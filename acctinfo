@@ -1,0 +1,402 @@
+#!/usr/bin/perl
+# SCRIPT: acctinfo
+# PURPOSE: Get the username (cPanel/FTP) for domain name entered at command line
+# AUTHOR: Peter Elsner <peter.elsner@cpanel.net>
+# CREATED:  03/28/2014
+# MODIFIED: 5/7/2014 - Added --listdbs & --listssls options to list any MySQL DB's and SSL's (Idea by Tristan Wallace) 
+# MODIFIED: 5/8/2014 - Added -q switch to clear the screen (default is to not clear the screen) (Idea by Ryan Robson)
+# MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller (default [no switches] is to list everything) 
+# MODIFIED: 6/01/2014 - Added --help switch to list the options.
+# MODIFIED: 6/1/2014 - Added a count of all accounts in /etc/trueuserdomains.
+
+$VERSION="1.3";
+
+use File::stat;
+use Getopt::Long;
+
+$all = undef;
+$listdbs = undef;
+$listssls = undef;
+$listsubs = undef;
+$listaddons = undef;
+$listparked = undef;
+$clearscreen = undef;
+$helpME = undef;
+
+GetOptions(
+   'listdbs' => \$listdbs,
+   'listssls' => \$listssls,
+   'listsubs' => \$listsubs,
+   'listaddons' => \$listaddons,
+   'listparked' => \$listparked,
+   'listreseller' => \$listreseller,
+   'help' => \$helpME,
+   'q' => \$clearscreen,
+);
+
+if ($clearscreen) { 
+	system("clear");
+}
+print "acctinfo - Version: " . $VERSION . "\n";
+if ($helpME) { 
+	&Usage;
+}
+
+$all=1 unless($listdbs or $listssls or $listsubs or $listaddons or $listparked or $listreseller or $helpME);
+
+# Determine the correct HOME DIRECTORY by grabbing the HOMEDIR value
+# from /etc/wwwacct.conf (one of cPanel's conf files)
+$IS_USERNAME=0;
+my $HOMEDIR=qx[ cat /etc/wwwacct.conf | grep 'HOMEDIR' ];
+my ($NAME,$VALUE)=(split(/\s+/,$HOMEDIR));
+$HOMEDIR=$VALUE;
+chomp($HOMEDIR);
+$SERVER_IP=qx[ cat /etc/wwwacct.conf | grep 'ADDR' ];
+($NAME,$VALUE)=(split(/\s+/,$SERVER_IP));
+$SERVER_IP=$VALUE;
+chomp($SERVER_IP);
+
+$DOMAIN=@ARGV[0];
+chomp($DOMAIN);
+if ($DOMAIN eq "") {
+	&Usage;
+}
+$DOMAIN=lc($DOMAIN);
+($TheDomain,$TheExt)=(split(/\./,$DOMAIN));
+if ($TheExt eq "") { 
+	$IS_USERNAME=1;
+}
+
+$HOSTNAME=`hostname`;
+chomp($HOSTNAME);
+# First check trueuserdomains (for the main domain)
+@RESULT=qx[ grep $DOMAIN /etc/trueuserdomains ];
+$CNT=@RESULT;
+if ($CNT==0) {    ## If not found there, then check userdomains (it could be addon/parked/sub domain)
+	@RESULT=qx[ grep $DOMAIN /etc/userdomains ];
+	$CNT=@RESULT;
+	if ($CNT==0) {     ## If not found there either, then it's not on this server
+		print "ERROR: $DOMAIN not found on $HOSTNAME\n";
+		exit;
+	}
+}
+
+($username)=(split(/\: /,@RESULT[0]))[1];
+chomp($username);
+# Now get the main domain from /etc/trueuserdomains using the $username
+@MAINDOMAIN=qx[ grep $username /etc/trueuserdomains ];
+($MAINDOMAIN)=(split(/\: /,@MAINDOMAIN[0]))[0];
+chomp($MAINDOMAIN);
+
+# Check to see if the $username is in /var/cpanel/suspended directory (indicating user is suspended).
+$SUSP="";
+if (-e("/var/cpanel/suspended/$username")) { 
+	$REASON=`cat /var/cpanel/suspended/$username`;
+	$SUSP="NOTE: " . $username . " is suspended - " . $REASON . ".\n";
+	chomp($REASON);
+}
+
+# Now read file /etc/userdatadomains into array
+open(USERDATAFILE,"/etc/userdatadomains");
+@USERDATADOMAINS=<USERDATAFILE>;
+close(USERDATAFILE);
+
+# Now get all parked, addon and sub domains (if any)
+$IS_PARKED="";
+$IS_ADDON="";
+$IS_SUB="";
+@SUBDOMAINS="";
+foreach $ACCT(@USERDATADOMAINS) { 
+	chomp($ACCT);
+	if($ACCT =~ m/ $username/) { 
+		if($ACCT =~ m/==sub==/) { 
+			($sub_domain)=(split(/\s+/,$ACCT))[0];
+			chop($sub_domain);
+			push(@SUBDOMAINS, $sub_domain);
+			if ($sub_domain eq $DOMAIN) { 
+				$IS_SUB = "$DOMAIN is a sub domain of $MAINDOMAIN\n";
+			}
+		}
+	}
+}
+# Now get all addon domains (if any)
+@ADDONDOMAINS="";
+foreach $ACCT(@USERDATADOMAINS) { 
+	chomp($ACCT);
+	if($ACCT =~ m/ $username/) { 
+		if($ACCT =~ m/==addon==/) { 
+			($addon_domain)=(split(/\s+/,$ACCT))[0];
+			chop($addon_domain);
+			push(@ADDONDOMAINS, $addon_domain);
+			if ($addon_domain eq $DOMAIN) { 
+				$IS_ADDON = "$DOMAIN is an addon domain of $MAINDOMAIN\n";
+			}
+		}
+	}
+}
+# Now get all parked domains (if any)
+@PARKEDDOMAINS="";
+foreach $ACCT(@USERDATADOMAINS) { 
+	chomp($ACCT);
+	if($ACCT =~ m/ $username/) { 
+		if($ACCT =~ m/==parked==/) { 
+			($parked_domain)=(split(/\s+/,$ACCT))[0];
+			chop($parked_domain);
+			push(@PARKEDDOMAINS, $parked_domain);
+			if ($parked_domain eq $DOMAIN) { 
+				$IS_PARKED = "$DOMAIN is a parked domain of $MAINDOMAIN\n";
+			}
+		}
+	}
+}
+# Now get all data from /var/cpanel/users/$username
+open(USERDATA,"/var/cpanel/users/$username");
+@USERDATA=<USERDATA>;
+close(USERDATA);
+# Get package
+foreach $USERLINE(@USERDATA) { 
+	if ($USERLINE =~ m/PLAN/) { 
+		($PACKAGE)=(split(/=/,$USERLINE))[1];
+		last;
+	}
+}
+chomp($PACKAGE);
+# Get IP address
+foreach $USERLINE(@USERDATA) { 
+	if ($USERLINE =~ m/IP/) { 
+		($IPADDR)=(split(/=/,$USERLINE))[1];
+		last;
+	}
+}
+chomp($IPADDR);
+# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
+$ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+$IPTYPE="shared";
+$RESOLVES_TO="";
+chomp($ResolvedIP);
+$NXDOMAIN="";
+if ($ResolvedIP eq "") { 
+	$NXDOMAIN="Non Existant (NXDOMAIN)";
+}
+if ($ResolvedIP ne $IPADDR) { 
+	$RESOLVES_TO = $MAINDOMAIN . " resolves to IP: $ResolvedIP $NXDOMAIN";
+}
+else { 
+	$IPTYPE="shared";
+	if($IPADDR ne $SERVER_IP) { 
+		$IPTYPE="dedicated";
+	}
+}
+# Get start date (when account was created)
+foreach $USERLINE(@USERDATA) { 
+	if ($USERLINE =~ m/STARTDATE/) { 
+		($STARTDATE2)=(split(/=/,$USERLINE))[1];
+		$STARTDATE=scalar localtime($STARTDATE2);
+		last;
+	}
+}
+chomp($STARTDATE);
+# See if this user is it's own owner (if not it is owned by a reseller)
+$RO_TEXT="";
+foreach $USERLINE(@USERDATA) { 
+	if ($USERLINE =~ m/^OWNER/) { 
+		($REAL_OWNER)=(split(/=/,$USERLINE))[1];
+		chomp($REAL_OWNER);
+		if ($REAL_OWNER ne $username and $REAL_OWNER ne "root") { 
+			$RO_TEXT=" (Which is under the reseller: $REAL_OWNER)";
+		}
+		last;
+	}
+}
+# Check if main domain (username) is a reseller.
+$Is_Reseller=0;
+if (-e("/var/cpanel/root.accts")) { 
+	open(accts,"/var/cpanel/root.accts");
+	@AllAccts=<accts>;
+	close(accts);
+	shift @AllAccts;
+	foreach $acct(@AllAccts) { 
+		chomp($acct);
+		($resellersdomain,$OWNER)=(split(/,/,$acct))[0,10];
+		if ($OWNER eq $username or $OWNER eq $REAL_OWNER and ($REAL_OWNER ne "root")) { 
+			$Is_Reseller=1;
+			push(@OWNEDBYRESELLER,$resellersdomain);
+		}
+	}
+}
+# Get IP address from .lastlogin file (if it exists)
+if (-e("$HOMEDIR/$username/.lastlogin")) { 
+	$LastLoginIP=qx[ cat $HOMEDIR/$username/.lastlogin ];
+	$nst=stat("$HOMEDIR/$username/.lastlogin");
+	$mtime=$nst->mtime;
+	$AccessDate=scalar localtime($mtime);
+	chomp($LastLoginIP);
+}
+
+if ($IS_USERNAME) { 
+	print "\n";
+}
+else { 
+	print "\nThe user name for $DOMAIN is: $username\n";
+}
+$TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
+chomp($TOTAL_DOMAINS);
+print "The main domain is $MAINDOMAIN $RO_TEXT\n";
+print "There are $TOTAL_DOMAINS total domains on this server.\n";
+print "$IS_PARKED\n" unless($IS_PARKED eq "");
+print "$IS_ADDON\n" unless($IS_ADDON eq "");
+print "$IS_SUB\n" unless($IS_SUB eq "");
+print $MAINDOMAIN . " has the " . $PACKAGE . " hosting package\n";
+print $MAINDOMAIN . " has a " . $IPTYPE . " IP address of " . $IPADDR . "\n";
+print $RESOLVES_TO . "\n" unless($RESOLVES_TO eq "");
+if($LastLoginIP) { 
+	print $MAINDOMAIN . " last logged in to cPanel from IP: " . $LastLoginIP . " On: " . $AccessDate . "\n";
+}
+print $MAINDOMAIN . " has been a customer since " . $STARTDATE . "\n";
+if ($SUSP) { 
+	print "==============================================================================================\n";
+	print $SUSP;
+}
+# DOMAIN INFO (PARKED, ADDON, SUB)
+shift @SUBDOMAINS;
+shift @ADDONDOMAINS;
+shift @PARKEDDOMAINS;
+$subcnt=@SUBDOMAINS;
+$addoncnt=@ADDONDOMAINS;
+$parkcnt=@PARKEDDOMAINS;
+if ($subcnt+$addoncnt+$parkcnt>1 and ($all or $listsubs or $listaddons or $listparked)) { 
+	print "The following are associated with $MAINDOMAIN ($username)\n";
+}
+if ($subcnt > 1 and ($all or $listsubs)) { 
+	print "Sub Domains:\n";
+	foreach $SUB(@SUBDOMAINS) { 
+		chomp($SUB);
+		print "\t \\_ $SUB\n";
+	}
+}
+else { 
+	if ($all or $listsubs) { 
+		print "==============================================================================================\n";
+		print "No Sub Domains found for $MAINDOMAIN ($username)\n";
+	}
+}
+if ($addoncnt > 1 and ($all or $listaddons)) { 
+	print "Addon Domains:\n";
+	foreach $ADDON(@ADDONDOMAINS) { 
+		chomp($ADDON);
+		print "\t \\_ $ADDON\n";
+	}
+}
+else { 
+	if ($all or $listaddons) { 
+		print "==============================================================================================\n";
+		print "No Addon Domains found for $MAINDOMAIN ($username)\n";
+	}
+}
+if ($parkcnt > 1 and ($all or $listparked)) { 
+	print "Parked Domains:\n";
+	foreach $PARK(@PARKEDDOMAINS) { 
+		chomp($PARK);
+		print "\t \\_ $PARK\n";
+	}
+}
+else { 
+	if ($all or $listparked) { 
+		print "==============================================================================================\n";
+		print "No Parked Domains found for $MAINDOMAIN ($username)\n";
+	}
+}
+# RESELLER INFO
+if ($listreseller or $all) { 
+	if ($Is_Reseller) { 
+		print "==============================================================================================\n";
+		if ($RO_TEXT) { 
+			print "The " . $REAL_OWNER . " reseller also has the following other domains associated with it\n";
+		}
+		else { 
+			print $MAINDOMAIN . " is a reseller and has the following accounts under it\n";
+		}
+		foreach $ResellersDomain(@OWNEDBYRESELLER) { 
+			chomp($ResellersDomain);
+			print "\t \\_ $ResellersDomain\n";
+		}
+	}
+	else { 
+		print "==============================================================================================\n";
+		print "No Reseller information found for $MAINDOMAIN ($username)\n";
+	}
+}
+# MySQL INFO
+if ($listdbs or $all) { 
+	print "==============================================================================================\n";
+	@USERDBS=qx[ echo "show databases like '$username%'" | mysql ];
+	splice(@USERDBS,0,1);
+	$DBCNT=@USERDBS;
+	if ($DBCNT == 0) {
+		print "No MySQL databases found for $MAINDOMAIN ($username)\n";
+	}
+	else { 
+		print "The following MySQL databases can be found under: $username\n";
+	}
+	foreach $USERDB(@USERDBS) {
+		chomp($USERDB);
+		@DBSIZE = qx[ echo "select table_schema, sum(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES where table_schema = '$USERDB' GROUP By table_schema;" | mysql ];
+		splice(@DBSIZE,0,1);
+		chomp(@DBSIZE);
+		$num=@DBSIZE;
+		if ($num == 0) {
+			print "\t \\_ $USERDB has no tables.\n";
+			next;
+		}
+		foreach $SIZEOFDB(@DBSIZE) {
+			chomp($SIZEOFDB);
+			($DBNAME,$DBSIZE)=(split(/\s+/,$SIZEOFDB));
+			chomp($DBNAME);
+			chomp($DBSIZE);
+			$DBSIZE=sprintf("%.2f", $DBSIZE);
+			print "\t \\_ $DBNAME ($DBSIZE MB)\n";
+		}
+	}
+}
+# SSL INFO
+if ($listssls or $all) { 
+	$SSLSFOUND=0;
+	print "==============================================================================================\n";
+	@SSLDATA = qx[ grep -r 'owner: $username' /var/cpanel/userdata/* | grep '_SSL' ];
+	$sslcnt=@SSLDATA;
+	if ($sslcnt>0) { 
+		print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
+		$SSLSFOUND=1;
+	}
+	else { 
+		print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
+	} 
+	if ($SSLSFOUND) { 
+		foreach $sslline(@SSLDATA) { 
+			chomp($sslline);
+			($ssldomaincrap)=(split(/\//,$sslline))[5];
+			($ssldomain)=(split(/_/,$ssldomaincrap))[0];
+			print "\t \\_ $ssldomain\n";
+		}
+	}
+}
+print "==============================================================================================\n";
+
+sub Usage { 
+   print "Usage: $0 [options] domainname.tld or cPUsername\n\n";
+   print "Example: $0 --listdbs cpanel.net\n";
+   print "\t Lists any MySQL databases (and their sizes) for cpanel.net\n";
+   print "$0 --listsubs cptestdo\n";
+   print "\t Lists all sub domains under the cptestdo user name.\n";
+   print "$0 --listaddons cptestdomain.net\n";
+   print "\t Lists all addon domains under the cptestdomain.net domain name.\n";
+   print "$0 --listparked cptestdomain.net\n";
+   print "\t Lists all parked domains under the cptestdomain.net domain name.\n";
+   print "$0 --listreseller cptestdo\n";
+   print "\t Lists reseller information and domains under the cptestdo user name.\n";
+   print "$0 --listssls cptestdomain.net\n";
+   print "\t Lists any SSL's under the cptestdomain.net domain name.\n";
+	exit;
+}
+
+exit;
