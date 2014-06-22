@@ -24,9 +24,15 @@ So you can call it as follows:
 
 or by username
 
-# acctinfo --listdbs cptestdo
+# acctinfo --listaddons cptestdo
 
 The following options are available: 
+
+--help 
+    Lists basic help information
+
+-q
+    Clears the screen (default is to not clear the screen)
 
 --listdbs cpanel.net
     Lists any MySQL databases (and their sizes) for cpanel.net
@@ -46,5 +52,6 @@ The following options are available:
 --listssls cptestdomain.net
     Lists any SSL's under the cptestdomain.net domain name.
 
+Note that you can also call it without any options and get all the data above.
 
 
