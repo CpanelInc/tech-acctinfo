@@ -19,19 +19,20 @@ following options:
 acctinfo - Version: 1.3
 Usage: ./acctinfo [options] domainname.tld or cPUsername
 
-Example: ./acctinfo --listdbs cpanel.net
-    Lists any MySQL databases (and their sizes) for cpanel.net
-./acctinfo --listsubs cptestdo
-    Lists all sub domains under the cptestdo user name.
-./acctinfo --listaddons cptestdomain.net
-    Lists all addon domains under the cptestdomain.net domain name.
-./acctinfo --listparked cptestdomain.net
-    Lists all parked domains under the cptestdomain.net domain name.
-./acctinfo --listreseller cptestdo
-    Lists reseller information and domains under the cptestdo user name.
-./acctinfo --listssls cptestdomain.net
-    Lists any SSL's under the cptestdomain.net domain name.
-
+<br>
+Example: ./acctinfo --listdbs cpanel.net<br>
+    Lists any MySQL databases (and their sizes) for cpanel.net<br>
+./acctinfo --listsubs cptestdo<br>
+    Lists all sub domains under the cptestdo user name.<br>
+./acctinfo --listaddons cptestdomain.net<br>
+    Lists all addon domains under the cptestdomain.net domain name.<br>
+./acctinfo --listparked cptestdomain.net<br>
+    Lists all parked domains under the cptestdomain.net domain name.<br>
+./acctinfo --listreseller cptestdo<br>
+    Lists reseller information and domains under the cptestdo user name.<br>
+./acctinfo --listssls cptestdomain.net<br>
+    Lists any SSL's under the cptestdomain.net domain name.<br>
+<p>
 
 ENJOY!
 
