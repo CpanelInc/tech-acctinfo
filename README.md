@@ -16,7 +16,7 @@ particular account or domain.
 You can either download it to your /root/bin folder or you can run it from the 
 command line.  I created an alias in my .bashrc file.
 
-alias acctinfo="perl <(curl -s https://raw.githubusercontent.com/cPanelPeter/acctinfo/master/acctinfo)"
+alias acctinfo="perl <&#40;curl -s https://raw.githubusercontent.com/cPanelPeter/acctinfo/master/acctinfo&#40;"
 
 So you can call it as follows: 
 
