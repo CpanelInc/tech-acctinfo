@@ -1,4 +1,4 @@
-<pre>
+
 The acctinfo script can provide you lots of information for an account on your 
 cPanel server.  
 
@@ -46,6 +46,5 @@ The following options are available:
 --listssls cptestdomain.net
     Lists any SSL's under the cptestdomain.net domain name.
 
-</pre>
 
 
