@@ -6,8 +6,8 @@
 # MODIFIED: 5/7/2014 - Added --listdbs & --listssls options to list any MySQL DB's and SSL's (Idea by Tristan Wallace) 
 # MODIFIED: 5/8/2014 - Added -q switch to clear the screen (default is to not clear the screen) (Idea by Ryan Robson)
 # MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller (default [no switches] is to list everything) 
-# MODIFIED: 6/01/2014 - Added --help switch to list the options.
-# MODIFIED: 6/1/2014 - Added a count of all accounts in /etc/trueuserdomains.
+# MODIFIED: 6/01/2014 - Added --help switch to list the options. (Idea by Citizen Kepler)
+# MODIFIED: 6/01/2014 - Added a count of all accounts in /etc/trueuserdomains.
 
 $VERSION="1.3";
 
