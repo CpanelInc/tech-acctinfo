@@ -10,9 +10,10 @@
 # v1.3 - MODIFIED: 6/01/2014 - Added a count of all accounts in /etc/trueuserdomains.
 # v1.4 - MODIFIED: 7/14/2014 - Added "use strict" and set all variables and arrays accordingly.
 # v1.5 - MODIFIED: 7/14/2014 - Added postgresql databases and tables.
+# V1.6 - MODIFIED: 7/27/2014 - BugFix - if PostGreSQL is not installed the psql command would fail
 
 use strict;
-my $VERSION="1.5";
+my $VERSION="1.6";
 
 use File::stat;
 use Getopt::Long;
@@ -382,36 +383,39 @@ if ($listdbs or $all) {
 		}
 	}
 	print "\n";
-	my @PSQLDBS=undef;
-	my $PgDb="";
-	@PSQLDBS=qx[ psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate='f' AND datname !='postgres'" | grep -v '\-' | grep -v 'datname' | grep -v ' row' ];
-	pop(@PSQLDBS);
-	my $PgDbCount=@PSQLDBS;
-	if ($PgDbCount == 0) { 
-		print "No PostGreSQL databases found for $MAINDOMAIN ($username)\n";
-	}
-	else { 
-		print "The following PostGreSQL databases can be found under: $username\n";
-		my $pg_table="";
-		my @PG_TABLES=undef;
-		foreach $PgDb(@PSQLDBS) { 
-			chomp($PgDb);
-			$PgDb=substr($PgDb,1);
-			#$pg_table=qx[ psql -U postgres $PgDb -c "\\d" ];
-			$pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
-			chomp($pg_table);
-			chomp($pg_table);
-			$pg_table =~ s/^\s+//;
-			$pg_table =~ s/\s+/, /g;
-			if ($pg_table eq "") { 
-				print "\t \\_ $PgDb - has no tables\n";
-			}
-			else { 
-				print "\t \\_ $PgDb\n";
-				print "\t\t \\_ $pg_table\n";
-			}
-		}
-	}
+   if (-e("/usr/bin/psql")) {    ## PostGreSQL is installed
+   	my @PSQLDBS=undef;
+	   my $PgDb="";
+	   @PSQLDBS=qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate='f' AND datname !='postgres'" | grep -v '\-' | grep -v 'datname' | grep -v ' row' ];
+	   pop(@PSQLDBS);
+	   my $PgDbCount=@PSQLDBS;
+	   if ($PgDbCount == 0) { 
+		   print "No PostGreSQL databases found for $MAINDOMAIN ($username)\n";
+	   }
+	   else { 
+		   print "The following PostGreSQL databases can be found under: $username\n";
+		   my $pg_table="";
+		   my @PG_TABLES=undef;
+		   foreach $PgDb(@PSQLDBS) { 
+			   chomp($PgDb);
+			   $PgDb=substr($PgDb,1);
+			   #$pg_table=qx[ psql -U postgres $PgDb -c "\\d" ];
+			   $pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
+			   chomp($pg_table);
+			   chomp($pg_table);
+			   $pg_table =~ s/^\s+//;
+			   $pg_table =~ s/\s+/, /g;
+			   if ($pg_table eq "") { 
+				   print "\t \\_ $PgDb - has no tables\n";
+			   }
+			   else { 
+				   print "\t \\_ $PgDb\n";
+				   print "\t\t \\_ $pg_table\n";
+			   }
+		   }
+	   }
+   }
+   print "PostGreSQL server is not installed on $HOSTNAME\n";
 }
 # SSL INFO
 if ($listssls or $all) { 
