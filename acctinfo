@@ -11,9 +11,13 @@
 # v1.4 - MODIFIED: 7/14/2014 - Added "use strict" and set all variables and arrays accordingly.
 # v1.5 - MODIFIED: 7/14/2014 - Added postgresql databases and tables.
 # V1.6 - MODIFIED: 7/27/2014 - BugFix - if PostGreSQL is not installed the psql command would fail
+# V1.7 - MODIFIED: 8/22/2014 - BugFix - PostGreSQL can be installed and not running - psql call 
+#        would fail. Fixed this.  
+# V1.7 - MODIFIED: 8/22/2014 - Added PostGreSQL table size to output
+# V1.7 - MODIFIED: 8/22/2014 - Added [Resolves to SAME] if domain resolves to same server IP.
 
 use strict;
-my $VERSION="1.6";
+my $VERSION="1.7";
 
 use File::stat;
 use Getopt::Long;
@@ -192,6 +196,7 @@ if ($ResolvedIP ne $IPADDR) {
 	$RESOLVES_TO = $MAINDOMAIN . " resolves to IP: $ResolvedIP $NXDOMAIN";
 }
 else { 
+	$RESOLVES_TO = $MAINDOMAIN . " resolves to SAME ($ResolvedIP)";
 	$IPTYPE="shared";
 	if($IPADDR ne $SERVER_IP) { 
 		$IPTYPE="dedicated";
@@ -383,7 +388,9 @@ if ($listdbs or $all) {
 		}
 	}
 	print "\n";
-   if (-e("/usr/bin/psql")) {    ## PostGreSQL is installed
+   # PostGreSQL INFO
+   my $psql_running = 0; if (qx[ ps ax | grep postgres | grep -v grep ]) { $psql_running = 1; }
+   if (-e("/usr/bin/psql") and $psql_running) {    ## PostGreSQL is installed and running
    	my @PSQLDBS=undef;
 	   my $PgDb="";
 	   @PSQLDBS=qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate='f' AND datname !='postgres'" | grep -v '\-' | grep -v 'datname' | grep -v ' row' ];
@@ -399,7 +406,6 @@ if ($listdbs or $all) {
 		   foreach $PgDb(@PSQLDBS) { 
 			   chomp($PgDb);
 			   $PgDb=substr($PgDb,1);
-			   #$pg_table=qx[ psql -U postgres $PgDb -c "\\d" ];
 			   $pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
 			   chomp($pg_table);
 			   chomp($pg_table);
@@ -410,12 +416,15 @@ if ($listdbs or $all) {
 			   }
 			   else { 
 				   print "\t \\_ $PgDb\n";
-				   print "\t\t \\_ $pg_table\n";
+               my ($pg_table_size) = (split(/\|/,qx[ psql -U postgres -d $PgDb -c "\\dt+" | grep '$pg_table' ]))[4];
+				   print "\t\t \\_ $pg_table ($pg_table_size)\n";
 			   }
 		   }
 	   }
    }
-   print "PostGreSQL server is not installed on $HOSTNAME\n";
+   else { 
+      print "PostGreSQL server is not installed (or running) on $HOSTNAME\n";
+   }
 }
 # SSL INFO
 if ($listssls or $all) { 
@@ -447,8 +456,8 @@ print "=========================================================================
 
 sub Usage { 
    print "Usage: $0 [options] domainname.tld or cPUsername\n\n";
-   print "Example: $0 --listdbs cpanel.net\n";
-   print "\t Lists any MySQL databases (and their sizes) for cpanel.net\n";
+   print "Example: $0 --listdbs somedomain.net\n";
+   print "\t Lists any MySQL  databases (and their sizes) as well as any PostGreSQL databases for somedomain.net\n";
    print "$0 --listsubs cptestdo\n";
    print "\t Lists all sub domains under the cptestdo user name.\n";
    print "$0 --listaddons cptestdomain.net\n";
