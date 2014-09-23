@@ -15,9 +15,14 @@
 #        would fail. Fixed this.  
 # V1.7 - MODIFIED: 8/22/2014 - Added PostGreSQL table size to output
 # V1.7 - MODIFIED: 8/22/2014 - Added [Resolves to SAME] if domain resolves to same server IP.
+# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed SSL Certificate display (some SSL certs were not 
+#			being found).
+# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed STARTDATE (was not being displayed)
+# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed display of sub/addon/parked domains (if only 1
+#			of either was created, it would not show them).  
 
 use strict;
-my $VERSION="1.7";
+my $VERSION="1.8;
 
 use File::stat;
 use Getopt::Long;
@@ -168,6 +173,7 @@ my $USERLINE="";
 my $PACKAGE="";
 my $IPADDR="";
 my $STARTDATE="";
+my $STARTDATE2="";
 foreach $USERLINE(@USERDATA) { 
 	if ($USERLINE =~ m/PLAN/) { 
 		($PACKAGE)=(split(/=/,$USERLINE))[1];
@@ -205,12 +211,11 @@ else {
 # Get start date (when account was created)
 foreach $USERLINE(@USERDATA) { 
 	if ($USERLINE =~ m/STARTDATE/) { 
-		my ($STARTDATE2)=(split(/=/,$USERLINE))[1];
+		($STARTDATE2)=(split(/=/,$USERLINE))[1];
 		my $STARTDATE=scalar localtime($STARTDATE2);
 		last;
 	}
 }
-chomp($STARTDATE);
 # See if this user is it's own owner (if not it is owned by a reseller)
 my $RO_TEXT="";
 my $REAL_OWNER="";
@@ -272,7 +277,11 @@ print $RESOLVES_TO . "\n" unless($RESOLVES_TO eq "");
 if($LastLoginIP) { 
 	print $MAINDOMAIN . " last logged in to cPanel from IP: " . $LastLoginIP . " On: " . $AccessDate . "\n";
 }
+
+my $STARTDATE=scalar localtime($STARTDATE2);
+chomp($STARTDATE);
 print $MAINDOMAIN . " has been a customer since " . $STARTDATE . "\n";
+
 if ($SUSP) { 
 	print "==============================================================================================\n";
 	print $SUSP;
@@ -289,46 +298,50 @@ my $PARK="";
 my $ADDON="";
 if ($subcnt+$addoncnt+$parkcnt>1 and ($all or $listsubs or $listaddons or $listparked)) { 
 	print "The following are associated with $MAINDOMAIN ($username)\n";
+	print "==============================================================================================\n";
 }
-if ($subcnt > 1 and ($all or $listsubs)) { 
+if ($all or $listsubs) { 
 	print "Sub Domains:\n";
-	foreach $SUB(@SUBDOMAINS) { 
-		chomp($SUB);
-		print "\t \\_ $SUB\n";
-	}
-}
-else { 
-	if ($all or $listsubs) { 
+	if ($subcnt > 0 and ($all or $listsubs)) { 
+		foreach $SUB(@SUBDOMAINS) { 
+			chomp($SUB);
+			print "\t \\_ $SUB\n";
+		}
 		print "==============================================================================================\n";
+	}
+	else { 
 		print "No Sub Domains found for $MAINDOMAIN ($username)\n";
 	}
 }
-if ($addoncnt > 1 and ($all or $listaddons)) { 
+
+if ($all or $listaddons) { 
 	print "Addon Domains:\n";
-	foreach $ADDON(@ADDONDOMAINS) { 
-		chomp($ADDON);
-		print "\t \\_ $ADDON\n";
-	}
-}
-else { 
-	if ($all or $listaddons) { 
+	if ($addoncnt > 0 and ($all or $listaddons)) { 
+		foreach $ADDON(@ADDONDOMAINS) { 
+			chomp($ADDON);
+			print "\t \\_ $ADDON\n";
+		}
 		print "==============================================================================================\n";
+	}
+else { 
 		print "No Addon Domains found for $MAINDOMAIN ($username)\n";
 	}
 }
-if ($parkcnt > 1 and ($all or $listparked)) { 
-	print "Parked Domains:\n";
-	foreach $PARK(@PARKEDDOMAINS) { 
-		chomp($PARK);
-		print "\t \\_ $PARK\n";
-	}
-}
-else { 
-	if ($all or $listparked) { 
+
+if ($all or $listparked) { 
+	if ($parkcnt > 0 and ($all or $listparked)) { 
+		print "Parked Domains:\n";
+		foreach $PARK(@PARKEDDOMAINS) { 
+			chomp($PARK);
+			print "\t \\_ $PARK\n";
+		}
 		print "==============================================================================================\n";
+	}
+	else { 
 		print "No Parked Domains found for $MAINDOMAIN ($username)\n";
 	}
 }
+
 # RESELLER INFO
 if ($listreseller or $all) { 
 	my $ResellersDomain="";
@@ -434,7 +447,7 @@ if ($listssls or $all) {
 	my $ssldomaincrap="";
 	my @SSLDATA=undef;
 	print "==============================================================================================\n";
-	@SSLDATA = qx[ grep -r 'owner: $username' /var/cpanel/userdata/* | grep '_SSL' ];
+	@SSLDATA = qx[ ls /var/cpanel/userdata/$username/*_SSL ];
 	my $sslcnt=@SSLDATA;
 	if ($sslcnt>0) { 
 		print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
