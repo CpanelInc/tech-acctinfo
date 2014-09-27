@@ -22,7 +22,7 @@
 #			of either was created, it would not show them).  
 
 use strict;
-my $VERSION="1.8;
+my $VERSION="1.8";
 
 use File::stat;
 use Getopt::Long;
