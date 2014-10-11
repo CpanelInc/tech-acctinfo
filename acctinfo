@@ -5,7 +5,7 @@
 # v1.0 - CREATED:  03/28/2014
 # v1.1 - MODIFIED: 5/7/2014 - Added --listdbs & --listssls options to list any MySQL DB's and SSL's (Idea by Tristan Wallace) 
 # v1.1.0 - MODIFIED: 5/8/2014 - Added -q switch to clear the screen (default is to not clear the screen) (Idea by Ryan Robson)
-# v1.2 - MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller (default [no switches] is to list everything) 
+# v1.2 - MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller 
 # v1.3 - MODIFIED: 6/01/2014 - Added --help switch to list the options. (Idea by Citizen Kepler)
 # v1.3 - MODIFIED: 6/01/2014 - Added a count of all accounts in /etc/trueuserdomains.
 # v1.4 - MODIFIED: 7/14/2014 - Added "use strict" and set all variables and arrays accordingly.
@@ -20,9 +20,10 @@
 # V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed STARTDATE (was not being displayed)
 # V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed display of sub/addon/parked domains (if only 1
 #			of either was created, it would not show them).  
+# V1.9 - MODIFIED: 10/11/2014 - Cleaned up output.  
 
 use strict;
-my $VERSION="1.8";
+my $VERSION="1.9";
 
 use File::stat;
 use Getopt::Long;
@@ -44,6 +45,7 @@ GetOptions(
    'listaddons' => \$listaddons,
    'listparked' => \$listparked,
    'listreseller' => \$listreseller,
+	'all' => \$all,
    'help' => \$helpME,
    'q' => \$clearscreen,
 );
@@ -55,8 +57,6 @@ print "acctinfo - Version: " . $VERSION . "\n";
 if ($helpME) { 
 	&Usage;
 }
-
-$all=1 unless($listdbs or $listssls or $listsubs or $listaddons or $listparked or $listreseller or $helpME);
 
 # Determine the correct HOME DIRECTORY by grabbing the HOMEDIR value
 # from /etc/wwwacct.conf (one of cPanel's conf files)
@@ -258,16 +258,16 @@ if (-e("$HOMEDIR/$username/.lastlogin")) {
 	chomp($LastLoginIP);
 }
 
+my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
+chomp($TOTAL_DOMAINS);
+print "There are $TOTAL_DOMAINS total domains on this server.\n";
 if ($IS_USERNAME) { 
 	print "\n";
 }
 else { 
 	print "\nThe user name for $DOMAIN is: $username\n";
 }
-my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
-chomp($TOTAL_DOMAINS);
 print "The main domain is $MAINDOMAIN $RO_TEXT\n";
-print "There are $TOTAL_DOMAINS total domains on this server.\n";
 print "$IS_PARKED\n" unless($IS_PARKED eq "");
 print "$IS_ADDON\n" unless($IS_ADDON eq "");
 print "$IS_SUB\n" unless($IS_SUB eq "");
@@ -281,11 +281,18 @@ if($LastLoginIP) {
 my $STARTDATE=scalar localtime($STARTDATE2);
 chomp($STARTDATE);
 print $MAINDOMAIN . " has been a customer since " . $STARTDATE . "\n";
-
 if ($SUSP) { 
-	print "==============================================================================================\n";
 	print $SUSP;
 }
+else { 
+	print "$MAINDOMAIN ($username) is not currently suspended\n";
+}
+print "\n";
+exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller);
+
+# END OF BASIC INFORMATION (no switches were added) 
+# ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
+
 # DOMAIN INFO (PARKED, ADDON, SUB)
 shift @SUBDOMAINS;
 shift @ADDONDOMAINS;
@@ -296,57 +303,57 @@ my $parkcnt=@PARKEDDOMAINS;
 my $SUB="";
 my $PARK="";
 my $ADDON="";
-if ($subcnt+$addoncnt+$parkcnt>1 and ($all or $listsubs or $listaddons or $listparked)) { 
+if ($subcnt+$addoncnt+$parkcnt>1 or ($all or $listsubs or $listaddons or $listparked)) { 
 	print "The following are associated with $MAINDOMAIN ($username)\n";
-	print "==============================================================================================\n";
+	&smborder;
 }
 if ($all or $listsubs) { 
-	print "Sub Domains:\n";
+	print "Sub Domains: ";
 	if ($subcnt > 0 and ($all or $listsubs)) { 
 		foreach $SUB(@SUBDOMAINS) { 
 			chomp($SUB);
 			print "\t \\_ $SUB\n";
 		}
-		print "==============================================================================================\n";
 	}
 	else { 
 		print "No Sub Domains found for $MAINDOMAIN ($username)\n";
 	}
+	&smborder;
 }
 
 if ($all or $listaddons) { 
-	print "Addon Domains:\n";
+	print "Addon Domains: ";
 	if ($addoncnt > 0 and ($all or $listaddons)) { 
 		foreach $ADDON(@ADDONDOMAINS) { 
 			chomp($ADDON);
 			print "\t \\_ $ADDON\n";
 		}
-		print "==============================================================================================\n";
 	}
 else { 
 		print "No Addon Domains found for $MAINDOMAIN ($username)\n";
 	}
+	&smborder;
 }
 
 if ($all or $listparked) { 
+	print "Parked Domains: ";
 	if ($parkcnt > 0 and ($all or $listparked)) { 
-		print "Parked Domains:\n";
 		foreach $PARK(@PARKEDDOMAINS) { 
 			chomp($PARK);
 			print "\t \\_ $PARK\n";
 		}
-		print "==============================================================================================\n";
 	}
 	else { 
 		print "No Parked Domains found for $MAINDOMAIN ($username)\n";
 	}
+	&smborder;
 }
 
 # RESELLER INFO
 if ($listreseller or $all) { 
+	&border;
 	my $ResellersDomain="";
 	if ($Is_Reseller) { 
-		print "==============================================================================================\n";
 		if ($RO_TEXT) { 
 			print "The " . $REAL_OWNER . " reseller also has the following other domains associated with it\n";
 		}
@@ -359,10 +366,11 @@ if ($listreseller or $all) {
 		}
 	}
 	else { 
-		print "==============================================================================================\n";
 		print "No Reseller information found for $MAINDOMAIN ($username)\n";
+		&border;
 	}
 }
+
 # MySQL INFO
 if ($listdbs or $all) { 
 	my @USERDBS=undef;
@@ -371,7 +379,7 @@ if ($listdbs or $all) {
 	my $SIZEOFDB="";
 	my $DBNAME="";
 	my $DBSIZE="";
-	print "==============================================================================================\n";
+	&border;
 	@USERDBS=qx[ echo "show databases like '$username%'" | mysql ];
 	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
@@ -400,7 +408,7 @@ if ($listdbs or $all) {
 			}
 		}
 	}
-	print "\n";
+	&smborder;
    # PostGreSQL INFO
    my $psql_running = 0; if (qx[ ps ax | grep postgres | grep -v grep ]) { $psql_running = 1; }
    if (-e("/usr/bin/psql") and $psql_running) {    ## PostGreSQL is installed and running
@@ -438,57 +446,69 @@ if ($listdbs or $all) {
    else { 
       print "PostGreSQL server is not installed (or running) on $HOSTNAME\n";
    }
+	&border;
 }
 # SSL INFO
-if ($listssls or $all) {
-   my $sslline="";
-   my $ssldomain="";
-   my @SSLDATA=undef;
-   my @SSLFOLDER=undef;
-   my $SSLFILE="";
-   my $SSLDOMAIN="";
-   print "==============================================================================================\n";
-   opendir(SSL,"/var/cpanel/userdata/$username/");
-   @SSLFOLDER=readdir(SSL);
-   closedir(SSL);
-   foreach $SSLFILE(@SSLFOLDER) {
-      chomp($SSLFILE);
-      if ($SSLFILE =~ m/_SSL/) {
-         ($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
-         push(@SSLDATA,"$SSLDOMAIN");
-      }
-   }
-   splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
-   my $sslcnt=@SSLDATA;
-   if ($sslcnt > 0) {
-      print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
-      foreach $sslline(@SSLDATA) {
-         chomp($sslline);
-         print "\t \\_ $sslline\n";
-      }
-   }
-   else {
-      print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
-   }
-}
-
-print "==============================================================================================\n";
-
-sub Usage { 
-   print "Usage: $0 [options] domainname.tld or cPUsername\n\n";
-   print "Example: $0 --listdbs somedomain.net\n";
-   print "\t Lists any MySQL  databases (and their sizes) as well as any PostGreSQL databases for somedomain.net\n";
-   print "$0 --listsubs cptestdo\n";
-   print "\t Lists all sub domains under the cptestdo user name.\n";
-   print "$0 --listaddons cptestdomain.net\n";
-   print "\t Lists all addon domains under the cptestdomain.net domain name.\n";
-   print "$0 --listparked cptestdomain.net\n";
-   print "\t Lists all parked domains under the cptestdomain.net domain name.\n";
-   print "$0 --listreseller cptestdo\n";
-   print "\t Lists reseller information and domains under the cptestdo user name.\n";
-   print "$0 --listssls cptestdomain.net\n";
-   print "\t Lists any SSL's under the cptestdomain.net domain name.\n";
-	exit;
+if ($listssls or $all) { 
+	my $sslline="";
+	my $ssldomain="";
+	my @SSLDATA=undef;
+	my @SSLFOLDER=undef;
+	my $SSLFILE="";
+	my $SSLDOMAIN="";
+	opendir(SSL,"/var/cpanel/userdata/$username/");
+	@SSLFOLDER=readdir(SSL);
+	closedir(SSL);
+	foreach $SSLFILE(@SSLFOLDER) {
+   	chomp($SSLFILE);
+   	if ($SSLFILE =~ m/_SSL/) { 
+      	($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
+      	push(@SSLDATA,"$SSLDOMAIN"); 
+   	}    
+	}
+	splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
+	my $sslcnt=@SSLDATA;
+	if ($sslcnt > 0) {
+		print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
+		foreach $sslline(@SSLDATA) { 
+			chomp($sslline);
+			print "\t \\_ $sslline\n";
+		}
+	}
+	else { 
+		&border;
+		print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
+	}
+	&border;
 }
 
 exit;
+
+sub Usage { 
+   print "\nUsage: $0 [options] domainname.tld or cPUsername [options]\n\n";
+   print "Examples: \n$0 --listdbs somedomain.net\n";
+   print "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n";
+   print "$0 --listsubs cptestdo\n";
+   print "\t Lists all sub domains under the cptestdo user name.\n\n";
+   print "$0 --listaddons cptestdomain.net\n";
+   print "\t Lists all addon domains under the cptestdomain.net domain name.\n\n";
+   print "$0 --listparked cptestdomain.net\n";
+   print "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
+   print "$0 --listreseller cptestdo\n";
+   print "\t Lists reseller information and domains under the cptestdo user name.\n\n";
+   print "$0 --listssls cptestdomain.net\n";
+   print "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
+   print "$0 --all cptestdomain.net\n";
+   print "\t Lists everything for the cptestdomain.net domain name.\n\n";
+   print "$0 --help\n";
+   print "\t Shows this usage information. (NOTE: [options] can go before or after domain/username).\n\n";
+	exit;
+}
+
+sub border { 
+	print "==============================================================================================\n";
+}
+
+sub smborder { 
+	print "----------------------------------------------------------------------------------------------\n";
+}
