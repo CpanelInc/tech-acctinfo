@@ -440,31 +440,38 @@ if ($listdbs or $all) {
    }
 }
 # SSL INFO
-if ($listssls or $all) { 
-	my $SSLSFOUND=0;
-	my $sslline="";
-	my $ssldomain="";
-	my $ssldomaincrap="";
-	my @SSLDATA=undef;
-	print "==============================================================================================\n";
-	@SSLDATA = qx[ ls /var/cpanel/userdata/$username/*_SSL ];
-	my $sslcnt=@SSLDATA;
-	if ($sslcnt>0) { 
-		print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
-		$SSLSFOUND=1;
-	}
-	else { 
-		print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
-	} 
-	if ($SSLSFOUND) { 
-		foreach $sslline(@SSLDATA) { 
-			chomp($sslline);
-			($ssldomaincrap)=(split(/\//,$sslline))[5];
-			($ssldomain)=(split(/_/,$ssldomaincrap))[0];
-			print "\t \\_ $ssldomain\n";
-		}
-	}
+if ($listssls or $all) {
+   my $sslline="";
+   my $ssldomain="";
+   my @SSLDATA=undef;
+   my @SSLFOLDER=undef;
+   my $SSLFILE="";
+   my $SSLDOMAIN="";
+   print "==============================================================================================\n";
+   opendir(SSL,"/var/cpanel/userdata/$username/");
+   @SSLFOLDER=readdir(SSL);
+   closedir(SSL);
+   foreach $SSLFILE(@SSLFOLDER) {
+      chomp($SSLFILE);
+      if ($SSLFILE =~ m/_SSL/) {
+         ($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
+         push(@SSLDATA,"$SSLDOMAIN");
+      }
+   }
+   splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
+   my $sslcnt=@SSLDATA;
+   if ($sslcnt > 0) {
+      print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
+      foreach $sslline(@SSLDATA) {
+         chomp($sslline);
+         print "\t \\_ $sslline\n";
+      }
+   }
+   else {
+      print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
+   }
 }
+
 print "==============================================================================================\n";
 
 sub Usage { 
