@@ -1,29 +1,8 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# SCRIPT: acctinfo
-# PURPOSE: Get all information for a username or domain entered at command line
-# AUTHOR: Peter Elsner <peter.elsner@cpanel.net>
-# v1.0 - CREATED:  03/28/2014
-#
-# v1.1 - MODIFIED: 5/7/2014 - Added --listdbs & --listssls options to list any MySQL DB's and SSL's (Idea by Tristan Wallace) 
-# v1.1.0 - MODIFIED: 5/8/2014 - Added -q switch to clear the screen (default is to not clear the screen) (Idea by Ryan Robson)
-# v1.2 - MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller 
-# v1.3 - MODIFIED: 6/01/2014 - Added --help switch to list the options. (Idea by Citizen Kepler)
-# v1.3 - MODIFIED: 6/01/2014 - Added a count of all accounts in /etc/trueuserdomains.
-# v1.4 - MODIFIED: 7/14/2014 - Added "use strict" and set all variables and arrays accordingly.
-# v1.5 - MODIFIED: 7/14/2014 - Added postgresql databases and tables.
-# V1.6 - MODIFIED: 7/27/2014 - BugFix - if PostGreSQL is not installed the psql command would fail
-# V1.7 - MODIFIED: 8/22/2014 - BugFix - PostGreSQL can be installed and not running - psql call 
-#        would fail. Fixed this.  
-# V1.7 - MODIFIED: 8/22/2014 - Added PostGreSQL table size to output
-# V1.7 - MODIFIED: 8/22/2014 - Added [Resolves to SAME] if domain resolves to same server IP.
-# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed SSL Certificate display (some SSL certs were not 
-#			being found).
-# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed STARTDATE (was not being displayed)
-# V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed display of sub/addon/parked domains (if only 1
-#			of either was created, it would not show them).  
-# V1.9 - MODIFIED: 10/11/2014 - Cleaned up output.  
-# V1.10 - MODIFIED 10/12/2014 - Added color
-
+# SCRIPT: acctinfo                                                                    #
+# PURPOSE: Get all information for a username or domain entered at command line       #
+# AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
+#######################################################################################
 use strict;
 my $VERSION="1.10";
 
