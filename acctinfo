@@ -1,8 +1,9 @@
-#!/usr/bin/perl
+#!/usr/local/cpanel/3rdparty/bin/perl
 # SCRIPT: acctinfo
-# PURPOSE: Get the username (cPanel/FTP) for domain name entered at command line
+# PURPOSE: Get all information for a username or domain entered at command line
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>
 # v1.0 - CREATED:  03/28/2014
+#
 # v1.1 - MODIFIED: 5/7/2014 - Added --listdbs & --listssls options to list any MySQL DB's and SSL's (Idea by Tristan Wallace) 
 # v1.1.0 - MODIFIED: 5/8/2014 - Added -q switch to clear the screen (default is to not clear the screen) (Idea by Ryan Robson)
 # v1.2 - MODIFIED: 5/18/2014 - Added additional switches --listsubs, --listaddons, --listparked, --listreseller 
@@ -21,12 +22,16 @@
 # V1.8 - MODIFIED: 9/23/2014 - BugFix - Fixed display of sub/addon/parked domains (if only 1
 #			of either was created, it would not show them).  
 # V1.9 - MODIFIED: 10/11/2014 - Cleaned up output.  
+# V1.10 - MODIFIED 10/12/2014 - Added color
 
 use strict;
-my $VERSION="1.9";
+my $VERSION="1.10";
 
 use File::stat;
 use Getopt::Long;
+use Term::ANSIColor qw(:constants);
+
+$Term::ANSIColor::AUTORESET = 1;
 
 my $all = undef;
 my $listdbs = undef;
@@ -53,14 +58,14 @@ GetOptions(
 if ($clearscreen) { 
 	system("clear");
 }
-print "acctinfo - Version: " . $VERSION . "\n";
+print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) { 
 	&Usage;
 }
 
 # Determine the correct HOME DIRECTORY by grabbing the HOMEDIR value
 # from /etc/wwwacct.conf (one of cPanel's conf files)
-my $IS_USERNAME=0;
+my $IS_USERNAME=1;
 my $HOMEDIR=qx[ cat /etc/wwwacct.conf | grep 'HOMEDIR' ];
 my ($NAME,$VALUE)=(split(/\s+/,$HOMEDIR));
 $HOMEDIR=$VALUE;
@@ -76,9 +81,8 @@ if ($DOMAIN eq "") {
 	&Usage;
 }
 $DOMAIN=lc($DOMAIN);
-my ($TheDomain,$TheExt)=(split(/\./,$DOMAIN));
-if ($TheExt eq "") { 
-	my $IS_USERNAME=1;
+if (index($DOMAIN, '.') != -1) { 
+   $IS_USERNAME=0;
 }
 
 my $HOSTNAME=`hostname`;
@@ -90,7 +94,7 @@ if ($CNT==0) {    ## If not found there, then check userdomains (it could be add
 	@RESULT=qx[ grep $DOMAIN /etc/userdomains ];
 	$CNT=@RESULT;
 	if ($CNT==0) {     ## If not found there either, then it's not on this server
-		print "ERROR: $DOMAIN not found on $HOSTNAME\n";
+		print RED "ERROR: " . GREEN $DOMAIN . " not found on " . MAGENTA $HOSTNAME . "\n";
 		exit;
 	}
 }
@@ -102,13 +106,6 @@ my @MAINDOMAIN=qx[ grep $username /etc/trueuserdomains ];
 my ($MAINDOMAIN)=(split(/\: /,@MAINDOMAIN[0]))[0];
 chomp($MAINDOMAIN);
 
-# Check to see if the $username is in /var/cpanel/suspended directory (indicating user is suspended).
-my $SUSP="";
-if (-e("/var/cpanel/suspended/$username")) { 
-	my $REASON=`cat /var/cpanel/suspended/$username`;
-	$SUSP="NOTE: " . $username . " is suspended - " . $REASON . ".\n";
-	chomp($REASON);
-}
 
 # Now read file /etc/userdatadomains into array
 open(USERDATAFILE,"/etc/userdatadomains");
@@ -192,22 +189,8 @@ chomp($IPADDR);
 # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
 my $ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
 my $IPTYPE="shared";
-my $RESOLVES_TO="";
 chomp($ResolvedIP);
-my $NXDOMAIN="";
-if ($ResolvedIP eq "") { 
-	$NXDOMAIN="Non Existant (NXDOMAIN)";
-}
-if ($ResolvedIP ne $IPADDR) { 
-	$RESOLVES_TO = $MAINDOMAIN . " resolves to IP: $ResolvedIP $NXDOMAIN";
-}
-else { 
-	$RESOLVES_TO = $MAINDOMAIN . " resolves to SAME ($ResolvedIP)";
-	$IPTYPE="shared";
-	if($IPADDR ne $SERVER_IP) { 
-		$IPTYPE="dedicated";
-	}
-}
+
 # Get start date (when account was created)
 foreach $USERLINE(@USERDATA) { 
 	if ($USERLINE =~ m/STARTDATE/) { 
@@ -260,32 +243,56 @@ if (-e("$HOMEDIR/$username/.lastlogin")) {
 
 my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
-print "There are $TOTAL_DOMAINS total domains on this server.\n";
+print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on this server.\n";
 if ($IS_USERNAME) { 
 	print "\n";
 }
 else { 
-	print "\nThe user name for $DOMAIN is: $username\n";
+	print BRIGHT_GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . BRIGHT_GREEN ON_BLACK " is: " . YELLOW $username . "\n";
 }
-print "The main domain is $MAINDOMAIN $RO_TEXT\n";
-print "$IS_PARKED\n" unless($IS_PARKED eq "");
-print "$IS_ADDON\n" unless($IS_ADDON eq "");
-print "$IS_SUB\n" unless($IS_SUB eq "");
-print $MAINDOMAIN . " has the " . $PACKAGE . " hosting package\n";
-print $MAINDOMAIN . " has a " . $IPTYPE . " IP address of " . $IPADDR . "\n";
-print $RESOLVES_TO . "\n" unless($RESOLVES_TO eq "");
+print BRIGHT_GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . BRIGHT_GREEN ON_BLACK $RO_TEXT . "\n";
+print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
+print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
+print GREEN "$IS_SUB\n" unless($IS_SUB eq "");
+print BLUE $MAINDOMAIN . WHITE " has the " . CYAN $PACKAGE . WHITE " hosting package\n";
+if ($ResolvedIP eq $IPADDR) { 
+	print BLUE $MAINDOMAIN . WHITE " resolves to SAME (" . CYAN $ResolvedIP . WHITE ")\n";
+	if($IPADDR ne $SERVER_IP) { 
+		$IPTYPE="dedicated";
+	}
+}
+if ($ResolvedIP ne $IPADDR) { 
+	print BLUE $MAINDOMAIN . WHITE " resolves to IP: " . CYAN $ResolvedIP . "\n" unless($ResolvedIP eq "");
+	print YELLOW "Seeing defaultwebpage? - This may be why!\n" unless($ResolvedIP eq "");
+}
+if ($ResolvedIP eq "") { 
+	print BLUE  $MAINDOMAIN . WHITE " resolves to " . RED "Non Existant (NXDOMAIN)\n";
+}
+print BLUE $MAINDOMAIN . WHITE " has a " . CYAN $IPTYPE . WHITE " IP address of " . CYAN $IPADDR . "\n";
+
+# Last Login IP
 if($LastLoginIP) { 
-	print $MAINDOMAIN . " last logged in to cPanel from IP: " . $LastLoginIP . " On: " . $AccessDate . "\n";
+	print BLUE $MAINDOMAIN . WHITE " last logged in to cPanel from IP: " . CYAN $LastLoginIP . WHITE " On: " . CYAN $AccessDate . "\n";
 }
 
 my $STARTDATE=scalar localtime($STARTDATE2);
 chomp($STARTDATE);
-print $MAINDOMAIN . " has been a customer since " . $STARTDATE . "\n";
-if ($SUSP) { 
-	print $SUSP;
+print BLUE $MAINDOMAIN . WHITE " has been a customer since " . CYAN $STARTDATE . "\n";
+
+# Check to see if the $username is in /var/cpanel/suspended directory 
+my $SUSP=0;
+my $REASON="";
+if (-e("/var/cpanel/suspended/$username")) { 
+	$REASON=`cat /var/cpanel/suspended/$username`;
+	chomp($REASON);
+	$SUSP=1;
 }
-else { 
-	print "$MAINDOMAIN ($username) is not currently suspended\n";
+if ($SUSP) {
+   print BLUE $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ") " . RED "is suspended";
+   print WHITE " - Reason: " . CYAN $REASON . "\n" unless($REASON eq "");
+}
+else {
+   print CYAN "$MAINDOMAIN " . WHITE " (" . GREEN $username . WHITE ") is not currently suspended\n";
 }
 print "\n";
 exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller);
@@ -304,47 +311,47 @@ my $SUB="";
 my $PARK="";
 my $ADDON="";
 if ($subcnt+$addoncnt+$parkcnt>1 or ($all or $listsubs or $listaddons or $listparked)) { 
-	print "The following are associated with $MAINDOMAIN ($username)\n";
+	print WHITE "The following are associated with " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	&smborder;
 }
 if ($all or $listsubs) { 
-	print "Sub Domains: ";
+	print YELLOW "Sub Domains: ";
 	if ($subcnt > 0 and ($all or $listsubs)) { 
 		foreach $SUB(@SUBDOMAINS) { 
 			chomp($SUB);
-			print "\t \\_ $SUB\n";
+			print YELLOW "\t \\_ $SUB\n";
 		}
 	}
 	else { 
-		print "No Sub Domains found for $MAINDOMAIN ($username)\n";
+		print MAGENTA "No Sub Domains found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	&smborder;
 }
 
 if ($all or $listaddons) { 
-	print "Addon Domains: ";
+	print YELLOW "Addon Domains: ";
 	if ($addoncnt > 0 and ($all or $listaddons)) { 
 		foreach $ADDON(@ADDONDOMAINS) { 
 			chomp($ADDON);
-			print "\t \\_ $ADDON\n";
+			print YELLOW "\t \\_ $ADDON\n";
 		}
 	}
 else { 
-		print "No Addon Domains found for $MAINDOMAIN ($username)\n";
+		print MAGENTA "No Addon Domains found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	&smborder;
 }
 
 if ($all or $listparked) { 
-	print "Parked Domains: ";
+	print YELLOW "Parked Domains: ";
 	if ($parkcnt > 0 and ($all or $listparked)) { 
 		foreach $PARK(@PARKEDDOMAINS) { 
 			chomp($PARK);
-			print "\t \\_ $PARK\n";
+			print YELLOW "\t \\_ $PARK\n";
 		}
 	}
 	else { 
-		print "No Parked Domains found for $MAINDOMAIN ($username)\n";
+		print MAGENTA "No Parked Domains found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	&smborder;
 }
@@ -355,18 +362,18 @@ if ($listreseller or $all) {
 	my $ResellersDomain="";
 	if ($Is_Reseller) { 
 		if ($RO_TEXT) { 
-			print "The " . $REAL_OWNER . " reseller also has the following other domains associated with it\n";
+			print WHITE "The " . GREEN $REAL_OWNER . WHITE " reseller also has the following other domains associated with it\n";
 		}
 		else { 
-			print $MAINDOMAIN . " is a reseller and has the following accounts under it\n";
+			print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following accounts under it\n";
 		}
 		foreach $ResellersDomain(@OWNEDBYRESELLER) { 
 			chomp($ResellersDomain);
-			print "\t \\_ $ResellersDomain\n";
+			print BOLD BLUE ON_WHITE "\t \\_ $ResellersDomain\n";
 		}
 	}
 	else { 
-		print "No Reseller information found for $MAINDOMAIN ($username)\n";
+		print WHITE "No Reseller information found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 		&border;
 	}
 }
@@ -384,10 +391,10 @@ if ($listdbs or $all) {
 	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
 	if ($DBCNT == 0) {
-		print "No MySQL databases found for $MAINDOMAIN ($username)\n";
+		print WHITE "No MySQL databases found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	else { 
-		print "The following MySQL databases can be found under: $username\n";
+		print WHITE "The following MySQL databases can be found under: " . GREEN $username . "\n";
 		foreach $USERDB(@USERDBS) {
 			chomp($USERDB);
 			@DBSIZE = qx[ echo "select table_schema, sum(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES where table_schema = '$USERDB' GROUP By table_schema;" | mysql ];
@@ -395,7 +402,7 @@ if ($listdbs or $all) {
 			chomp(@DBSIZE);
 			my $num=@DBSIZE;
 			if ($num == 0) {
-				print "\t \\_ $USERDB has no tables.\n";
+				print YELLOW "\t \\_" . $USERDB . WHITE "has no tables.\n";
 				next;
 			}
 			foreach $SIZEOFDB(@DBSIZE) {
@@ -404,7 +411,7 @@ if ($listdbs or $all) {
 				chomp($DBNAME);
 				chomp($DBSIZE);
 				$DBSIZE=sprintf("%.2f", $DBSIZE);
-				print "\t \\_ $DBNAME ($DBSIZE MB)\n";
+				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . BRIGHT_GREEN ON_WHITE $DBSIZE . WHITE "MB)\n";
 			}
 		}
 	}
@@ -418,10 +425,10 @@ if ($listdbs or $all) {
 	   pop(@PSQLDBS);
 	   my $PgDbCount=@PSQLDBS;
 	   if ($PgDbCount == 0) { 
-		   print "No PostGreSQL databases found for $MAINDOMAIN ($username)\n";
+		   print WHITE "No PostGreSQL databases found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	   }
 	   else { 
-		   print "The following PostGreSQL databases can be found under: $username\n";
+		   print WHITE "The following PostGreSQL databases can be found under: " . GREEN $username . "\n";
 		   my $pg_table="";
 		   my @PG_TABLES=undef;
 		   foreach $PgDb(@PSQLDBS) { 
@@ -433,18 +440,18 @@ if ($listdbs or $all) {
 			   $pg_table =~ s/^\s+//;
 			   $pg_table =~ s/\s+/, /g;
 			   if ($pg_table eq "") { 
-				   print "\t \\_ $PgDb - has no tables\n";
+				   print YELLOW "\t \\_" .  $PgDb . WHITE " has no tables\n";
 			   }
 			   else { 
-				   print "\t \\_ $PgDb\n";
+				   print YELLOW "\t \\_" .  $PgDb . "\n";
                my ($pg_table_size) = (split(/\|/,qx[ psql -U postgres -d $PgDb -c "\\dt+" | grep '$pg_table' ]))[4];
-				   print "\t\t \\_ $pg_table ($pg_table_size)\n";
+				   print YELLOW "\t\t \\_" . $pg_table . WHITE " (" . BRIGHT_GREEN ON_WHITE $pg_table_size . WHITE ")\n";
 			   }
 		   }
 	   }
    }
    else { 
-      print "PostGreSQL server is not installed (or running) on $HOSTNAME\n";
+      print RED "PostGreSQL server is not installed (or running) on " . MAGENTA $HOSTNAME . "\n";
    }
 	&border;
 }
@@ -469,15 +476,15 @@ if ($listssls or $all) {
 	splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
 	my $sslcnt=@SSLDATA;
 	if ($sslcnt > 0) {
-		print "SSL Certificates installed under $MAINDOMAIN ($username)\n";
+		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 		foreach $sslline(@SSLDATA) { 
 			chomp($sslline);
-			print "\t \\_ $sslline\n";
+			print YELLOW "\t \\_ " . $sslline . "\n";
 		}
 	}
 	else { 
 		&border;
-		print "No SSL Certificates found for $MAINDOMAIN ($username)\n";
+		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	&border;
 }
@@ -485,30 +492,30 @@ if ($listssls or $all) {
 exit;
 
 sub Usage { 
-   print "\nUsage: $0 [options] domainname.tld or cPUsername [options]\n\n";
-   print "Examples: \n$0 --listdbs somedomain.net\n";
-   print "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n";
-   print "$0 --listsubs cptestdo\n";
-   print "\t Lists all sub domains under the cptestdo user name.\n\n";
-   print "$0 --listaddons cptestdomain.net\n";
-   print "\t Lists all addon domains under the cptestdomain.net domain name.\n\n";
-   print "$0 --listparked cptestdomain.net\n";
-   print "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
-   print "$0 --listreseller cptestdo\n";
-   print "\t Lists reseller information and domains under the cptestdo user name.\n\n";
-   print "$0 --listssls cptestdomain.net\n";
-   print "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
-   print "$0 --all cptestdomain.net\n";
-   print "\t Lists everything for the cptestdomain.net domain name.\n\n";
-   print "$0 --help\n";
-   print "\t Shows this usage information. (NOTE: [options] can go before or after domain/username).\n\n";
+   print WHITE "\nUsage: " . CYAN $0 . WHITE " [options] domainname.tld or cPUsername [options]\n\n";
+   print YELLOW "Examples: \n" . CYAN $0 . WHITE " --listdbs somedomain.net\n";
+   print GREEN "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n";
+   print CYAN $0 . WHITE " --listsubs cptestdo\n";
+   print GREEN "\t Lists all sub domains under the cptestdo user name.\n\n";
+   print CYAN $0 . WHITE " --listaddons cptestdomain.net\n";
+   print GREEN "\t Lists all addon domains under the cptestdomain.net domain name.\n\n";
+   print CYAN $0 . WHITE " --listparked cptestdomain.net\n";
+   print GREEN "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
+   print CYAN $0 . WHITE " --listreseller cptestdo\n";
+   print GREEN "\t Lists reseller information and domains under the cptestdo user name.\n\n";
+   print CYAN $0 . WHITE " --listssls cptestdomain.net\n";
+   print GREEN "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
+   print CYAN $0 . WHITE " --all cptestdomain.net\n";
+   print GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n";
+   print CYAN $0 . WHITE " --help\n";
+   print GREEN "\t Shows this usage information. (NOTE: [options] can go before or after domain/username).\n\n";
 	exit;
 }
 
 sub border { 
-	print "==============================================================================================\n";
+	print BRIGHT_BLUE ON_BLACK "==============================================================================================\n";
 }
 
 sub smborder { 
-	print "----------------------------------------------------------------------------------------------\n";
+	print MAGENTA "----------------------------------------------------------------------------------------------\n";
 }
