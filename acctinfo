@@ -82,9 +82,17 @@ my ($username)=(split(/\: /,@RESULT[0]))[1];
 chomp($username);
 # Now get the main domain from /etc/trueuserdomains using the $username
 my @MAINDOMAIN=qx[ grep $username /etc/trueuserdomains ];
-my ($MAINDOMAIN)=(split(/\: /,@MAINDOMAIN[0]))[0];
+my $MAINDOMAIN="";
+my $MainDomainLine="";
+my $TrueUser="";
+foreach $MainDomainLine(@MAINDOMAIN) {
+   chomp($MainDomainLine);
+   ($MAINDOMAIN,$TrueUser)=(split(/\: /,$MainDomainLine));
+   if ($username eq $TrueUser) {
+      last;
+   }
+}
 chomp($MAINDOMAIN);
-
 
 # Now read file /etc/userdatadomains into array
 open(USERDATAFILE,"/etc/userdatadomains");
@@ -296,6 +304,7 @@ if ($subcnt+$addoncnt+$parkcnt>1 or ($all or $listsubs or $listaddons or $listpa
 if ($all or $listsubs) { 
 	print YELLOW "Sub Domains: ";
 	if ($subcnt > 0 and ($all or $listsubs)) { 
+      print "\n";
 		foreach $SUB(@SUBDOMAINS) { 
 			chomp($SUB);
 			print YELLOW "\t \\_ $SUB\n";
@@ -310,6 +319,7 @@ if ($all or $listsubs) {
 if ($all or $listaddons) { 
 	print YELLOW "Addon Domains: ";
 	if ($addoncnt > 0 and ($all or $listaddons)) { 
+      print "\n";
 		foreach $ADDON(@ADDONDOMAINS) { 
 			chomp($ADDON);
 			print YELLOW "\t \\_ $ADDON\n";
@@ -324,6 +334,7 @@ else {
 if ($all or $listparked) { 
 	print YELLOW "Parked Domains: ";
 	if ($parkcnt > 0 and ($all or $listparked)) { 
+      print "\n";
 		foreach $PARK(@PARKEDDOMAINS) { 
 			chomp($PARK);
 			print YELLOW "\t \\_ $PARK\n";
