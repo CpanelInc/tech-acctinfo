@@ -14,9 +14,9 @@ It can come in very handy when you need to quickly find out information on a
 particular account or domain.
 
 You can either download it to your /root/bin folder or you can run it from the 
-command line.  I created an alias in my .bashrc file.
+command line.  I created an alias in my .bashrc file that looks like this.
 
-alias acctinfo="perl <(curl -s https://raw.githubusercontent.com/cPanelPeter/acctinfo/master/acctinfo)"
+alias acctinfo="/usr/local/cpanel/3rdparty/bin/perl <(curl -s https://raw.githubusercontent.com/cPanelPeter/acctinfo/master/acctinfo)"
 
 So you can call it as follows: 
 
@@ -34,8 +34,8 @@ The following options are available:
 -q
     Clears the screen (default is to not clear the screen)
 
---listdbs cpanel.net
-    Lists any MySQL databases (and their sizes) for cpanel.net
+--listdbs somedomain.net
+    Lists any MySQL and PosgGreSQL databases (and their sizes) for somedomain.net
 
 --listsubs cptestdo
     Lists all sub domains under the cptestdo user name.
@@ -52,6 +52,7 @@ The following options are available:
 --listssls cptestdomain.net
     Lists any SSL's under the cptestdomain.net domain name.
 
-Note that you can also call it without any options and get all the data above.
+--all cptestdomain.net
+   Lists all settings for the cptestdomain.net domain name. 
 
 
