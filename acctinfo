@@ -3,12 +3,25 @@
 # PURPOSE: Get all information for a username or domain entered at command line       #
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
 #######################################################################################
+
+BEGIN {
+    unshift @INC, '/usr/local/cpanel';
+    unshift @INC, '/usr/local/cpanel/scripts';
+    unshift @INC, '/usr/local/cpanel/bin';
+}
+
 use strict;
-my $VERSION="1.10";
+my $VERSION="2.0";
 
 use File::stat;
 use Getopt::Long;
 use Term::ANSIColor qw(:constants);
+use Cpanel::Sys::Hostname       			();
+use Cpanel::Config::LoadCpUserFile 		();
+use Cpanel::Config::Users          		();
+use Cpanel::Config::LoadWwwAcctConf 	();
+use Cpanel::ResellerFunctions				();
+use Cpanel::Usage                   	();
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -21,17 +34,18 @@ my $listparked = undef;
 my $listreseller = undef;
 my $clearscreen = undef;
 my $helpME = undef;
+my $SearchFor = undef;
 
 GetOptions(
-   'listdbs' => \$listdbs,
-   'listssls' => \$listssls,
-   'listsubs' => \$listsubs,
-   'listaddons' => \$listaddons,
-   'listparked' => \$listparked,
-   'listreseller' => \$listreseller,
+	'listdbs' => \$listdbs,
+	'listssls' => \$listssls,
+	'listsubs' => \$listsubs,
+	'listaddons' => \$listaddons,
+	'listparked' => \$listparked,
+	'listreseller' => \$listreseller,
 	'all' => \$all,
-   'help' => \$helpME,
-   'q' => \$clearscreen,
+	'help' => \$helpME,
+	'q' => \$clearscreen,
 );
 
 if ($clearscreen) { 
@@ -42,69 +56,62 @@ if ($helpME) {
 	&Usage;
 }
 
-# Determine the correct HOME DIRECTORY by grabbing the HOMEDIR value
-# from /etc/wwwacct.conf (one of cPanel's conf files)
-my $IS_USERNAME=1;
-my $HOMEDIR=qx[ cat /etc/wwwacct.conf | grep 'HOMEDIR' ];
-my ($NAME,$VALUE)=(split(/\s+/,$HOMEDIR));
-$HOMEDIR=$VALUE;
-chomp($HOMEDIR);
-my $SERVER_IP=qx[ cat /etc/wwwacct.conf | grep 'ADDR' ];
-($NAME,$VALUE)=(split(/\s+/,$SERVER_IP));
-$SERVER_IP=$VALUE;
-chomp($SERVER_IP);
+my $conf = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
+my $HOMEDIR = $conf->{'HOMEDIR'};
+my $SERVER_IP = $conf->{'ADDR'};
 
-my $DOMAIN=@ARGV[0];
-chomp($DOMAIN);
-if ($DOMAIN eq "") {
+my $IS_USERNAME=1;
+
+my $QUERY=@ARGV[0];
+chomp($QUERY);
+if ($QUERY eq "") {
 	&Usage;
 }
-$DOMAIN=lc($DOMAIN);
-if (index($DOMAIN, '.') != -1) { 
+$QUERY=lc($QUERY);
+if (index($QUERY, '.') != -1) { 
    $IS_USERNAME=0;
 }
 
-my $HOSTNAME=`hostname`;
-chomp($HOSTNAME);
-# First check trueuserdomains (for the main domain)
-my @RESULT=qx[ grep $DOMAIN /etc/trueuserdomains ];
-my $CNT=@RESULT;
-if ($CNT==0) {    ## If not found there, then check userdomains (it could be addon/parked/sub domain)
-	@RESULT=qx[ grep $DOMAIN /etc/userdomains ];
-	$CNT=@RESULT;
-	if ($CNT==0) {     ## If not found there either, then it's not on this server
-		print RED "ERROR: " . GREEN $DOMAIN . " not found on " . MAGENTA $HOSTNAME . "\n";
-		exit;
-	}
-}
-
-my ($username)=(split(/\: /,@RESULT[0]))[1];
-chomp($username);
-# Now get the main domain from /etc/trueuserdomains using the $username
-my @MAINDOMAIN=qx[ grep $username /etc/trueuserdomains ];
+my $HOSTNAME = Cpanel::Sys::Hostname::gethostname();
 my $MAINDOMAIN="";
-my $MainDomainLine="";
-my $TrueUser="";
-foreach $MainDomainLine(@MAINDOMAIN) {
-   chomp($MainDomainLine);
-   ($MAINDOMAIN,$TrueUser)=(split(/\: /,$MainDomainLine));
-   if ($username eq $TrueUser) {
-      last;
-   }
+my $username="";
+
+if ($IS_USERNAME) { 
+	$MAINDOMAIN=&FindMainDomain($QUERY);
+#	$username=&FindUser($MAINDOMAIN);
+	$username=$QUERY;
+}
+else { 
+	$username=&FindUser($QUERY);
+	$MAINDOMAIN=&FindMainDomain($username);
 }
 chomp($MAINDOMAIN);
+chomp($username);
+if (!($MAINDOMAIN)) { 
+	$username=&FindUser($QUERY);
+	$MAINDOMAIN=&FindMainDomain($username);
+}
+# If both variables are still empty, neither the username nor the domain name were found!
+if ($MAINDOMAIN eq "" and $username eq "") { 
+	print "Error - $QUERY not found on $HOSTNAME\n";
+	# Add message here to try using the --cruft switch (to be added later).
+	exit;
+}
 
-# Now read file /etc/userdatadomains into array
-open(USERDATAFILE,"/etc/userdatadomains");
-my @USERDATADOMAINS=<USERDATAFILE>;
-close(USERDATAFILE);
-
-# Now get all parked, addon and sub domains (if any)
+# Load /var/cpanel/users/$username into config hash variable
+my $user_conf = Cpanel::Config::LoadCpUserFile::load($username);
+my $DOMAIN = $QUERY;
 my $IS_PARKED="";
 my $IS_ADDON="";
 my $IS_SUB="";
 my @SUBDOMAINS="";
+my @ADDONDOMAINS="";
+my @PARKEDDOMAINS="";
 my $ACCT="";
+open(USERDATAFILE,"/etc/userdatadomains");
+my @USERDATADOMAINS=<USERDATAFILE>;
+close(USERDATAFILE);
+# Now get all sub domains (if any)
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -119,7 +126,6 @@ foreach $ACCT(@USERDATADOMAINS) {
 	}
 }
 # Now get all addon domains (if any)
-my @ADDONDOMAINS="";
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -134,7 +140,6 @@ foreach $ACCT(@USERDATADOMAINS) {
 	}
 }
 # Now get all parked domains (if any)
-my @PARKEDDOMAINS="";
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -148,75 +153,68 @@ foreach $ACCT(@USERDATADOMAINS) {
 		}
 	}
 }
-# Now get all data from /var/cpanel/users/$username
-open(USERDATA,"/var/cpanel/users/$username");
-my @USERDATA=<USERDATA>;
-close(USERDATA);
-# Get package
-my $USERLINE="";
-my $PACKAGE="";
-my $IPADDR="";
-my $STARTDATE="";
-my $STARTDATE2="";
-foreach $USERLINE(@USERDATA) { 
-	if ($USERLINE =~ m/PLAN/) { 
-		($PACKAGE)=(split(/=/,$USERLINE))[1];
-		last;
-	}
-}
-chomp($PACKAGE);
-# Get IP address
-foreach $USERLINE(@USERDATA) { 
-	if ($USERLINE =~ m/IP/) { 
-		($IPADDR)=(split(/=/,$USERLINE))[1];
-		last;
-	}
-}
-chomp($IPADDR);
+
+shift @SUBDOMAINS;
+shift @ADDONDOMAINS;
+shift @PARKEDDOMAINS;
+my $subcnt=@SUBDOMAINS;
+my $addoncnt=@ADDONDOMAINS;
+
+# We already have the $user_conf hash variable.
+my $PACKAGE=$user_conf->{'PLAN'};
+my $IPADDR=$user_conf->{'IP'};
+my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
 # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
 my $ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
-my $IPTYPE="shared";
 chomp($ResolvedIP);
-
-# Get start date (when account was created)
-foreach $USERLINE(@USERDATA) { 
-	if ($USERLINE =~ m/STARTDATE/) { 
-		($STARTDATE2)=(split(/=/,$USERLINE))[1];
-		my $STARTDATE=scalar localtime($STARTDATE2);
-		last;
-	}
+my $IPTYPE="";
+if ($IPADDR eq $SERVER_IP) {
+	$IPTYPE="shared";
 }
-# See if this user is it's own owner (if not it is owned by a reseller)
+else {
+	$IPTYPE="dedicated";
+}
+my $REAL_OWNER=$user_conf->{'OWNER'};
 my $RO_TEXT="";
-my $REAL_OWNER="";
-foreach $USERLINE(@USERDATA) { 
-	if ($USERLINE =~ m/^OWNER/) { 
-		($REAL_OWNER)=(split(/=/,$USERLINE))[1];
-		chomp($REAL_OWNER);
-		if ($REAL_OWNER ne $username and $REAL_OWNER ne "root") { 
-			my $RO_TEXT=" (Which is under the reseller: $REAL_OWNER)";
-		}
-		last;
-	}
+if ($REAL_OWNER ne $username and $REAL_OWNER ne "root") { 
+	$RO_TEXT=" (Which is under the reseller: $REAL_OWNER)";
 }
 # Check if main domain (username) is a reseller.
+my @ACCTSOWNEDBYRESELLER=undef;
+my @LISTOFACCTS=undef;
 my $Is_Reseller=0;
-my $acct="";
-my @OWNEDBYRESELLER=undef;
-if (-e("/var/cpanel/root.accts")) { 
-	open(accts,"/var/cpanel/root.accts");
-	my @AllAccts=<accts>;
-	close(accts);
-	shift @AllAccts;
-	foreach $acct(@AllAccts) { 
-		chomp($acct);
-		my ($resellersdomain,$OWNER)=(split(/,/,$acct))[0,10];
-		if ($OWNER eq $username or $OWNER eq $REAL_OWNER and ($REAL_OWNER ne "root")) { 
-			my $Is_Reseller=1;
-			push(@OWNEDBYRESELLER,$resellersdomain);
+my $ResellerAcctsCnt=0;
+my $ResellerDomain="";
+my $vcu_account="";
+my $ResellersAcct="";
+my $RESELLER="";
+my $FOUND="";
+my @ALL_RESELLERS=Cpanel::ResellerFunctions::getresellerslist();
+unshift @ALL_RESELLERS, 'root';
+foreach $RESELLER(@ALL_RESELLERS) { 
+	chomp($RESELLER);
+	if ($RESELLER eq $username) { 
+		$Is_Reseller=1;
+		# Read all accounts in /var/cpanelusers into array
+		opendir(ACCTS,"/var/cpanel/users");
+		my @LISTOFACCTS=readdir(ACCTS);
+		closedir(ACCTS);
+		foreach $vcu_account(@LISTOFACCTS) { 
+			chomp($vcu_account);
+			$FOUND="";
+			$FOUND=qx[ grep 'OWNER=$username' /var/cpanel/users/$vcu_account ];
+			if ($FOUND) { 
+				$ResellersAcct=qx[ grep 'DNS=' /var/cpanel/users/$vcu_account ];
+				$ResellerDomain=substr($ResellersAcct,4);
+				chomp($ResellerDomain);
+				push(@ACCTSOWNEDBYRESELLER,"$ResellerDomain ($vcu_account)");
+			}
 		}
+		$ResellerAcctsCnt=@ACCTSOWNEDBYRESELLER;
+		last;
 	}
 }
+
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
 my $AccessDate="";
@@ -230,7 +228,7 @@ if (-e("$HOMEDIR/$username/.lastlogin")) {
 
 my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
-print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on this server.\n";
+print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . BRIGHT_GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
 if ($IS_USERNAME) { 
 	print "\n";
 }
@@ -238,33 +236,34 @@ else {
 	print BRIGHT_GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . BRIGHT_GREEN ON_BLACK " is: " . YELLOW $username . "\n";
 }
 print BRIGHT_GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . BRIGHT_GREEN ON_BLACK $RO_TEXT . "\n";
+if ($Is_Reseller) { 
+	print BRIGHT_GREEN ON_BLACK "This account is also a reseller!\n";
+}
 print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
 print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
 print GREEN "$IS_SUB\n" unless($IS_SUB eq "");
-print BLUE $MAINDOMAIN . WHITE " has the " . CYAN $PACKAGE . WHITE " hosting package\n";
+#print BLUE $MAINDOMAIN . WHITE " has the " . CYAN $PACKAGE . WHITE " hosting package\n";
+print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
+print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ")\n";
 if ($ResolvedIP eq $IPADDR) { 
-	print BLUE $MAINDOMAIN . WHITE " resolves to SAME (" . CYAN $ResolvedIP . WHITE ")\n";
-	if($IPADDR ne $SERVER_IP) { 
-		$IPTYPE="dedicated";
-	}
+	print WHITE "Resolves to SAME (" . CYAN $ResolvedIP . ")\n";
 }
 if ($ResolvedIP ne $IPADDR) { 
-	print BLUE $MAINDOMAIN . WHITE " resolves to IP: " . CYAN $ResolvedIP . "\n" unless($ResolvedIP eq "");
-	print YELLOW "Seeing defaultwebpage? - This may be why!\n" unless($ResolvedIP eq "");
+	# Check for 1:1 NAT config - IPADDR might be private and defined in /var/cpanel/cpnat
+	print WHITE "Resolves to IP: " . CYAN $ResolvedIP . "\n" unless($ResolvedIP eq "");
+	print YELLOW "Seeing defaultwebpage.cgi? - This may be why!\n" unless($ResolvedIP eq "");
 }
 if ($ResolvedIP eq "") { 
-	print BLUE  $MAINDOMAIN . WHITE " resolves to " . RED "Non Existant (NXDOMAIN)\n";
+	print WHITE "Resolves to " . RED "Non Existant (NXDOMAIN)\n";
 }
-print BLUE $MAINDOMAIN . WHITE " has a " . CYAN $IPTYPE . WHITE " IP address of " . CYAN $IPADDR . "\n";
+#print BLUE $MAINDOMAIN . WHITE " has a " . CYAN $IPTYPE . WHITE " IP address of " . CYAN $IPADDR . "\n";
 
 # Last Login IP
 if($LastLoginIP) { 
-	print BLUE $MAINDOMAIN . WHITE " last logged in to cPanel from IP: " . CYAN $LastLoginIP . WHITE " On: " . CYAN $AccessDate . "\n";
+	print WHITE "Last logged in to cPanel from IP: " . CYAN $LastLoginIP . WHITE " On: " . CYAN $AccessDate . "\n";
 }
 
-my $STARTDATE=scalar localtime($STARTDATE2);
-chomp($STARTDATE);
-print BLUE $MAINDOMAIN . WHITE " has been a customer since " . CYAN $STARTDATE . "\n";
+print WHITE "Has been a customer since " . CYAN $STARTDATE . "\n";
 
 # Check to see if the $username is in /var/cpanel/suspended directory 
 my $SUSP=0;
@@ -274,26 +273,23 @@ if (-e("/var/cpanel/suspended/$username")) {
 	chomp($REASON);
 	$SUSP=1;
 }
+print WHITE "Suspended: ";
 if ($SUSP) {
-   print BLUE $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ") " . RED "is suspended";
-   print WHITE " - Reason: " . CYAN $REASON . "\n" unless($REASON eq "");
+   print RED "YES!"; 
+	print WHITE " - Reason: " . CYAN $REASON unless($REASON eq "");
 }
 else {
-   print CYAN "$MAINDOMAIN " . WHITE " (" . GREEN $username . WHITE ") is not currently suspended\n";
+   print GREEN "No";
 }
 print "\n";
+my $parkcnt=@PARKEDDOMAINS;
+print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "PARKED: " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
 exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller);
 
 # END OF BASIC INFORMATION (no switches were added) 
 # ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
 
 # DOMAIN INFO (PARKED, ADDON, SUB)
-shift @SUBDOMAINS;
-shift @ADDONDOMAINS;
-shift @PARKEDDOMAINS;
-my $subcnt=@SUBDOMAINS;
-my $addoncnt=@ADDONDOMAINS;
-my $parkcnt=@PARKEDDOMAINS;
 my $SUB="";
 my $PARK="";
 my $ADDON="";
@@ -349,17 +345,14 @@ if ($all or $listparked) {
 # RESELLER INFO
 if ($listreseller or $all) { 
 	&border;
-	my $ResellersDomain="";
-	if ($Is_Reseller) { 
-		if ($RO_TEXT) { 
-			print WHITE "The " . GREEN $REAL_OWNER . WHITE " reseller also has the following other domains associated with it\n";
-		}
-		else { 
-			print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following accounts under it\n";
-		}
-		foreach $ResellersDomain(@OWNEDBYRESELLER) { 
-			chomp($ResellersDomain);
-			print BOLD BLUE ON_WHITE "\t \\_ $ResellersDomain\n";
+	my $owned_by_reseller="";
+	if ($Is_Reseller and $ResellerAcctsCnt > 0) { 
+		print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following accounts under it\n";
+		# RIGHT HERE
+		shift @ACCTSOWNEDBYRESELLER;
+		foreach $owned_by_reseller(@ACCTSOWNEDBYRESELLER) { 
+			chomp($owned_by_reseller);
+			print BOLD YELLOW ON_BLACK "\t \\_ $owned_by_reseller\n";
 		}
 	}
 	else { 
@@ -434,8 +427,6 @@ if ($listdbs or $all) {
 			   }
 			   else { 
 				   print YELLOW "\t \\_" .  $PgDb . "\n";
-               my ($pg_table_size) = (split(/\|/,qx[ psql -U postgres -d $PgDb -c "\\dt+" | grep '$pg_table' ]))[4];
-				   print YELLOW "\t\t \\_" . $pg_table . WHITE " (" . BRIGHT_GREEN ON_WHITE $pg_table_size . WHITE ")\n";
 			   }
 		   }
 	   }
@@ -509,3 +500,38 @@ sub border {
 sub smborder { 
 	print MAGENTA "----------------------------------------------------------------------------------------------\n";
 }
+
+sub FindMainDomain() {
+	$SearchFor=$_[0];
+	my $MAINUSER="";
+	my $TrueUserLine="";
+	open(TRUEUSER,"/etc/trueuserdomains");
+	my @TRUEUSERS=<TRUEUSER>;
+	close(TRUEUSER);
+	foreach $TrueUserLine(@TRUEUSERS) {
+		chomp($TrueUserLine);
+		($MAINDOMAIN,$MAINUSER)=(split(/:\s+/,$TrueUserLine));
+		if ($MAINUSER eq $SearchFor) {
+			return $MAINDOMAIN;
+		}
+	}
+}
+
+sub FindUser() { 
+	my $SearchFor=$_[0];
+	my $UserLine="";
+	my $TheDOMAIN="";
+	my $TheUSER="";
+	open(USERDOMAIN,"/etc/userdomains");
+	my @USERDOMAINS=<USERDOMAIN>;
+	close(USERDOMAIN);
+	foreach $UserLine(@USERDOMAINS) {
+		chomp($UserLine);
+		($TheDOMAIN,$TheUSER)=(split(/:\s+/,$UserLine));
+		if ($TheDOMAIN eq $SearchFor) {
+			return $TheUSER;
+		}
+	}
+}
+
+
