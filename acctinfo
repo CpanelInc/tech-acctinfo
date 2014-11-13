@@ -1,4 +1,4 @@
-#!/usr/local/cpanel/3rdparty/bin/perl
+#!/usr/bin/perl
 # SCRIPT: acctinfo                                                                    #
 # PURPOSE: Get all information for a username or domain entered at command line       #
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
@@ -78,7 +78,6 @@ my $username="";
 
 if ($IS_USERNAME) { 
 	$MAINDOMAIN=&FindMainDomain($QUERY);
-#	$username=&FindUser($MAINDOMAIN);
 	$username=$QUERY;
 }
 else { 
@@ -111,7 +110,7 @@ my $ACCT="";
 open(USERDATAFILE,"/etc/userdatadomains");
 my @USERDATADOMAINS=<USERDATAFILE>;
 close(USERDATAFILE);
-# Now get all sub domains (if any)
+# Get all sub domains (if any)
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -125,7 +124,7 @@ foreach $ACCT(@USERDATADOMAINS) {
 		}
 	}
 }
-# Now get all addon domains (if any)
+# Get all addon domains (if any)
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -139,7 +138,7 @@ foreach $ACCT(@USERDATADOMAINS) {
 		}
 	}
 }
-# Now get all parked domains (if any)
+# Get all parked domains (if any)
 foreach $ACCT(@USERDATADOMAINS) { 
 	chomp($ACCT);
 	if($ACCT =~ m/ $username/) { 
@@ -348,7 +347,6 @@ if ($listreseller or $all) {
 	my $owned_by_reseller="";
 	if ($Is_Reseller and $ResellerAcctsCnt > 0) { 
 		print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following accounts under it\n";
-		# RIGHT HERE
 		shift @ACCTSOWNEDBYRESELLER;
 		foreach $owned_by_reseller(@ACCTSOWNEDBYRESELLER) { 
 			chomp($owned_by_reseller);
@@ -436,6 +434,7 @@ if ($listdbs or $all) {
    }
 	&border;
 }
+
 # SSL INFO
 if ($listssls or $all) { 
 	my $sslline="";
@@ -534,4 +533,25 @@ sub FindUser() {
 	}
 }
 
+sub check_cloudflare_ips {
+   my $chkIP=$_[0];
+   # Below IP's obtained from: https://www.cloudflare.com/ips
+   my @cf_subnets = qw\199.27.128.0/21 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/12\;
+   my $cloudflareIP=0;
+   my $cf_subnet="";
+   my @a = split /\./, $chkIP;
+   my $di = getIp(@a);
+   foreach $cf_subnet (@cf_subnets){
+      ($a, $b) = getNetwork($cf_subnet);
+      if(($di >= $a) && ($di <= $b)){$cloudflareIP=1;}
+   }
+   sub getIp {
+      return ($_[0]*256*256*256) + ($_[1]*256*256) + ($_[2]*256) + $_[3];
+   }
+   sub getNetwork {
+      @a = split(/[\/|\.]/, +shift);
+      return (getIp(@a[0 .. 3]), (getIp(@a[0 .. 3]) + (2 ** (32 - $a[4]))));
+   }
+   return $cloudflareIP;
+}
 
