@@ -227,16 +227,16 @@ if (-e("$HOMEDIR/$username/.lastlogin")) {
 
 my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
-print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . BRIGHT_GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
+print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
 if ($IS_USERNAME) { 
 	print "\n";
 }
 else { 
-	print BRIGHT_GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . BRIGHT_GREEN ON_BLACK " is: " . YELLOW $username . "\n";
+	print GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . GREEN ON_BLACK " is: " . YELLOW $username . "\n";
 }
-print BRIGHT_GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . BRIGHT_GREEN ON_BLACK $RO_TEXT . "\n";
+print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
 if ($Is_Reseller) { 
-	print BRIGHT_GREEN ON_BLACK "This account is also a reseller!\n";
+	print GREEN ON_BLACK "This account is also a reseller!\n";
 }
 print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
 print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
@@ -392,7 +392,7 @@ if ($listdbs or $all) {
 				chomp($DBNAME);
 				chomp($DBSIZE);
 				$DBSIZE=sprintf("%.2f", $DBSIZE);
-				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . BRIGHT_GREEN ON_WHITE $DBSIZE . WHITE "MB)\n";
+				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_WHITE $DBSIZE . WHITE "MB)\n";
 			}
 		}
 	}
