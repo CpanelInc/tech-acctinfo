@@ -164,8 +164,8 @@ my $PACKAGE=$user_conf->{'PLAN'};
 my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
 # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-my $ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
-chomp($ResolvedIP);
+my @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+my $ResolvedIP;
 my $IPTYPE="";
 if ($IPADDR eq $SERVER_IP) {
 	$IPTYPE="shared";
@@ -241,21 +241,38 @@ if ($Is_Reseller) {
 print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
 print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
 print GREEN "$IS_SUB\n" unless($IS_SUB eq "");
-#print BLUE $MAINDOMAIN . WHITE " has the " . CYAN $PACKAGE . WHITE " hosting package\n";
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
 print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ")\n";
-if ($ResolvedIP eq $IPADDR) { 
-	print WHITE "Resolves to SAME (" . CYAN $ResolvedIP . ")\n";
+my $defaultsite=0;
+my $TotalARecords = @ResolvedIP;
+my $ResolvesToDetail="";
+print WHITE "Resolves to IP: ";
+if ($TotalARecords > 1) { 
+	print "(multiple A records found) \n";
+	foreach $ResolvedIP(@ResolvedIP) { 
+		chomp($ResolvedIP);
+		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
+	#	&is_mod_rpaf_installed;
+		print CYAN "\t \\_" . $ResolvedIP . " " . $ResolvesToDetail . "\n";
+	}
 }
-if ($ResolvedIP ne $IPADDR) { 
-	# Check for 1:1 NAT config - IPADDR might be private and defined in /var/cpanel/cpnat
-	print WHITE "Resolves to IP: " . CYAN $ResolvedIP . "\n" unless($ResolvedIP eq "");
-	print YELLOW "Seeing defaultwebpage.cgi? - This may be why!\n" unless($ResolvedIP eq "");
+else {    ##  ONLY 1 A RECORED RETURNED.
+	$ResolvedIP = @ResolvedIP[0];
+	chomp($ResolvedIP);
+	if ($TotalARecords == 0 and $ResolvedIP eq "") { 
+		print "DOES NOT RESOLVE!\n";
+		$defaultsite=1;
+	}
+	else { 
+		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
+		#	&is_mod_rpaf_installed;
+		print CYAN $ResolvedIP . " " . $ResolvesToDetail . "\n";
+	}
 }
-if ($ResolvedIP eq "") { 
-	print WHITE "Resolves to " . RED "Non Existant (NXDOMAIN)\n";
+
+if ($defaultsite) { 
+	print YELLOW "Seeing defaultwebpage.cgi? - This may be why!\n";
 }
-#print BLUE $MAINDOMAIN . WHITE " has a " . CYAN $IPTYPE . WHITE " IP address of " . CYAN $IPADDR . "\n";
 
 # Last Login IP
 if($LastLoginIP) { 
@@ -555,3 +572,42 @@ sub check_cloudflare_ips {
    return $cloudflareIP;
 }
 
+sub check_for_nat { 
+	return if (!(-e("/var/cpanel/cpnat")));
+   my $chkIP=$_[0];
+	open(CPNAT,"/var/cpanel/cpnat");
+	my @CPNAT=<CPNAT>;
+	close(CPNAT);
+	my $cpnat;
+	foreach $cpnat(@CPNAT) { 
+		chomp($cpnat);
+		my ($outsideIP,$insideIP)=(split(/\s+/,$cpnat));
+		chomp($outsideIP);
+		chomp($insideIP);
+		if ($outsideIP eq $chkIP) { 
+			return $insideIP;
+		}
+	}
+}
+
+sub check_resolved_ip { 
+	my $IP2CHK = $_[0];
+	my $RetVal="";
+	if ($IP2CHK eq $IPADDR) {
+		$RetVal = " [SAME]";
+	}
+	else { 
+		$defaultsite=1;
+	}
+	my $IS_CLOUDFLARE = &check_cloudflare_ips($IP2CHK);
+	if ($IS_CLOUDFLARE) { 
+		$RetVal = " <-- CloudFlare DNS";
+		$defaultsite=1;
+	}
+	my $IS_NAT = &check_for_nat($IP2CHK);
+	if ($IS_NAT) { 
+		$RetVal = " NAT detected ($IP2CHK -> $IS_NAT)";
+	}
+	#	&is_mod_rpaf_installed;
+	return $RetVal;
+}
