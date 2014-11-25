@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.0";
+my $VERSION="2.1";
 
 use File::stat;
 use Getopt::Long;
@@ -58,6 +58,7 @@ if ($helpME) {
 
 my $conf = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
 my $HOMEDIR = $conf->{'HOMEDIR'};
+# NOTE: The above is the HOMEDIR variable in /etc/wwwacct.conf 
 my $SERVER_IP = $conf->{'ADDR'};
 
 my $IS_USERNAME=1;
@@ -214,6 +215,29 @@ foreach $RESELLER(@ALL_RESELLERS) {
 	}
 }
 
+my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
+chomp($TOTAL_DOMAINS);
+print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
+if ($IS_USERNAME) { 
+	print "\n";
+}
+else { 
+	print GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . GREEN ON_BLACK " is: " . YELLOW $username . "\n";
+}
+# Get home directory from /etc/passwd
+my @PASSWDS=undef;
+my $RealHome="";
+my $passline="";
+open(PASSWD,"/etc/passwd");
+@PASSWDS=<PASSWD>;
+close(PASSWD);
+foreach $passline(@PASSWDS) { 
+	chomp($passline);
+	if ($passline =~ m/$username/) { 
+		($RealHome)=(split(/:/,$passline))[5];
+	}
+}
+
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
 my $AccessDate="";
@@ -225,16 +249,8 @@ if (-e("$HOMEDIR/$username/.lastlogin")) {
 	chomp($LastLoginIP);
 }
 
-my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
-chomp($TOTAL_DOMAINS);
-print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
-if ($IS_USERNAME) { 
-	print "\n";
-}
-else { 
-	print GREEN ON_BLACK "\nThe user name for " . BLUE $DOMAIN . GREEN ON_BLACK " is: " . YELLOW $username . "\n";
-}
 print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
+print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome . "\n";
 if ($Is_Reseller) { 
 	print GREEN ON_BLACK "This account is also a reseller!\n";
 }
@@ -252,8 +268,7 @@ if ($TotalARecords > 1) {
 	foreach $ResolvedIP(@ResolvedIP) { 
 		chomp($ResolvedIP);
 		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
-	#	&is_mod_rpaf_installed;
-		print CYAN "\t \\_" . $ResolvedIP . " " . $ResolvesToDetail . "\n";
+		print CYAN "\t \\_" . $ResolvedIP . " " . RED $ResolvesToDetail . "\n";
 	}
 }
 else {    ##  ONLY 1 A RECORED RETURNED.
@@ -265,9 +280,14 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 	}
 	else { 
 		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
-		#	&is_mod_rpaf_installed;
-		print CYAN $ResolvedIP . " " . $ResolvesToDetail . "\n";
+		print CYAN $ResolvedIP . " " . RED $ResolvesToDetail; 
 	}
+	my $Is_IP_OnServer = qx[ ifconfig | grep $ResolvedIP ];
+	if (!($Is_IP_OnServer)) { 
+		print RED " [IP is not on this server]";
+		$defaultsite=1;
+	}
+	print "\n";
 }
 
 if ($defaultsite) { 
@@ -384,7 +404,6 @@ if ($listdbs or $all) {
 	my $SIZEOFDB="";
 	my $DBNAME="";
 	my $DBSIZE="";
-	&border;
 	@USERDBS=qx[ echo "show databases like '$username%'" | mysql ];
 	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
@@ -409,7 +428,7 @@ if ($listdbs or $all) {
 				chomp($DBNAME);
 				chomp($DBSIZE);
 				$DBSIZE=sprintf("%.2f", $DBSIZE);
-				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_WHITE $DBSIZE . WHITE "MB)\n";
+				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_BLACK $DBSIZE . WHITE "MB)\n";
 			}
 		}
 	}
@@ -465,7 +484,7 @@ if ($listssls or $all) {
 	closedir(SSL);
 	foreach $SSLFILE(@SSLFOLDER) {
    	chomp($SSLFILE);
-   	if ($SSLFILE =~ m/_SSL/) { 
+   	if ($SSLFILE =~ m/_SSL$/) { 
       	($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
       	push(@SSLDATA,"$SSLDOMAIN"); 
    	}    
@@ -480,7 +499,6 @@ if ($listssls or $all) {
 		}
 	}
 	else { 
-		&border;
 		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	&border;
@@ -510,11 +528,13 @@ sub Usage {
 }
 
 sub border { 
-	print BRIGHT_BLUE ON_BLACK "==============================================================================================\n";
+	print MAGENTA ON_BLACK "==============================================================================================\n";
+	return;
 }
 
 sub smborder { 
 	print MAGENTA "----------------------------------------------------------------------------------------------\n";
+	return;
 }
 
 sub FindMainDomain() {
@@ -608,6 +628,9 @@ sub check_resolved_ip {
 	if ($IS_NAT) { 
 		$RetVal = " NAT detected ($IP2CHK -> $IS_NAT)";
 	}
-	#	&is_mod_rpaf_installed;
 	return $RetVal;
+}
+
+
+sub cruft_check { 
 }
