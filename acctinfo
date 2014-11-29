@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.1";
+my $VERSION="2.2";
 
 use File::stat;
 use Getopt::Long;
@@ -610,27 +610,31 @@ sub check_for_nat {
 	}
 }
 
-sub check_resolved_ip { 
-	my $IP2CHK = $_[0];
-	my $RetVal="";
-	if ($IP2CHK eq $IPADDR) {
-		$RetVal = " [SAME]";
-	}
-	else { 
-		$defaultsite=1;
-	}
-	my $IS_CLOUDFLARE = &check_cloudflare_ips($IP2CHK);
-	if ($IS_CLOUDFLARE) { 
-		$RetVal = " <-- CloudFlare DNS";
-		$defaultsite=1;
-	}
-	my $IS_NAT = &check_for_nat($IP2CHK);
-	if ($IS_NAT) { 
-		$RetVal = " NAT detected ($IP2CHK -> $IS_NAT)";
-	}
-	return $RetVal;
+sub check_resolved_ip {
+   my $IP2CHK = $_[0];
+   my $RetVal="";
+   if ($IP2CHK eq $IPADDR) {
+      $RetVal = " [SAME]";
+   }
+   else {
+      $defaultsite=1;
+   }
+   my $IS_CLOUDFLARE = &check_cloudflare_ips($IP2CHK);
+   if ($IS_CLOUDFLARE) {
+      $RetVal = " <-- CloudFlare DNS";
+      $defaultsite=1;
+   }
+   my $IS_NAT = &check_for_nat($IP2CHK);
+   if ($IS_NAT) {
+      $RetVal = " NAT detected ($IS_NAT => $IP2CHK)";
+      print "DEBUG: IS_NAT = $IS_NAT - IP2CHK = $IPADDR\n";
+      if ($IS_NAT eq $IPADDR) {
+         $RetVal = $RetVal .= " [SAME]";
+         $defaultsite=0;
+      }
+   }
+   return $RetVal;
 }
-
 
 sub cruft_check { 
 }
