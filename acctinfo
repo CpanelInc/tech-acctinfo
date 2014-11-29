@@ -428,7 +428,7 @@ if ($listdbs or $all) {
 				chomp($DBNAME);
 				chomp($DBSIZE);
 				$DBSIZE=sprintf("%.2f", $DBSIZE);
-				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_BLACK $DBSIZE . WHITE "MB)\n";
+				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_BLACK $DBSIZE . WHITE " MB)\n";
 			}
 		}
 	}
