@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.2";
+my $VERSION="2.3";
 
 use File::stat;
 use Getopt::Long;
@@ -281,11 +281,6 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 	else { 
 		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
 		print CYAN $ResolvedIP . " " . RED $ResolvesToDetail; 
-	}
-	my $Is_IP_OnServer = qx[ ifconfig | grep $ResolvedIP ];
-	if (!($Is_IP_OnServer)) { 
-		print RED " [IP is not on this server]";
-		$defaultsite=1;
 	}
 	print "\n";
 }
@@ -607,6 +602,9 @@ sub check_for_nat {
 		if ($outsideIP eq $chkIP) { 
 			return $insideIP;
 		}
+      if ($insideIP eq $chkIP) { 
+         return $outsideIP;
+      }
 	}
 }
 
@@ -619,6 +617,11 @@ sub check_resolved_ip {
    else {
       $defaultsite=1;
    }
+	my $Is_IP_OnServer = qx[ ifconfig | grep '$IP2CHK' ];
+	if (!($Is_IP_OnServer)) { 
+		$RetVal = $RetVal .= " [Not on this server]";
+		$defaultsite=1;
+	}
    my $IS_CLOUDFLARE = &check_cloudflare_ips($IP2CHK);
    if ($IS_CLOUDFLARE) {
       $RetVal = " <-- CloudFlare DNS";
@@ -627,12 +630,16 @@ sub check_resolved_ip {
    my $IS_NAT = &check_for_nat($IP2CHK);
    if ($IS_NAT) {
       $RetVal = " NAT detected ($IS_NAT => $IP2CHK)";
-      print "DEBUG: IS_NAT = $IS_NAT - IP2CHK = $IPADDR\n";
       if ($IS_NAT eq $IPADDR) {
          $RetVal = $RetVal .= " [SAME]";
          $defaultsite=0;
       }
-   }
+	}
+	my $Is_IP_OnServer = qx[ ifconfig | grep '$IS_NAT' ];
+	if (!($Is_IP_OnServer)) { 
+		$RetVal = $RetVal .= " [Not on this server]";
+		$defaultsite=1;
+	}
    return $RetVal;
 }
 
