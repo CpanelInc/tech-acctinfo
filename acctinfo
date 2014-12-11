@@ -201,6 +201,9 @@ foreach $RESELLER(@ALL_RESELLERS) {
 		closedir(ACCTS);
 		foreach $vcu_account(@LISTOFACCTS) { 
 			chomp($vcu_account);
+         if ($vcu_account =~ m/HASH/) { 
+            next;
+         }
 			$FOUND="";
 			$FOUND=qx[ grep 'OWNER=$username' /var/cpanel/users/$vcu_account ];
 			if ($FOUND) { 
