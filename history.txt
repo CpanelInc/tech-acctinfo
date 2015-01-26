@@ -1,3 +1,7 @@
+V2.4  -  Fixed issue with it occasionally getting the wrong real home directory from /etc/passwd
+         Fixed issue with [Not on this server] IP resolution so that it does not display 
+         default webpage cgi
+
 V2.3  -  Fixed resolved IP check to include NAT check, CloudFlare DNS check, and whether IP address
          is on the server or not.  
 
