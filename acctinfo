@@ -173,12 +173,13 @@ if ($cruft) {
 my $PACKAGE=$user_conf->{'PLAN'};
 my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
+my @ResolvedIP=undef;
 if ($IS_USERNAME) { 
    # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-   my @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+   @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
 }
 else { 
-   my @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
+   @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
 }
 my $ResolvedIP;
 my $IPTYPE="";
