@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.1";
+my $VERSION="2.4.2";
 
 use File::stat;
 use Getopt::Long;
@@ -235,7 +235,7 @@ foreach $RESELLER(@ALL_RESELLERS) {
 
 my $TOTAL_DOMAINS=qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
-print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total domains on (" . GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
+print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total accounts on (" . GREEN ON_BLACK $HOSTNAME . WHITE ").\n";
 if ($IS_USERNAME) { 
 	print "\n";
 }
@@ -298,7 +298,6 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 	chomp($ResolvedIP);
 	if ($TotalARecords == 0 and $ResolvedIP eq "") { 
 		print "DOES NOT RESOLVE!\n";
-		$defaultsite=1;
 	}
 	else { 
 		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
@@ -308,7 +307,7 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 }
 
 if ($defaultsite) { 
-	print YELLOW "Seeing defaultwebpage.cgi? - This may be why!\n";
+	print YELLOW "Not seeing the site you're expecting (or defaultwebpage.cgi)? - This may be why!\n";
 }
 
 # Last Login IP
@@ -659,7 +658,6 @@ sub check_resolved_ip {
 	my $Is_IP_OnServer = qx[ ifconfig | grep '$IS_NAT' ];
 	if (!($Is_IP_OnServer)) { 
 		$RetVal = $RetVal .= " [Not on this server]";
-		$defaultsite=1;
 	}
    return $RetVal;
 }
