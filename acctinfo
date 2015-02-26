@@ -11,16 +11,17 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.2";
+my $VERSION="2.4.4";
 
 use File::stat;
 use Getopt::Long;
+use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
-use Cpanel::Sys::Hostname       			();
+use Cpanel::Sys::Hostname				();
 use Cpanel::Config::LoadCpUserFile 		();
 use Cpanel::Config::Users          		();
 use Cpanel::Config::LoadWwwAcctConf 	();
-use Cpanel::ResellerFunctions				();
+use Cpanel::ResellerFunctions			();
 use Cpanel::Usage                   	();
 
 $Term::ANSIColor::AUTORESET = 1;
@@ -46,7 +47,7 @@ GetOptions(
 	'listreseller' => \$listreseller,
 	'all' => \$all,
 	'help' => \$helpME,
-   'cruft' => \$cruft,
+	'cruft' => \$cruft,
 	'q' => \$clearscreen,
 );
 
@@ -95,9 +96,9 @@ if (!($MAINDOMAIN)) {
 }
 # If both variables are still empty, neither the username nor the domain name were found!
 if ($MAINDOMAIN eq "" and $username eq "") { 
-   if ($cruft) { 
-      &cruft_check;
-   }
+	if ($cruft) { 
+		&cruft_check;
+	}
 	print "Error - $QUERY not found on $HOSTNAME\n";
 	# Add message here to try using the --cruft switch (to be added later).
 	exit;
@@ -166,21 +167,17 @@ my $subcnt=@SUBDOMAINS;
 my $addoncnt=@ADDONDOMAINS;
 
 if ($cruft) { 
-   &cruft_check;
+	&cruft_check;
 }
 
 # We already have the $user_conf hash variable.
 my $PACKAGE=$user_conf->{'PLAN'};
+my $THEME=$user_conf->{'RS'};
 my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
-my @ResolvedIP=undef;
-#if ($IS_USERNAME) { 
-   # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-   @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
-#}
-#else { 
-#   @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
-#}
+# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
+#my @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+my @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
 my $ResolvedIP;
 my $IPTYPE="";
 if ($IPADDR eq $SERVER_IP) {
@@ -245,15 +242,17 @@ else {
 # Get home directory from /etc/passwd
 my @PASSWDS=undef;
 my $RealHome="";
+my $RealShell="";
 my $passline="";
 open(PASSWD,"/etc/passwd");
 @PASSWDS=<PASSWD>;
 close(PASSWD);
 foreach $passline(@PASSWDS) { 
 	chomp($passline);
-	if ($passline =~ m/$username/) { 
+	if ($passline =~ m/\b$username\b/) { 
 		($RealHome)=(split(/:/,$passline))[5];
-      last;
+		($RealShell)=(split(/:/,$passline))[6];
+		last;
 	}
 }
 
@@ -276,11 +275,13 @@ if ($Is_Reseller) {
 print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
 print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
 print GREEN "$IS_SUB\n" unless($IS_SUB eq "");
+print WHITE "Shell: " . CYAN $RealShell . "\n";
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
+print WHITE "Theme: " . CYAN $THEME . "\n";
 my $IS_IP_ON_SERVER = qx[ ifconfig | grep $IPADDR ];
 my $NOTONSERVER="";
-if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER=" - [ Not on this server ]"; }
-print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") $NOTONSERVER\n";
+if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER="[ Not on this server ]"; }
+print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") - $NOTONSERVER\n";
 my $defaultsite=0;
 my $TotalARecords = @ResolvedIP;
 my $ResolvesToDetail="";
@@ -298,6 +299,7 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 	chomp($ResolvedIP);
 	if ($TotalARecords == 0 and $ResolvedIP eq "") { 
 		print "DOES NOT RESOLVE!\n";
+		$defaultsite=1;
 	}
 	else { 
 		$ResolvesToDetail = &check_resolved_ip($ResolvedIP);
@@ -327,11 +329,11 @@ if (-e("/var/cpanel/suspended/$username")) {
 }
 print WHITE "Suspended: ";
 if ($SUSP) {
-   print RED "YES!"; 
+	print RED "YES!"; 
 	print WHITE " - Reason: " . CYAN $REASON unless($REASON eq "");
 }
 else {
-   print GREEN "No";
+	print GREEN "No";
 }
 print "\n";
 my $parkcnt=@PARKEDDOMAINS;
@@ -420,7 +422,9 @@ if ($listdbs or $all) {
 	my $SIZEOFDB="";
 	my $DBNAME="";
 	my $DBSIZE="";
-	@USERDBS=qx[ echo "show databases like '$username%'" | mysql ];
+	# MySQL username can only be the first 8 characters of $usrename
+	my $first8=substr($username,0,8);
+	@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
 	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
 	if ($DBCNT == 0) {
@@ -641,6 +645,7 @@ sub check_resolved_ip {
 	my $Is_IP_OnServer = qx[ ifconfig | grep '$IP2CHK' ];
 	if (!($Is_IP_OnServer)) { 
 		$RetVal = $RetVal .= " [Not on this server]";
+		$defaultsite=1;
 	}
    my $IS_CLOUDFLARE = &check_cloudflare_ips($IP2CHK);
    if ($IS_CLOUDFLARE) {
@@ -658,30 +663,205 @@ sub check_resolved_ip {
 	my $Is_IP_OnServer = qx[ ifconfig | grep '$IS_NAT' ];
 	if (!($Is_IP_OnServer)) { 
 		$RetVal = $RetVal .= " [Not on this server]";
+		$defaultsite=1;
 	}
    return $RetVal;
 }
 
-sub cruft_check() { 
-   # NOT HAPPY WITH THIS YET.  Going to write something better.  This is an extremely
-   # rough draft.  
-   # Turn off buffering
-   $|                          = 1;
-   if ($IS_USERNAME) { 
-      print "$DOMAIN is a username - checking...\n";
-      my ($name, $passwd, $uid, $gid, $quota, $comment, $gcos, $dir, $shell) = getpwnam($DOMAIN);
-      print "System user (/etc/passwd) - ";
-      if ($name) { print "[OK]\n"; } else { print "[MISSING]\n"; }
-      sleep(1);
-      print "/etc/group - ";
-      if(qx[ grep '$gid' /etc/group ]) { print "[OK]\n"; } else { print "[MISSING]\n"; }
-      sleep(1);
-      print "Home Directory - ";
-      if (-e($dir)) { print "[OK]\n"; } else { print "[MISSING]\n"; }
-      sleep(1);
-   }
-   else {
-      print "$DOMAIN is a domain name - checking...\n";
-   }
-   exit;
+sub cruft_check { 
+	system("clear");
+	# Turn off buffering
+	$| = 1;
+	&border;
+	print CYAN "CRUFT CHECK\n";
+	&border;
+	my $maxwidth=25;
+	my $file2search="";
+	my $TheStatus="";
+	my $spacer=0;
+	my $len=0;
+	my $filestatus="";
+	my $TrueUserLine = "";
+	my $RealOwner = "";
+	my $RealDomain = "";
+	my $termdate="";
+	my @temp=undef;
+
+	# Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
+	print BLUE "From your query of " . GREEN $QUERY . BLUE " I have determined:\n";
+	my $InAccountingLog = "";
+	open(ACCOUNTING,"/var/cpanel/accounting.log");
+	my @ACCOUNTING=<ACCOUNTING>;
+	close(ACCOUNTING);
+	my $isActive=0;
+	my $isTerminated=0;
+	foreach $InAccountingLog(@ACCOUNTING) { 
+		if ($InAccountingLog =~ m{ $QUERY }xms) { 
+			if ($InAccountingLog =~ m{ CREATE }xms) { 
+				@temp = split(/:/,$InAccountingLog);
+				chomp($MAINDOMAIN = $temp[-3]);
+				chomp($username = $temp[-1]);
+				$isActive=1;
+				$isTerminated=0;
+			}
+		}
+	}
+	foreach $InAccountingLog(@ACCOUNTING) { 
+		if ($InAccountingLog =~ m{ $QUERY }xms) { 
+			if ($InAccountingLog =~ m{ REMOVE }xms) { 
+				$isTerminated=1;
+				$isActive=0;
+				$termdate=@temp[0].":".@temp[1].":".@temp[2];
+			}
+		}
+	}
+	if ($isActive) { 
+		print "$MAINDOMAIN ($username) is an active account (according to /var/cpanel/accounting.log)\n";
+	}
+	if ($isTerminated) { 
+		print "$MAINDOMAIN ($username) was terminated on $termdate\n";
+	}
+	# END OF ACCOUNTING LOG CHECK
+
+	if (!($MAINDOMAIN) and !($username)) { 
+		print "No data found for your query of: $QUERY\n";
+		exit;
+	}
+	else { 
+		my $MAINDOMAIN=$RealDomain;
+		my $username=$RealOwner;
+	}
+
+	#print "DEBUG: MAINDOMAIN = $MAINDOMAIN\n";
+	#print "DEBUG: username = $username\n";
+
+	&smborder;
+
+	my @FILES2SEARCH=qw(
+		/etc/passwd 
+		/etc/group 
+		/etc/shadow 
+		/etc/gshadow 
+		/etc/quota.conf 
+		/etc/dbowners 
+		/etc/userdomains 
+		/etc/trueuserdomains 
+		/etc/userdatadomains 
+		/etc/named.conf
+		/etc/domainusers
+		/etc/trueuserowners
+		/etc/localdomains
+		/etc/remotedomains
+		/etc/demousers
+		/etc/demoids
+		/etc/demodomains
+		/usr/local/apache/conf/httpd.conf
+	);
+	foreach $file2search(@FILES2SEARCH) { 
+		chomp($file2search);
+		if (!(-s($file2search))) { 
+			next;
+		}
+		$filestatus=&check_file_existance($file2search,$username);
+		if (!($filestatus)) { 
+			$filestatus=&check_file_existance($file2search,$MAINDOMAIN);
+		}
+		if ($filestatus) { $filestatus = GREEN "[EXISTS]"; } else { $filestatus = RED "[MISSING]"; }
+		&print_output($file2search,$filestatus);
+	}
+	# Check for home directory and others to see if they exist
+	# Check Home Directory
+	my $dirstatus=&check_dir("$HOMEDIR/$username");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("$HOMEDIR/$username",$dirstatus);
+	# Check /var/cpanel/userdata/$username
+	my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("/var/cpanel/userdata/$username",$dirstatus);
+	# Check /var/cpanel/users/$username
+	my $dirstatus=&check_dir("/var/cpanel/users/$username");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("/var/cpanel/users/$username",$dirstatus);
+	# Check /var/named/$MAINDOMAIN.db file
+	my $dirstatus=&check_dir("/var/named/$MAINDOMAIN.db");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("/var/named/$MAINDOMAIN.db",$dirstatus);
+	# Check MySQL users table.   - Thanks Blaine
+	my $first8 = substr($username,0,8);
+	my @results=undef;
+    my $check_mysql_users = Cpanel::MysqlUtils::sqlcmd("SELECT User from mysql.user WHERE User REGEXP \"^$first8\$\"");
+    if ($check_mysql_users =~ /^ERROR/) {
+        print "$check_mysql_users\n";
+        exit;
+    }
+    my @mysql_users = split ("\n", "$check_mysql_users");
+    if (@mysql_users) {
+        my %hash = map {$_, 1} @mysql_users;
+        @mysql_users = keys %hash;
+        foreach (@mysql_users) {
+            push (@results, ('MySQL user - ' . $_));
+        }
+    }
+    my $var_cpanel_databases_users = '/var/cpanel/databases/users.db';
+    open (my $fh, '<', $var_cpanel_databases_users) or warn "could not open $var_cpanel_databases_users\n";
+        foreach (<$fh>) {
+            if (/$first8/) {
+                push (@results, $var_cpanel_databases_users);
+                last;
+            }
+        }
+    close $fh;
+	my $result="";
+	foreach $result(@results) { 
+		print "$result\n";
+	}
+
+	&border;
+	print "\n";
+	exit;
+}
+
+sub check_file_existance { 
+	my $TheFile = $_[0];
+	my $TheSearchString = $_[1];
+	my @TheFileData = undef;
+	my $DataLine = "";
+	my $FoundLine=0;
+	if (-e($TheFile)) { 
+		# File exists, open it and read into array
+	 	open(TheFile,"$TheFile");
+		@TheFileData=<TheFile>;
+		close(TheFile);
+		foreach $DataLine(@TheFileData) { 
+			chomp($DataLine);
+			if ($DataLine =~ m/\b$TheSearchString\b/) { 
+				$FoundLine=1;
+				last;
+			}
+		}
+		if ($FoundLine) { return 1; } else { return 0; }
+	}
+}
+
+sub print_output { 
+	my $DisplayName=$_[0];
+	my $TheStatus=$_[1];
+	my $maxwidth=25;
+	my $spacer=0;
+	my $len=length($DisplayName);
+	$spacer=($maxwidth-$len)+50;
+	print YELLOW "$DisplayName";
+	printf "%".$spacer."s",$TheStatus;	
+	print "\n";
+	select(undef, undef, undef, 0.25);
+}
+
+sub check_dir() {
+	my $Dir2Check=$_[0];
+	if (-e($Dir2Check)) { 
+		return 1;
+	}
+	else { 
+		return 0;
+	}
 }
