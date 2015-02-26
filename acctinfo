@@ -531,19 +531,19 @@ sub Usage {
    print WHITE "\nUsage: " . CYAN "acctinfo" . WHITE " [options] domainname.tld or cPUsername [options]\n\n";
    print YELLOW "Examples: \n" . CYAN "acctinfo" . WHITE " --listdbs somedomain.net\n";
    print GREEN "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n";
-   print CYAN $0 . WHITE " --listsubs cptestdo\n";
+   print CYAN "acctinfo" . WHITE " --listsubs cptestdo\n";
    print GREEN "\t Lists all sub domains under the cptestdo user name.\n\n";
-   print CYAN $0 . WHITE " --listaddons cptestdomain.net\n";
+   print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net\n";
    print GREEN "\t Lists all addon domains under the cptestdomain.net domain name.\n\n";
-   print CYAN $0 . WHITE " --listparked cptestdomain.net\n";
+   print CYAN "acctinfo" . WHITE " --listparked cptestdomain.net\n";
    print GREEN "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
-   print CYAN $0 . WHITE " --listreseller cptestdo\n";
+   print CYAN "acctinfo" . WHITE " --listreseller cptestdo\n";
    print GREEN "\t Lists reseller information and domains under the cptestdo user name.\n\n";
-   print CYAN $0 . WHITE " --listssls cptestdomain.net\n";
+   print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
    print GREEN "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
-   print CYAN $0 . WHITE " --all cptestdomain.net\n";
+   print CYAN "acctinfo" . WHITE " --all cptestdomain.net\n";
    print GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n";
-   print CYAN $0 . WHITE " --help\n";
+   print CYAN "acctinfo" . WHITE " --help\n";
    print GREEN "\t Shows this usage information. (NOTE: [options] can go before or after domain/username).\n\n";
 	exit;
 }
