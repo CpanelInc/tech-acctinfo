@@ -528,8 +528,8 @@ if ($listssls or $all) {
 exit;
 
 sub Usage { 
-   print WHITE "\nUsage: " . CYAN acctinfo . WHITE " [options] domainname.tld or cPUsername [options]\n\n";
-   print YELLOW "Examples: \n" . CYAN acctinfo . WHITE " --listdbs somedomain.net\n";
+   print WHITE "\nUsage: " . CYAN "acctinfo" . WHITE " [options] domainname.tld or cPUsername [options]\n\n";
+   print YELLOW "Examples: \n" . CYAN "acctinfo" . WHITE " --listdbs somedomain.net\n";
    print GREEN "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n";
    print CYAN $0 . WHITE " --listsubs cptestdo\n";
    print GREEN "\t Lists all sub domains under the cptestdo user name.\n\n";

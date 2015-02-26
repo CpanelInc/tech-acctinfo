@@ -1,4 +1,6 @@
 V2.4.2-  Started cruft check routine - almost done.  
+V2.4.2-  Added border to end of main output.
+V2.4.2-  Fixed Usage: display ($0 was sometimes returning /dev/fd/63 instead of acctinfo)
 V2.4.2-  Added theme and shell information to output.
 V2.4  -  Fixed issue with it occasionally getting the wrong real home directory from /etc/passwd
          Fixed issue with [Not on this server] IP resolution so that it does not display 
