@@ -177,13 +177,13 @@ my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
 my @ResolvedIP;
 my $ResolvedIP;
-if ($IS_USERNAME) { 
+#if ($IS_USERNAME) { 
    # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
    my @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
-}
-else {  ## a domain name was entered so we should resolve the IP of that. 
-   my @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
-}
+#}
+#else {  ## a domain name was entered so we should resolve the IP of that. 
+#   my @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
+#}
 my $IPTYPE="";
 if ($IPADDR eq $SERVER_IP) {
 	$IPTYPE="shared";
