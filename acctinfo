@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.5";
+my $VERSION="2.4.6";
 
 use File::stat;
 use Getopt::Long;
@@ -100,7 +100,7 @@ if ($MAINDOMAIN eq "" and $username eq "") {
 		&cruft_check;
 	}
 	print "Error - $QUERY not found on $HOSTNAME\n";
-	# Add message here to try using the --cruft switch (to be added later).
+	print "Try using the --cruft switch (acctinfo $QUERY --cruft)\n";
 	exit;
 }
 
@@ -165,6 +165,7 @@ shift @ADDONDOMAINS;
 shift @PARKEDDOMAINS;
 my $subcnt=@SUBDOMAINS;
 my $addoncnt=@ADDONDOMAINS;
+my $parkcnt=@PARKEDDOMAINS;
 
 if ($cruft) { 
 	&cruft_check;
@@ -177,13 +178,15 @@ my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
 my @ResolvedIP;
 my $ResolvedIP;
-#if ($IS_USERNAME) { 
-   # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-   my @ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
-#}
-#else {  ## a domain name was entered so we should resolve the IP of that. 
-#   my @ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
-#}
+#print "DEBUG: MAINDOMAIN=$MAINDOMAIN\n";
+#print "DEBUG: DOMAIN = $DOMAIN\n";
+if ($IS_USERNAME) { 
+	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
+	@ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+}
+else {  ## a domain name was entered so we should resolve the IP of that. 
+	@ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
+}
 my $IPTYPE="";
 if ($IPADDR eq $SERVER_IP) {
 	$IPTYPE="shared";
@@ -341,7 +344,6 @@ else {
 	print GREEN "No";
 }
 print "\n";
-my $parkcnt=@PARKEDDOMAINS;
 print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "PARKED: " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
 &border;
 exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller);
@@ -680,6 +682,7 @@ sub cruft_check {
 	$| = 1;
 	&border;
 	print CYAN "CRUFT CHECK\n";
+#	print "DEBUG: addoncnt=$addoncnt - subcnt=$subcnt - parkcnt=$parkcnt\n";
 	&border;
 	my $maxwidth=25;
 	my $file2search="";
@@ -688,59 +691,89 @@ sub cruft_check {
 	my $len=0;
 	my $filestatus="";
 	my $TrueUserLine = "";
-	my $RealOwner = "";
-	my $RealDomain = "";
 	my $termdate="";
 	my @temp=undef;
 
 	# Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
 	print BLUE "From your query of " . GREEN $QUERY . BLUE " I have determined:\n";
-	my $InAccountingLog = "";
+	my $isActive;
+	my $is_acct;
+	my $check_for;
 	open(ACCOUNTING,"/var/cpanel/accounting.log");
-	my @ACCOUNTING=<ACCOUNTING>;
-	close(ACCOUNTING);
-	my $isActive=0;
-	my $isTerminated=0;
-	foreach $InAccountingLog(@ACCOUNTING) { 
-		if ($InAccountingLog =~ m{ $QUERY }xms) { 
-			if ($InAccountingLog =~ m{ CREATE }xms) { 
-				@temp = split(/:/,$InAccountingLog);
-				chomp($MAINDOMAIN = $temp[-3]);
-				chomp($username = $temp[-1]);
-				$isActive=1;
-				$isTerminated=0;
-			}
+	foreach (<ACCOUNTING>) { 
+		@temp = split(/:/);
+		if ($IS_USERNAME) { 
+			$check_for = ':' . $QUERY . '$';
 		}
-	}
-	foreach $InAccountingLog(@ACCOUNTING) { 
-		if ($InAccountingLog =~ m{ $QUERY }xms) { 
-			if ($InAccountingLog =~ m{ REMOVE }xms) { 
-				$isTerminated=1;
-				$isActive=0;
+		else { 
+			$check_for = ':' . $QUERY . ':';
+		}
+		if (/$check_for/) { 
+			$is_acct = 1;
+			if (/CREATE/) { 
+				$isActive = 1;
+				chomp($username = $temp[-1]);
+				chomp($MAINDOMAIN = $temp[-3]);
+			}
+			if (/REMOVE/) { 
+				chomp($username = $temp[-1]);
+				chomp($MAINDOMAIN = $temp[-2]);
+				$isActive = 0;
+				@temp = ();
+				@temp = split(/:/);
 				$termdate=@temp[0].":".@temp[1].":".@temp[2];
 			}
 		}
 	}
+	close(ACCOUNTING);	
+	
 	if ($isActive) { 
 		print "$MAINDOMAIN ($username) is an active account (according to /var/cpanel/accounting.log)\n";
 	}
-	if ($isTerminated) { 
+	if ($is_acct and !$isActive) { 
 		print "$MAINDOMAIN ($username) was terminated on $termdate\n";
 	}
 	# END OF ACCOUNTING LOG CHECK
 
+	my $useQuery = 0;
 	if (!($MAINDOMAIN) and !($username)) { 
-		print "No data found for your query of: $QUERY\n";
-		exit;
+		print "No data found for your query of: $QUERY (in /var/cpanel/accounting.log)\n";
 	}
-	else { 
-		my $MAINDOMAIN=$RealDomain;
-		my $username=$RealOwner;
+	if (!$isActive) { 
+		my $isAddon;
+		my $isSub;
+		my $isParked;
+		$isAddon = qx[ grep '$QUERY' /etc/userdatadomains | grep '==addon==' ];
+		if ($isAddon) { 
+			($username) = (split(/\s+/,$isAddon))[1];
+			($username) = (split(/==/,$username));
+			($isAddon) = (split(/:/,$isAddon));
+			print "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
+		}
+		$isSub = qx[ grep '$QUERY' /etc/userdatadomains | grep '==sub==' ];
+		if ($isSub) { 
+			($username) = (split(/\s+/,$isSub))[1];
+			($username) = (split(/==/,$username));
+			($isSub) = (split(/:/,$isSub));
+			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n";
+		}
+		$isParked = qx[ grep '$QUERY' /etc/userdatadomains | grep '==parked==' ];
+		if ($isParked) { 
+			($username) = (split(/\s+/,$isParked))[1];
+			($username) = (split(/==/,$username));
+			($isParked) = (split(/:/,$isParked));
+			print "$QUERY has an entry in /etc/userdatadomains asa Parked Domain $isParked\n";
+		}
+		($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
+		$MAINDOMAIN =~ s/://g;
+		if ($MAINDOMAIN and $username) { 
+			print "Checking main account $MAINDOMAIN ($username) instead...\n";
+			$useQuery=0;
+		}
+		else { 
+			$useQuery=1;
+		}
 	}
-
-	#print "DEBUG: MAINDOMAIN = $MAINDOMAIN\n";
-	#print "DEBUG: username = $username\n";
-
 	&smborder;
 
 	my @FILES2SEARCH=qw(
@@ -762,14 +795,23 @@ sub cruft_check {
 		/etc/demoids
 		/etc/demodomains
 		/usr/local/apache/conf/httpd.conf
+		/var/cpanel/databases/users.db
+		/var/cpanel/databases/dbindex.db
 	);
+
 	foreach $file2search(@FILES2SEARCH) { 
 		chomp($file2search);
 		if (!(-s($file2search))) { 
 			next;
 		}
-		$filestatus=&check_file_existance($file2search,$username);
-		if (!($filestatus)) { 
+		#$filestatus=&check_file_existance($file2search,$username);
+		if ($useQuery) { 
+			$filestatus=&check_file_existance($file2search,$QUERY);
+		}
+		else { 	
+			$filestatus=&check_file_existance($file2search,$username);
+		}
+		if (!($filestatus) and !$useQuery) { 
 			$filestatus=&check_file_existance($file2search,$MAINDOMAIN);
 		}
 		if ($filestatus) { $filestatus = GREEN "[EXISTS]"; } else { $filestatus = RED "[MISSING]"; }
@@ -792,36 +834,28 @@ sub cruft_check {
 	my $dirstatus=&check_dir("/var/named/$MAINDOMAIN.db");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/named/$MAINDOMAIN.db",$dirstatus);
-	# Check MySQL users table.   - Thanks Blaine
-	my $first8 = substr($username,0,8);
-	my @results=undef;
-    my $check_mysql_users = Cpanel::MysqlUtils::sqlcmd("SELECT User from mysql.user WHERE User REGEXP \"^$first8\$\"");
-    if ($check_mysql_users =~ /^ERROR/) {
-        print "$check_mysql_users\n";
-        exit;
-    }
-    my @mysql_users = split ("\n", "$check_mysql_users");
-    if (@mysql_users) {
-        my %hash = map {$_, 1} @mysql_users;
-        @mysql_users = keys %hash;
-        foreach (@mysql_users) {
-            push (@results, ('MySQL user - ' . $_));
-        }
-    }
-    my $var_cpanel_databases_users = '/var/cpanel/databases/users.db';
-    open (my $fh, '<', $var_cpanel_databases_users) or warn "could not open $var_cpanel_databases_users\n";
-        foreach (<$fh>) {
-            if (/$first8/) {
-                push (@results, $var_cpanel_databases_users);
-                last;
-            }
-        }
-    close $fh;
-	my $result="";
-	foreach $result(@results) { 
-		print "$result\n";
+	# Check MySQL users table. 
+	my @MySQLUsers = undef;
+	my $MySQLUser;
+	my $first8;
+	if (length($username)>8) { 
+		$first8 = substr($username,0,8);
+		$first8="^".$first8;
 	}
-
+	else { 
+		$first8 = $username;
+		$first8="^".$first8."\$";
+	}
+	my @MySQLUsers=qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -B -N ];
+	my @MySQLUsersUnique = uniq(@MySQLUsers);
+	my $num=@MySQLUsersUnique;
+	if ($num > 0) {
+		print YELLOW "MySQL Users Found in MySQL.user table\n";
+		foreach $MySQLUser(@MySQLUsersUnique) { 
+			chomp($MySQLUser);
+			print WHITE "\t \\_ " . $MySQLUser . "\n";
+		}
+	}
 	&border;
 	print "\n";
 	exit;
@@ -870,4 +904,10 @@ sub check_dir() {
 	else { 
 		return 0;
 	}
+}
+
+
+sub uniq { 
+	my %seen;
+	grep !$seen{$_}++, @_;
 }
