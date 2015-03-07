@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.6";
+my $VERSION="2.4.7";
 
 use File::stat;
 use Getopt::Long;
@@ -178,13 +178,12 @@ my $IPADDR=$user_conf->{'IP'};
 my $STARTDATE=scalar localtime($user_conf->{'STARTDATE'});
 my @ResolvedIP;
 my $ResolvedIP;
-#print "DEBUG: MAINDOMAIN=$MAINDOMAIN\n";
-#print "DEBUG: DOMAIN = $DOMAIN\n";
 if ($IS_USERNAME) { 
 	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
 	@ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
 }
-else {  ## a domain name was entered so we should resolve the IP of that. 
+else {  
+	## a domain name was entered so we should resolve the IP of that instead. 
 	@ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
 }
 my $IPTYPE="";
@@ -292,6 +291,11 @@ if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER="[ Not configured on this server ]"; 
 print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") - $NOTONSERVER\n";
 my $defaultsite=0;
 my $TotalARecords = @ResolvedIP;
+my $ConnectionTimeout=0;
+if (@ResolvedIP[4] =~ m/no servers could be reached/ ) { 
+	$TotalARecords=0;
+	$ConnectionTimeout=1;
+}
 my $ResolvesToDetail="";
 print WHITE "Resolves to IP: ";
 if ($TotalARecords > 1) { 
@@ -305,6 +309,9 @@ if ($TotalARecords > 1) {
 else {    ##  ONLY 1 A RECORED RETURNED.
 	$ResolvedIP = @ResolvedIP[0];
 	chomp($ResolvedIP);
+	if ($ConnectionTimeout) { 
+		$ResolvedIP = ""; 
+	}
 	if ($TotalARecords == 0 and $ResolvedIP eq "") { 
 		print "DOES NOT RESOLVE!\n";
 		$defaultsite=1;
@@ -677,7 +684,7 @@ sub check_resolved_ip {
 }
 
 sub cruft_check { 
-	system("clear");
+#	system("clear");
 	# Turn off buffering
 	$| = 1;
 	&border;
