@@ -1,3 +1,4 @@
+V2.4.8-  Completed cruft check (Yay!) - and did a few more bug fixes.
 V2.4.7-  Fixed small bug when domain name can not resolve (it was displaying the dig output with connection timed out) 
 V2.4.6-  Continued on cruft check - still need to check postgresql databases
 V2.4.2-  Started cruft check routine - almost done.  
