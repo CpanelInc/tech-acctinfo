@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.8";
+my $VERSION="2.4.9";
 
 use File::stat;
 use Getopt::Long;
@@ -558,6 +558,8 @@ sub Usage {
    print GREEN "\t Lists reseller information and domains under the cptestdo user name.\n\n";
    print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
    print GREEN "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
+   print CYAN "acctinfo" . WHITE " --cruft cptestdomain.net\n";
+   print GREEN "\t Perform a cruft check on cptestdomain.net.\n\n";
    print CYAN "acctinfo" . WHITE " --all cptestdomain.net\n";
    print GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n";
    print CYAN "acctinfo" . WHITE " --help\n";
@@ -753,7 +755,6 @@ sub cruft_check {
 	my $useQuery = 0;
 	if (!($MAINDOMAIN) and !($username)) { 
 		print "No data found for your query of: $QUERY (in /var/cpanel/accounting.log)\n";
-		exit;
 	}
 	if (!$isActive) { 
 		my $isAddon;
@@ -778,7 +779,7 @@ sub cruft_check {
 			($username) = (split(/\s+/,$isParked))[1];
 			($username) = (split(/==/,$username));
 			($isParked) = (split(/:/,$isParked));
-			print "$QUERY has an entry in /etc/userdatadomains asa Parked Domain $isParked\n";
+			print "$QUERY has an entry in /etc/userdatadomains as a Parked Domain $isParked\n";
 		}
 		($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
 		$MAINDOMAIN =~ s/://g;
@@ -824,7 +825,6 @@ sub cruft_check {
 			&print_output($filestat,$fileskip);
 			next;
 		}
-		#$filestatus=&check_file_existance($file2search,$username);
 		if ($useQuery) { 
 			$filestatus=&check_file_existance($file2search,$QUERY);
 		}
