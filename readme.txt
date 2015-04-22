@@ -55,4 +55,6 @@ The following options are available:
 --all cptestdomain.net
    Lists all settings for the cptestdomain.net domain name. 
 
+--cruft cptestdo
+   Do a cruft check of all files for that user name (or domain name).  
 

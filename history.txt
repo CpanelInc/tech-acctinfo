@@ -1,3 +1,5 @@
+V2.4.10- Fixed empty string in cruft check that was sometimes causing missing data to show as
+         exists.  
 V2.4.9-  Removed exit from cruft check if no data found in /var/cpanel/accounting.log
          which would allow the cruft check to continue.
 V2.4.8-  Completed cruft check (Yay!) - and did a few more bug fixes.

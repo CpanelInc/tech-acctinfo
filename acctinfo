@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.9";
+my $VERSION="2.4.10";
 
 use File::stat;
 use Getopt::Long;
@@ -755,26 +755,32 @@ sub cruft_check {
 	my $useQuery = 0;
 	if (!($MAINDOMAIN) and !($username)) { 
 		print "No data found for your query of: $QUERY (in /var/cpanel/accounting.log)\n";
+		if ($IS_USERNAME) { 
+			$username = $QUERY;
+		}	
+		else { 
+			exit;
+		}
 	}
 	if (!$isActive) { 
 		my $isAddon;
 		my $isSub;
 		my $isParked;
-		$isAddon = qx[ grep '$QUERY' /etc/userdatadomains | grep '==addon==' ];
+		$isAddon = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==addon==' ];
 		if ($isAddon) { 
 			($username) = (split(/\s+/,$isAddon))[1];
 			($username) = (split(/==/,$username));
 			($isAddon) = (split(/:/,$isAddon));
 			print "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
 		}
-		$isSub = qx[ grep '$QUERY' /etc/userdatadomains | grep '==sub==' ];
+		$isSub = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==sub==' ];
 		if ($isSub) { 
 			($username) = (split(/\s+/,$isSub))[1];
 			($username) = (split(/==/,$username));
 			($isSub) = (split(/:/,$isSub));
 			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n";
 		}
-		$isParked = qx[ grep '$QUERY' /etc/userdatadomains | grep '==parked==' ];
+		$isParked = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==parked==' ];
 		if ($isParked) { 
 			($username) = (split(/\s+/,$isParked))[1];
 			($username) = (split(/==/,$username));
@@ -891,7 +897,7 @@ sub cruft_check {
 			my @postgres_users = split ("\n", "@check_postgres_users");
 			foreach (@postgres_users) {
 				chomp($_);
-				print WHITE "\t \\_ " . $_ . "\n";
+				print WHITE "\t \\_" . $_ . "\n";
 			}
 		}
 	}
