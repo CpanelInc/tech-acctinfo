@@ -11,7 +11,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.10";
+my $VERSION="2.4.11";
 
 use File::stat;
 use Getopt::Long;
@@ -20,9 +20,10 @@ use Term::ANSIColor qw(:constants);
 use Cpanel::Sys::Hostname				();
 use Cpanel::Config::LoadCpUserFile 		();
 use Cpanel::Config::Users          		();
-use Cpanel::Config::LoadWwwAcctConf 	();
+use Cpanel::Config::LoadWwwAcctConf		();
+use Cpanel::Config::LoadCpConf			();
 use Cpanel::ResellerFunctions			();
-use Cpanel::Usage                   	();
+use Cpanel::Usage                  		();
 
 $Term::ANSIColor::AUTORESET = 1;
 # Turn off buffering
@@ -65,6 +66,10 @@ my $conf = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
 my $HOMEDIR = $conf->{'HOMEDIR'};
 # NOTE: The above is the HOMEDIR variable in /etc/wwwacct.conf 
 my $SERVER_IP = $conf->{'ADDR'};
+my $cpconf = Cpanel::Config::LoadCpConf::loadcpconf();
+my $DBPrefix = $cpconf->{'database_prefix'};
+
+my ( $os_release, $os_ises ) = get_release_version();
 
 my $IS_USERNAME=1;
 
@@ -252,6 +257,8 @@ else {
 my @PASSWDS=undef;
 my $RealHome="";
 my $RealShell="";
+my $UID="";
+my $GID="";
 my $passline="";
 open(PASSWD,"/etc/passwd");
 @PASSWDS=<PASSWD>;
@@ -259,6 +266,8 @@ close(PASSWD);
 foreach $passline(@PASSWDS) { 
 	chomp($passline);
 	if ($passline =~ m/\b$username\b/) { 
+		($UID)=(split(/:/,$passline))[2];
+		($GID)=(split(/:/,$passline))[3];
 		($RealHome)=(split(/:/,$passline))[5];
 		($RealShell)=(split(/:/,$passline))[6];
 		last;
@@ -285,6 +294,17 @@ print GREEN "$IS_PARKED\n" unless($IS_PARKED eq "");
 print GREEN "$IS_ADDON\n" unless($IS_ADDON eq "");
 print GREEN "$IS_SUB\n" unless($IS_SUB eq "");
 print WHITE "Shell: " . CYAN $RealShell . "\n";
+
+print WHITE "UID/GID: " . CYAN $UID . "/" . $GID;
+if ( version_compare($os_release, qw( > 6.9 ))) { ;
+	if ($UID < 1000 or $GID < 1000) {
+		print RED " - WARNING! - UID/GID is less than 1000!\n";
+	}
+}
+else { 
+	print "\n";
+}
+
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
 print WHITE "Theme: " . CYAN $THEME . "\n";
 my $IS_IP_ON_SERVER = qx[ ifconfig | grep $IPADDR ];
@@ -441,33 +461,28 @@ if ($listdbs or $all) {
 	my $DBNAME="";
 	my $DBSIZE="";
 	# MySQL username can only be the first 8 characters of $usrename
-	my $first8=substr($username,0,8);
-	@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
-	splice(@USERDBS,0,1);
+	my $first8;
+	if ($DBPrefix) { 
+		$first8=substr($username,0,8);
+		@USERDBS=qx[ echo "select Db from mysql.db where User like '$first8%'" | mysql -BN ];
+	}
+	else { 
+		@USERDBS=qx[ echo "select Db from mysql.db where User = '$username'" | mysql -BN ];
+	}
+#	print "DEBUG: first8 = $first8\n";
+	#@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
+	#@USERDBS=qx[ echo "select Db from mysql.db where User = '$first8'" | mysql -BN ];
+#	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
 	if ($DBCNT == 0) {
 		print WHITE "No MySQL databases found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	}
 	else { 
-		print WHITE "The following MySQL databases can be found under: " . GREEN $username . "\n";
+		print WHITE "The following ($DBCNT) MySQL databases can be found under: " . GREEN $username . "\n";
 		foreach $USERDB(@USERDBS) {
 			chomp($USERDB);
-			@DBSIZE = qx[ echo "select table_schema, sum(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES where table_schema = '$USERDB' GROUP By table_schema;" | mysql ];
-			splice(@DBSIZE,0,1);
-			chomp(@DBSIZE);
-			my $num=@DBSIZE;
-			if ($num == 0) {
-				print YELLOW "\t \\_" . $USERDB . WHITE " has no tables.\n";
-				next;
-			}
-			foreach $SIZEOFDB(@DBSIZE) {
-				chomp($SIZEOFDB);
-				($DBNAME,$DBSIZE)=(split(/\s+/,$SIZEOFDB));
-				chomp($DBNAME);
-				chomp($DBSIZE);
-				$DBSIZE=sprintf("%.2f", $DBSIZE);
-				print YELLOW "\t \\_ " . $DBNAME . WHITE . " (" . GREEN ON_BLACK $DBSIZE . WHITE " MB)\n";
-			}
+			$USERDB =~ s/\\//g;
+			print YELLOW "\t \\_ " . $USERDB . "\n";
 		}
 	}
 	&smborder;
@@ -483,23 +498,23 @@ if ($listdbs or $all) {
 		   print WHITE "No PostGreSQL databases found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	   }
 	   else { 
-		   print WHITE "The following PostGreSQL databases can be found under: " . GREEN $username . "\n";
+		   print WHITE "The following ($PgDbCount) PostGreSQL databases can be found under: " . GREEN $username . "\n";
 		   my $pg_table="";
 		   my @PG_TABLES=undef;
 		   foreach $PgDb(@PSQLDBS) { 
 			   chomp($PgDb);
 			   $PgDb=substr($PgDb,1);
-			   $pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
-			   chomp($pg_table);
-			   chomp($pg_table);
-			   $pg_table =~ s/^\s+//;
-			   $pg_table =~ s/\s+/, /g;
-			   if ($pg_table eq "") { 
-				   print YELLOW "\t \\_" .  $PgDb . WHITE " has no tables\n";
-			   }
-			   else { 
+#			   $pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
+#			   chomp($pg_table);
+#			   chomp($pg_table);
+#			   $pg_table =~ s/^\s+//;
+#			   $pg_table =~ s/\s+/, /g;
+#			   if ($pg_table eq "") { 
+#				   print YELLOW "\t \\_" .  $PgDb . WHITE " has no tables\n";
+#			   }
+#			   else { 
 				   print YELLOW "\t \\_" .  $PgDb . "\n";
-			   }
+#			   }
 		   }
 	   }
    }
@@ -820,7 +835,6 @@ sub cruft_check {
 		/etc/demodomains
 		/usr/local/apache/conf/httpd.conf
 		/var/cpanel/databases/users.db
-		/var/cpanel/databases/dbindex.db
 	);
 
 	foreach $file2search(@FILES2SEARCH) { 
@@ -863,22 +877,48 @@ sub cruft_check {
 	my $dirstatus=&check_dir("/var/cpanel/databases/grants_$username.yaml");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/cpanel/databases/grants_$username.yaml",$dirstatus);
-	my $dirstatus=&check_dir("/var/cpanel/databases/$username.yaml");
+	my $CPVersion = `cat /usr/local/cpanel/version`;
+	my $yaml_json;
+	if ($CPVersion < 11.50) { 
+		$yaml_json="yaml";
+	}
+	else { 
+		$yaml_json="json";
+	}
+	my $dirstatus=&check_dir("/var/cpanel/databases/$username.$yaml_json");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/var/cpanel/databases/$username.yaml",$dirstatus);
+	&print_output("/var/cpanel/databases/$username.$yaml_json",$dirstatus);
+	# Move /var/cpanel/databases/dbindex.db check here - as of 11.50 it's a json file.
+	my $dbindex;
+	if ($CPVersion < 11.50) { 
+		$dbindex = "/var/cpanel/databases/dbindex.db";
+	}
+	else { 
+		$dbindex = "/var/cpanel/databases/dbindex.db.json";
+	}	
+	#my $dirstatus=&check_dir($dbindex);
+	my $dirstatus=&check_file_existance($dbindex,$username);
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output($dbindex,$dirstatus);
+
 	# Check MySQL users table. 
 	my @MySQLUsers = undef;
 	my $MySQLUser;
 	my $first8;
-	if (length($username)>8) { 
-		$first8 = substr($username,0,8);
-		$first8="^".$first8;
+	if ($DBPrefix) { 
+		if (length($username)>8) { 
+			$first8 = substr($username,0,8);
+			$first8="^".$first8;
+		}
+		else { 
+			$first8 = $username;
+			$first8="^".$first8."\$";
+		}
 	}
 	else { 
 		$first8 = $username;
-		$first8="^".$first8."\$";
 	}
-	my @MySQLUsers=qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -B -N ];
+	my @MySQLUsers=qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -BN ];
 	my @MySQLUsersUnique = uniq(@MySQLUsers);
 	my $num=@MySQLUsersUnique;
 	if ($num > 0) {
@@ -902,7 +942,7 @@ sub cruft_check {
 		}
 	}
 	else { 
-		print "\nPostGreSQL is not installed (or running)\n";
+      	print "\nPostGreSQL server is not installed (or running) on " . MAGENTA $HOSTNAME . "\n";
 	} 
 	&border;
 	print "\n";
@@ -934,7 +974,7 @@ sub check_file_existance {
 sub print_output { 
 	my $DisplayName=$_[0];
 	my $TheStatus=$_[1];
-	my $maxwidth=25;
+	my $maxwidth=30;
 	my $spacer=0;
 	my $len=length($DisplayName);
 	$spacer=($maxwidth-$len)+50;
@@ -959,3 +999,69 @@ sub uniq {
 	my %seen;
 	grep !$seen{$_}++, @_;
 }
+
+# Taken from ssp - Thanks to Chris Dillon!
+sub version_cmp { # should only be used by version_compare()
+    no warnings 'uninitialized'; # Prevent uninitialized value warnings when not using all 4 values
+    my ( $a1, $b1, $c1, $d1 ) = split /[\._]/, $_[0];
+    my ( $a2, $b2, $c2, $d2 ) = split /[\._]/, $_[1];
+    return $a1 <=> $a2 || $b1 <=> $b2 || $c1 <=> $c2 || $d1 <=> $d2;
+}
+
+sub version_compare {
+    # example: return if version_compare($ver_string, qw( >= 1.2.3.3 ));
+    # Must be no more than four version numbers separated by periods and/or underscores.
+    my ($ver1, $mode, $ver2) = @_;
+    return if ( $ver1 =~ /[^\._0-9]/ );
+    return if ( $ver2 =~ /[^\._0-9]/ );
+    # Shamelessly copied the comparison logic out of Cpanel::Version::Compare
+    my %modes = (
+    	'>' => sub {
+    		return if $_[0] eq $_[1];
+            return version_cmp(@_) > 0;
+          },
+          '<' => sub {
+    	      return if $_[0] eq $_[1];
+              return version_cmp(@_) < 0;
+          },
+          '==' => sub { return $_[0] eq $_[1] || version_cmp(@_) == 0; },
+          '!=' => sub { return $_[0] ne $_[1] && version_cmp(@_) != 0; },
+          '>=' => sub {
+    	      return 1 if $_[0] eq $_[1];
+              return version_cmp(@_) >= 0;
+                                                                                                              },
+          '<=' => sub {
+    	      return 1 if $_[0] eq $_[1];
+              return version_cmp(@_) <= 0;
+          }
+    );
+    return if ( ! exists $modes{$mode} );
+    return $modes{$mode}->( $ver1, $ver2 );
+}
+
+
+# ripped from /usr/local/cpanel/Cpanel/Sys/OS.pm
+sub get_release_version {
+    my $ises = 0;
+    my $ver;
+
+    if ( open my $fh, '<', '/etc/redhat-release' ) {
+        my $line = readline $fh;
+        close $fh;
+        chomp $line;
+        if    ( $line =~ m/(?:Corporate|Advanced\sServer|Enterprise)/i ) { $ises = 1; }
+        elsif ( $line =~ /CloudLinux|CentOS/i )                          { $ises = 2; }
+        elsif ( $line =~ /WhiteBox/i )                                   { $ises = 3; }
+        elsif ( $line =~ /caos/i )                                       { $ises = 4; }
+        if    ( $line =~ /(\d+\.\d+)/ )                                  { $ver  = $1; }
+        elsif ( $line =~ /(\d+)/ )                                       { $ver  = $1; }
+    }
+
+    if ($ises) {
+        return ( $ver, $ises );
+    }
+    else {
+        return ( $ver, 0 );
+    }
+}
+

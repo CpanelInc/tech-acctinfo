@@ -1,3 +1,6 @@
+V2.4.11- Added CentOS/CloudLinux Version 7 check - for MINUID less than 1000
+         Added check for /var/cpanel/databases/username.yaml/json (11.50 uses .json)
+         
 V2.4.10- Fixed empty string in cruft check that was sometimes causing missing data to show as
          exists.  
 V2.4.9-  Removed exit from cruft check if no data found in /var/cpanel/accounting.log
