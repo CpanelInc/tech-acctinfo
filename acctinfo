@@ -216,13 +216,13 @@ foreach $RESELLER(@ALL_RESELLERS) {
 	chomp($RESELLER);
 	if ($RESELLER eq $username) { 
 		$Is_Reseller=1;
-		# Read all accounts in /var/cpanelusers into array
+		# Read all accounts in /var/cpanel/users into array
 		opendir(ACCTS,"/var/cpanel/users");
 		my @LISTOFACCTS=readdir(ACCTS);
 		closedir(ACCTS);
 		foreach $vcu_account(@LISTOFACCTS) { 
 			chomp($vcu_account);
-         if ($vcu_account =~ m/HASH/) { 
+         if ($vcu_account =~ m/HASH/ or $vcu_account eq "." or $vcu_account eq "..") { 
             next;
          }
 			$FOUND="";
