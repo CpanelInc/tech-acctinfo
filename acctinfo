@@ -300,6 +300,9 @@ if ( version_compare($os_release, qw( > 6.9 ))) { ;
 	if ($UID < 1000 or $GID < 1000) {
 		print RED " - WARNING! - UID/GID is less than 1000!\n";
 	}
+   else { 
+	   print "\n";
+   }
 }
 else { 
 	print "\n";
