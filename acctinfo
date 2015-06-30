@@ -467,10 +467,10 @@ if ($listdbs or $all) {
 	my $first8;
 	if ($DBPrefix) { 
 		$first8=substr($username,0,8);
-		@USERDBS=qx[ echo "select Db from mysql.db where User like '$first8%'" | mysql -BN ];
+		@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User like '$first8%'" | mysql -BN ];
 	}
 	else { 
-		@USERDBS=qx[ echo "select Db from mysql.db where User = '$username'" | mysql -BN ];
+		@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User = '$username'" | mysql -BN ];
 	}
 #	print "DEBUG: first8 = $first8\n";
 	#@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
