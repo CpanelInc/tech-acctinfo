@@ -1,17 +1,17 @@
-#!/usr/bin/perl
+#!/usr/local/cpanel/3rdparty/bin/perl
 # SCRIPT: acctinfo                                                                    #
 # PURPOSE: Get all information for a username or domain entered at command line       #
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
 #######################################################################################
 
-BEGIN {
-    unshift @INC, '/usr/local/cpanel';
-    unshift @INC, '/usr/local/cpanel/scripts';
-    unshift @INC, '/usr/local/cpanel/bin';
-}
+#BEGIN {
+#    unshift @INC, '/usr/local/cpanel';
+#    unshift @INC, '/usr/local/cpanel/scripts';
+#    unshift @INC, '/usr/local/cpanel/bin';
+#}
 
 use strict;
-my $VERSION="2.4.11";
+my $VERSION="2.4.12";
 
 use File::stat;
 use Getopt::Long;
@@ -187,11 +187,13 @@ my @ResolvedIP;
 my $ResolvedIP;
 if ($IS_USERNAME) { 
 	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-	@ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+	#@ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
+	@ResolvedIP=qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
 }
 else {  
 	## a domain name was entered so we should resolve the IP of that instead. 
-	@ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
+	#@ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
+	@ResolvedIP=qx[ dig \@208.67.222.222 $DOMAIN A +short ];
 }
 my $IPTYPE="";
 if ($IPADDR eq $SERVER_IP) {
@@ -207,6 +209,7 @@ if ($REAL_OWNER ne $username and $REAL_OWNER ne "root") {
 }
 # Check if main domain (username) is a reseller.
 my @ACCTSOWNEDBYRESELLER=undef;
+my @SORTEDRESELLERACCTS=undef;
 my @LISTOFACCTS=undef;
 my $Is_Reseller=0;
 my $ResellerAcctsCnt=0;
@@ -441,9 +444,12 @@ if ($listreseller or $all) {
 	if ($all) { &border; }
 	my $owned_by_reseller="";
 	if ($Is_Reseller and $ResellerAcctsCnt > 0) { 
-		print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following accounts under it\n";
+		print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following ($ResellerAcctsCnt) accounts under it\n";
 		shift @ACCTSOWNEDBYRESELLER;
-		foreach $owned_by_reseller(@ACCTSOWNEDBYRESELLER) { 
+      # Sort @ACCTSOWNEDBYRESELLER here
+      my @SORTEDRESELLERACCTS=sort(@ACCTSOWNEDBYRESELLER);
+		#foreach $owned_by_reseller(@ACCTSOWNEDBYRESELLER) { 
+		foreach $owned_by_reseller(@SORTEDRESELLERACCTS) { 
 			chomp($owned_by_reseller);
 			print BOLD YELLOW ON_BLACK "\t \\_ $owned_by_reseller\n";
 		}
@@ -631,7 +637,7 @@ sub FindUser() {
 sub check_cloudflare_ips {
    my $chkIP=$_[0];
    # Below IP's obtained from: https://www.cloudflare.com/ips
-   my @cf_subnets = qw\199.27.128.0/21 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/12\;
+   my @cf_subnets = qw\103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 104.16.0.0/12 108.162.192.0/18 141.101.64.0/18 162.158.0.0/15 172.64.0.0/13 173.245.48.0/20 188.114.96.0/20 190.93.240.0/20 197.234.240.0/22 198.41.128.0/17 199.27.128.0/21\;
    my $cloudflareIP=0;
    my $cf_subnet="";
    my @a = split /\./, $chkIP;
