@@ -4,14 +4,14 @@
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
 #######################################################################################
 
-#BEGIN {
-#    unshift @INC, '/usr/local/cpanel';
-#    unshift @INC, '/usr/local/cpanel/scripts';
-#    unshift @INC, '/usr/local/cpanel/bin';
-#}
+BEGIN {
+    unshift @INC, '/usr/local/cpanel';
+    unshift @INC, '/usr/local/cpanel/scripts';
+    unshift @INC, '/usr/local/cpanel/bin';
+}
 
 use strict;
-my $VERSION="2.4.12";
+my $VERSION="2.4.13";
 
 use File::stat;
 use Getopt::Long;
