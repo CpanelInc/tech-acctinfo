@@ -1,3 +1,5 @@
+V2.4.14- Reworked the SSL certificate check (now uses /home/user/ssl/certs)
+V2.4.14- Fixed last login IP to only pull the last IP address
 V2.4.11- Added CentOS/CloudLinux Version 7 check - for MINUID less than 1000
          Added check for /var/cpanel/databases/username.yaml/json (11.50 uses .json)
          

@@ -1,6 +1,7 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
 # SCRIPT: acctinfo                                                                    #
-# PURPOSE: Get all information for a username or domain entered at command line       #
+# PURPOSE: Get as much information for a username or domain entered at command line   #
+# as possible.                                                                        #
 # AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
 #######################################################################################
 
@@ -11,23 +12,23 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.13";
+my $VERSION="2.4.14";
 
 use File::stat;
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
 use Cpanel::Sys::Hostname				();
-use Cpanel::Config::LoadCpUserFile 		();
-use Cpanel::Config::Users          		();
-use Cpanel::Config::LoadWwwAcctConf		();
-use Cpanel::Config::LoadCpConf			();
+use Cpanel::Config::LoadCpUserFile 	();
+use Cpanel::Config::Users          	();
+use Cpanel::Config::LoadWwwAcctConf	();
+use Cpanel::Config::LoadCpConf		();
 use Cpanel::ResellerFunctions			();
-use Cpanel::Usage                  		();
+use Cpanel::Usage               		();
 
-$Term::ANSIColor::AUTORESET = 1;
+$Term::ANSIColor::AUTORESET   = 1;
 # Turn off buffering
-$| 							= 1;
+$| 					      		= 1;
 
 my $all = undef;
 my $listdbs = undef;
@@ -106,7 +107,7 @@ if ($MAINDOMAIN eq "" and $username eq "") {
 	if ($cruft) { 
 		&cruft_check;
 	}
-	print "Error - $QUERY not found on $HOSTNAME\n";
+	print "Error - $QUERY not found on $HOSTNAME (or missing from /etc/userdomains file)\n";
 	print "Try using the --cruft switch (acctinfo $QUERY --cruft)\n";
 	exit;
 }
@@ -279,12 +280,13 @@ foreach $passline(@PASSWDS) {
 
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
-my $AccessDate="";
+#my $AccessDate="";
 if (-e("$HOMEDIR/$username/.lastlogin")) { 
-	$LastLoginIP=qx[ cat $HOMEDIR/$username/.lastlogin ];
-	my $nst=stat("$HOMEDIR/$username/.lastlogin");
-	my $mtime=$nst->mtime;
-	$AccessDate=scalar localtime($mtime);
+#	$LastLoginIP=qx[ cat $HOMEDIR/$username/.lastlogin ];
+	$LastLoginIP=qx[ tail -1 $HOMEDIR/$username/.lastlogin ];
+#	my $nst=stat("$HOMEDIR/$username/.lastlogin");
+#	my $mtime=$nst->mtime;
+#	$AccessDate=scalar localtime($mtime);
 	chomp($LastLoginIP);
 }
 
@@ -357,7 +359,7 @@ if ($defaultsite) {
 
 # Last Login IP
 if($LastLoginIP) { 
-	print WHITE "Last logged in to cPanel from IP: " . CYAN $LastLoginIP . WHITE " On: " . CYAN $AccessDate . "\n";
+	print WHITE "Last logged in to cPanel from IP: " . CYAN $LastLoginIP . "\n";
 }
 
 print WHITE "Has been a customer since " . CYAN $STARTDATE . "\n";
@@ -534,35 +536,78 @@ if ($listdbs or $all) {
 }
 
 # SSL INFO
-if ($listssls or $all) { 
-	my $sslline="";
-	my $ssldomain="";
-	my @SSLDATA=undef;
-	my @SSLFOLDER=undef;
-	my $SSLFILE="";
-	my $SSLDOMAIN="";
-	opendir(SSL,"/var/cpanel/userdata/$username/");
-	@SSLFOLDER=readdir(SSL);
-	closedir(SSL);
-	foreach $SSLFILE(@SSLFOLDER) {
-   	chomp($SSLFILE);
-   	if ($SSLFILE =~ m/_SSL$/) { 
-      	($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
-      	push(@SSLDATA,"$SSLDOMAIN"); 
-   	}    
+#if ($listssls or $all) { 
+#	my $sslline="";
+#	my $ssldomain="";
+#	my @SSLDATA=undef;
+#	my @SSLFOLDER=undef;
+#	my $SSLFILE="";
+#	my $SSLDOMAIN="";
+#	opendir(SSL,"/var/cpanel/userdata/$username/");
+#	@SSLFOLDER=readdir(SSL);
+#	closedir(SSL);
+#	foreach $SSLFILE(@SSLFOLDER) {
+#   	chomp($SSLFILE);
+#   	if ($SSLFILE =~ m/_SSL$/) { 
+#      	($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
+#      	push(@SSLDATA,"$SSLDOMAIN"); 
+#   	}    
+#	}
+#	splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
+#	my $sslcnt=@SSLDATA;
+#	if ($sslcnt > 0) {
+#		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+#		foreach $sslline(@SSLDATA) { 
+#			chomp($sslline);
+#			print YELLOW "\t \\_ " . $sslline . "\n";
+#		}
+#	}
+#	else { 
+#		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+#	}
+#	&border;
+#}
+
+# NEW SSL INFO ROUTINE - 12/13/2015 - PSE
+my $basedir="$HOMEDIR/$username/ssl/certs";
+my @certs;
+my $cert;
+my $domain;
+my $startdate;
+my $expiredate;
+if (-e("$basedir")) { 
+	print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+	opendir(ssldir,"$basedir");
+	my @certs=readdir(ssldir);
+	closedir(ssldir);
+	foreach $cert(@certs) {
+		chomp($cert);
+		if ($cert eq "." or $cert eq "..") { next; }
+		$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
+		$domain =~ s/^\s*(.*?)\s*$/$1/;
+		$domain = substr($domain,5);
+		chomp($domain);
+		if ($domain eq "") { 
+			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
+			chomp($domain);
+			$domain =~ s/^\s*(.*?)\s*$/$1/;
+			$domain = substr($domain,12);
+			($domain)=(split(/,/,$domain))[0];
+		} 
+		$startdate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not Before:' ];
+		$expiredate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not After :' ];
+		chomp($startdate);
+		chomp($expiredate);
+		$startdate =~ s/^\s*(.*?)\s*$/$1/;
+		$expiredate =~ s/^\s*(.*?)\s*$/$1/;
+		print YELLOW . $domain . "\n";
+		print "\t \\_ " . GREEN . $startdate . "\n";
+		print "\t \\_ " . GREEN . $expiredate . "\n";
+		&border;
 	}
-	splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
-	my $sslcnt=@SSLDATA;
-	if ($sslcnt > 0) {
-		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-		foreach $sslline(@SSLDATA) { 
-			chomp($sslline);
-			print YELLOW "\t \\_ " . $sslline . "\n";
-		}
-	}
-	else { 
-		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-	}
+}
+else { 
+	print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	&border;
 }
 
