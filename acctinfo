@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.14";
+my $VERSION="2.4.16";
 
 use File::stat;
 use Getopt::Long;
@@ -25,6 +25,11 @@ use Cpanel::Config::LoadWwwAcctConf	();
 use Cpanel::Config::LoadCpConf		();
 use Cpanel::ResellerFunctions			();
 use Cpanel::Usage               		();
+use Cpanel::Config::Httpd              ();
+use Cpanel::Lang::PHP::Config          ();
+use Cpanel::PHPConfig                  ();
+use Cpanel::Lang::PHP::Settings        ();
+
 
 $Term::ANSIColor::AUTORESET   = 1;
 # Turn off buffering
@@ -315,6 +320,16 @@ else {
 
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
 print WHITE "Theme: " . CYAN $THEME . "\n";
+my $PHPDefaultVersion = &get_system_php_version();
+my $PHPversion = &get_php_version();
+if ($PHPversion eq "") { $PHPversion = "Inherit"; }
+if ($PHPversion or $PHPDefaultVersion) { 
+	print WHITE "PHP Version: " . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
+}
+my $cageFSStats = &check_for_cagefs();
+if ($cageFSStats) { 
+	print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
+}
 my $IS_IP_ON_SERVER = qx[ ifconfig | grep $IPADDR ];
 my $NOTONSERVER="[ Is configured on this server ] ";
 if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER="[ Not configured on this server ]"; }
@@ -475,10 +490,12 @@ if ($listdbs or $all) {
 	my $first8;
 	if ($DBPrefix) { 
 		$first8=substr($username,0,8);
-		@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User like '$first8%'" | mysql -BN ];
+		#@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User like '$first8%'" | mysql -BN ];
+		@USERDBS=qx[ echo "SHOW DATABASES like '$first8%'" | mysql -BN ];
 	}
 	else { 
-		@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User = '$username'" | mysql -BN ];
+		#@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User = '$username'" | mysql -BN ];
+		@USERDBS=qx[ echo "SHOW DATABASES WHERE User = '$username%'" | mysql -BN ];
 	}
 #	print "DEBUG: first8 = $first8\n";
 	#@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
@@ -913,6 +930,7 @@ sub cruft_check {
 	}
 	# Check for home directory and others to see if they exist
 	# Check Home Directory
+	#my $dirstatus=&check_dir("$HOMEDIR/$username");
 	my $dirstatus=&check_dir("$HOMEDIR/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("$HOMEDIR/$username",$dirstatus);
@@ -1119,3 +1137,52 @@ sub get_release_version {
     }
 }
 
+sub check_for_cagefs() { 
+	return unless(-e("/usr/sbin/cagefsctl")); 
+	my $tcageFSStats=qx[ /usr/sbin/cagefsctl --user-status $username ];
+	chomp($tcageFSStats);
+	return $tcageFSStats;
+}
+
+sub get_php_version() { 
+	return unless(-e("/etc/cpanel/ea4/is_ea4"));
+	my $phpUserVersion;
+	my @HTACCESS;
+	my $htaline;
+	if (-e("$HOMEDIR/$username/public_html/.htaccess")) { 
+		open(HTACCESS,"$HOMEDIR/$username/public_html/.htaccess");
+		@HTACCESS=<HTACCESS>;
+		close(HTACCESS);
+		foreach $htaline(@HTACCESS) {
+			if ($htaline =~ m/as default/) { 
+				($phpUserVersion) = (split(/\s+/,$htaline))[3];
+				chomp($phpUserVersion);
+			}
+		}
+	}
+	return $phpUserVersion;
+}
+
+sub get_system_php_version() { 
+	return unless(-e("/etc/cpanel/ea4/is_ea4"));
+
+	open(PHPCONF,"/etc/apache2/conf.d/php.conf");
+	my @PHPCONF=<PHPCONF>;
+	close(PHPCONF);
+	my $phpconfline;
+	my $phpDefault;
+	foreach $phpconfline(@PHPCONF) { 
+		chomp($phpconfline);
+		if ($phpconfline =~ m/as default/) { 
+			($phpDefault)=(split(/\s+/,$phpconfline))[2];
+		}
+	}
+	$phpDefault = &alltrim($phpDefault);
+	return $phpDefault;
+}
+
+sub alltrim() { 
+	my $string2trim=$_[0];
+	$string2trim =~ s/^\s*(.*?)\s*$/$1/;
+	return $string2trim;
+}
