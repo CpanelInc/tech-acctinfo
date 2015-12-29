@@ -320,11 +320,17 @@ else {
 
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
 print WHITE "Theme: " . CYAN $THEME . "\n";
-my $PHPDefaultVersion = &get_system_php_version();
-my $PHPversion = &get_php_version();
-if ($PHPversion eq "") { $PHPversion = "Inherit"; }
-if ($PHPversion or $PHPDefaultVersion) { 
-	print WHITE "PHP Version: " . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
+my $PHPDefaultVersion;
+my $PHPversion;
+my $isEA4=0;
+$isEA4 = &isEA4;
+if ($isEA4) { 
+	$PHPDefaultVersion = &get_system_php_version();
+	$PHPversion = &get_php_version();
+	if ($PHPversion eq "") { $PHPversion = " Inherit"; }
+}
+if ($isEA4) { 
+	print WHITE "PHP Version:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
 }
 my $cageFSStats = &check_for_cagefs();
 if ($cageFSStats) { 
@@ -1145,7 +1151,8 @@ sub check_for_cagefs() {
 }
 
 sub get_php_version() { 
-	return unless(-e("/etc/cpanel/ea4/is_ea4"));
+	return unless($isEA4);
+	#return unless(-e("/etc/cpanel/ea4/is_ea4"));
 	my $phpUserVersion;
 	my @HTACCESS;
 	my $htaline;
@@ -1164,13 +1171,13 @@ sub get_php_version() {
 }
 
 sub get_system_php_version() { 
-	return unless(-e("/etc/cpanel/ea4/is_ea4"));
-
+	return unless($isEA4);
+	#return unless(-e("/etc/cpanel/ea4/is_ea4"));
 	open(PHPCONF,"/etc/apache2/conf.d/php.conf");
 	my @PHPCONF=<PHPCONF>;
 	close(PHPCONF);
 	my $phpconfline;
-	my $phpDefault;
+	my $phpDefault = "Inherit";
 	foreach $phpconfline(@PHPCONF) { 
 		chomp($phpconfline);
 		if ($phpconfline =~ m/as default/) { 
@@ -1185,4 +1192,13 @@ sub alltrim() {
 	my $string2trim=$_[0];
 	$string2trim =~ s/^\s*(.*?)\s*$/$1/;
 	return $string2trim;
+}
+
+sub isEA4 { 
+	if (-e("/etc/cpanel/ea4/is_ea4")) { 
+		return 1;
+	}
+	else {
+		return 0;
+	}
 }
