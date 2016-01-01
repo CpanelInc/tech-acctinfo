@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.16";
+my $VERSION="2.4.17";
 
 use File::stat;
 use Getopt::Long;
@@ -310,12 +310,17 @@ if ( version_compare($os_release, qw( > 6.9 ))) { ;
 	if ($UID < 1000 or $GID < 1000) {
 		print RED " - WARNING! - UID/GID is less than 1000!\n";
 	}
-   else { 
+	else { 
 	   print "\n";
-   }
+	}
 }
 else { 
-	print "\n";
+	if ($UID < 500 or $GID < 500) {
+		print RED " - WARNING! - UID/GID is less than 500!\n";
+	}
+	else { 
+	   print "\n";
+	}
 }
 
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
@@ -327,11 +332,11 @@ $isEA4 = &isEA4;
 if ($isEA4) { 
 	$PHPDefaultVersion = &get_system_php_version();
 	$PHPversion = &get_php_version();
-	if ($PHPversion eq "") { $PHPversion = " Inherit"; }
-}
-if ($isEA4) { 
+	if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) { $PHPversion = "Inherit"; }
+   $PHPversion = " " . $PHPversion;
 	print WHITE "PHP Version:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
 }
+
 my $cageFSStats = &check_for_cagefs();
 if ($cageFSStats) { 
 	print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
@@ -592,46 +597,48 @@ if ($listdbs or $all) {
 #}
 
 # NEW SSL INFO ROUTINE - 12/13/2015 - PSE
-my $basedir="$HOMEDIR/$username/ssl/certs";
-my @certs;
-my $cert;
-my $domain;
-my $startdate;
-my $expiredate;
-if (-e("$basedir")) { 
-	print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-	opendir(ssldir,"$basedir");
-	my @certs=readdir(ssldir);
-	closedir(ssldir);
-	foreach $cert(@certs) {
-		chomp($cert);
-		if ($cert eq "." or $cert eq "..") { next; }
-		$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
-		$domain =~ s/^\s*(.*?)\s*$/$1/;
-		$domain = substr($domain,5);
-		chomp($domain);
-		if ($domain eq "") { 
-			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
-			chomp($domain);
+if ($listssls or $all) { 
+	my $basedir="$HOMEDIR/$username/ssl/certs";
+	my @certs;
+	my $cert;
+	my $domain;
+	my $startdate;
+	my $expiredate;
+	if (-e("$basedir")) { 
+		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+		opendir(ssldir,"$basedir");
+		my @certs=readdir(ssldir);
+		closedir(ssldir);
+		foreach $cert(@certs) {
+			chomp($cert);
+			if ($cert eq "." or $cert eq "..") { next; }
+			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
 			$domain =~ s/^\s*(.*?)\s*$/$1/;
-			$domain = substr($domain,12);
-			($domain)=(split(/,/,$domain))[0];
-		} 
-		$startdate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not Before:' ];
-		$expiredate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not After :' ];
-		chomp($startdate);
-		chomp($expiredate);
-		$startdate =~ s/^\s*(.*?)\s*$/$1/;
-		$expiredate =~ s/^\s*(.*?)\s*$/$1/;
-		print YELLOW . $domain . "\n";
-		print "\t \\_ " . GREEN . $startdate . "\n";
-		print "\t \\_ " . GREEN . $expiredate . "\n";
+			$domain = substr($domain,5);
+			chomp($domain);
+			if ($domain eq "") { 
+				$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
+				chomp($domain);
+				$domain =~ s/^\s*(.*?)\s*$/$1/;
+				$domain = substr($domain,12);
+				($domain)=(split(/,/,$domain))[0];
+			} 
+			$startdate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not Before:' ];
+			$expiredate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not After :' ];
+			chomp($startdate);
+			chomp($expiredate);
+			$startdate =~ s/^\s*(.*?)\s*$/$1/;
+			$expiredate =~ s/^\s*(.*?)\s*$/$1/;
+			print YELLOW . $domain . "\n";
+			print "\t \\_ " . GREEN . $startdate . "\n";
+			print "\t \\_ " . GREEN . $expiredate . "\n";
+			&border;
+		}
+	}
+	else { 
+		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 		&border;
 	}
-}
-else { 
-	print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-	&border;
 }
 
 exit;
@@ -1152,7 +1159,6 @@ sub check_for_cagefs() {
 
 sub get_php_version() { 
 	return unless($isEA4);
-	#return unless(-e("/etc/cpanel/ea4/is_ea4"));
 	my $phpUserVersion;
 	my @HTACCESS;
 	my $htaline;
@@ -1172,7 +1178,6 @@ sub get_php_version() {
 
 sub get_system_php_version() { 
 	return unless($isEA4);
-	#return unless(-e("/etc/cpanel/ea4/is_ea4"));
 	open(PHPCONF,"/etc/apache2/conf.d/php.conf");
 	my @PHPCONF=<PHPCONF>;
 	close(PHPCONF);
@@ -1195,10 +1200,8 @@ sub alltrim() {
 }
 
 sub isEA4 { 
-	if (-e("/etc/cpanel/ea4/is_ea4")) { 
+	if (-f "/etc/cpanel/ea4/is_ea4" ) { 
 		return 1;
 	}
-	else {
-		return 0;
-	}
+	return undef;
 }
