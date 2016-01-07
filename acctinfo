@@ -613,8 +613,8 @@ if ($listssls or $all) {
 			chomp($cert);
 			if ($cert eq "." or $cert eq "..") { next; }
 			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
-			$domain =~ s/^\s*(.*?)\s*$/$1/;
-			$domain = substr($domain,5);
+         $domain =~ s/DNS://g;
+         $domain = &alltrim($domain);
 			chomp($domain);
 			if ($domain eq "") { 
 				$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
