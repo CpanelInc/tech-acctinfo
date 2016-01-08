@@ -27,9 +27,10 @@ use Cpanel::Config::LoadCpConf		();
 use Cpanel::ResellerFunctions			();
 use Cpanel::Usage               		();
 use Cpanel::Config::Httpd              ();
-use Cpanel::Lang::PHP::Config          ();
 use Cpanel::PHPConfig                  ();
-use Cpanel::Lang::PHP::Settings        ();
+# SEEMS IN 54, we got rid of the /usr/local/cpanel/Cpanel/Lang directory 
+#use Cpanel::Lang::PHP::Config          ();
+#use Cpanel::Lang::PHP::Settings        ();
 
 
 $Term::ANSIColor::AUTORESET   = 1;
