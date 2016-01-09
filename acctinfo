@@ -9,11 +9,10 @@ BEGIN {
    unshift @INC, '/usr/local/cpanel';
    unshift @INC, '/usr/local/cpanel/scripts';
    unshift @INC, '/usr/local/cpanel/bin';
-#   unshift @INC, '/usr/local/cpanel/Cpanel';
 }
 
 use strict;
-my $VERSION="2.4.17";
+my $VERSION="2.4.18";
 
 use File::stat;
 use Getopt::Long;
@@ -26,12 +25,7 @@ use Cpanel::Config::LoadWwwAcctConf	();
 use Cpanel::Config::LoadCpConf		();
 use Cpanel::ResellerFunctions			();
 use Cpanel::Usage               		();
-use Cpanel::Config::Httpd              ();
-use Cpanel::PHPConfig                  ();
-# SEEMS IN 54, we got rid of the /usr/local/cpanel/Cpanel/Lang directory 
-#use Cpanel::Lang::PHP::Config          ();
-#use Cpanel::Lang::PHP::Settings        ();
-
+#use Cpanel::Config::Httpd              ();
 
 $Term::ANSIColor::AUTORESET   = 1;
 # Turn off buffering
