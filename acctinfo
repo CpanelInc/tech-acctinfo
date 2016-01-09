@@ -25,7 +25,6 @@ use Cpanel::Config::LoadWwwAcctConf	();
 use Cpanel::Config::LoadCpConf		();
 use Cpanel::ResellerFunctions			();
 use Cpanel::Usage               		();
-#use Cpanel::Config::Httpd              ();
 
 $Term::ANSIColor::AUTORESET   = 1;
 # Turn off buffering
