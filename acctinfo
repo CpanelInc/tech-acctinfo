@@ -12,9 +12,9 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.18";
+my $VERSION="2.4.20";
 
-use File::stat;
+use File::HomeDir;
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -114,6 +114,7 @@ if ($MAINDOMAIN eq "" and $username eq "") {
 
 # Load /var/cpanel/users/$username into config hash variable
 my $user_conf = Cpanel::Config::LoadCpUserFile::load($username);
+my $UsersHomeDir = File::HomeDir::users_home($username);
 my $DOMAIN = $QUERY;
 my $IS_PARKED="";
 my $IS_ADDON="";
@@ -281,17 +282,23 @@ foreach $passline(@PASSWDS) {
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
 #my $AccessDate="";
-if (-e("$HOMEDIR/$username/.lastlogin")) { 
-#	$LastLoginIP=qx[ cat $HOMEDIR/$username/.lastlogin ];
+#if (-e("$HOMEDIR/$username/.lastlogin")) { 
+if (-e("$UsersHomeDir/.lastlogin")) { 
 	$LastLoginIP=qx[ tail -1 $HOMEDIR/$username/.lastlogin ];
-#	my $nst=stat("$HOMEDIR/$username/.lastlogin");
-#	my $mtime=$nst->mtime;
-#	$AccessDate=scalar localtime($mtime);
 	chomp($LastLoginIP);
 }
 
 print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
-print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome . "\n";
+print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
+# Perm check - make sure $UsersHomeDir is 711 - Warn if not!
+my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
+$statmode = sprintf "%lo", $statmode;
+#print "\n";
+if ( $statmode != 711 ) { 
+    print RED " - WARNING! - $UsersHomeDir permissions are not 711 [$statmode]\n";
+	print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
+}
+print "\n";
 if ($Is_Reseller) { 
 	print GREEN ON_BLACK "This account is also a reseller!\n";
 }
@@ -335,6 +342,9 @@ if ($isEA4) {
 my $cageFSStats = &check_for_cagefs();
 if ($cageFSStats) { 
 	print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
+}
+else {
+	print WHITE "CageFS: " . CYAN . "Not installed!\n";
 }
 my $IS_IP_ON_SERVER = qx[ ifconfig | grep $IPADDR ];
 my $NOTONSERVER="[ Is configured on this server ] ";
@@ -593,7 +603,8 @@ if ($listdbs or $all) {
 
 # NEW SSL INFO ROUTINE - 12/13/2015 - PSE
 if ($listssls or $all) { 
-	my $basedir="$HOMEDIR/$username/ssl/certs";
+	#my $basedir="$HOMEDIR/$username/ssl/certs";
+	my $basedir="$UsersHomeDir/ssl/certs";
 	my @certs;
 	my $cert;
 	my $domain;
@@ -795,6 +806,8 @@ sub cruft_check {
 	my $TrueUserLine = "";
 	my $termdate="";
 	my @temp=undef;
+	my $DNSLineCnt=0;
+	my $TotalDomainCnt=0;
 
 	# Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
 	print BLUE "From your query of " . GREEN $QUERY . BLUE " I have determined:\n";
@@ -840,6 +853,13 @@ sub cruft_check {
 		if ($parkcnt > 0) { 
 			print "It has $addoncnt Parked domains\n";
 		}
+		# Add up the total number of additional domains
+		$TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
+		# Now add one more to that for the main account
+		$TotalDomainCnt++;
+		# Now count the number of "DNS" lines in /var/cpanel/users/$username and make sure 
+		# it equalts $TotalDomainCnt.  Warn if it does NOT!
+		$DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
 	}
 	if ($is_acct and !$isActive) { 
 		print "$MAINDOMAIN ($username) was terminated on $termdate\n";
@@ -939,9 +959,11 @@ sub cruft_check {
 	# Check for home directory and others to see if they exist
 	# Check Home Directory
 	#my $dirstatus=&check_dir("$HOMEDIR/$username");
-	my $dirstatus=&check_dir("$HOMEDIR/$username");
+	my $UsersHomeDir = File::HomeDir::users_home($username);
+	my $dirstatus=&check_dir($UsersHomeDir);
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("$HOMEDIR/$username",$dirstatus);
+	#&print_output("$HOMEDIR/$username",$dirstatus);
+	&print_output($UsersHomeDir,$dirstatus);
 	# Check /var/cpanel/userdata/$username
 	my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
@@ -950,6 +972,9 @@ sub cruft_check {
 	my $dirstatus=&check_dir("/var/cpanel/users/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/cpanel/users/$username",$dirstatus);
+	if ($DNSLineCnt != $TotalDomainCnt) { 
+				print RED "\t \\_ WARNING: One or more DNS lines may be missing from this file!\n";
+	}
 	# Check /var/named/$MAINDOMAIN.db file
 	my $dirstatus=&check_dir("/var/named/$MAINDOMAIN.db");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
@@ -1157,8 +1182,10 @@ sub get_php_version() {
 	my $phpUserVersion;
 	my @HTACCESS;
 	my $htaline;
-	if (-e("$HOMEDIR/$username/public_html/.htaccess")) { 
-		open(HTACCESS,"$HOMEDIR/$username/public_html/.htaccess");
+	#if (-e("$HOMEDIR/$username/public_html/.htaccess")) { 
+	if (-e("$UsersHomeDir/public_html/.htaccess")) { 
+		#open(HTACCESS,"$HOMEDIR/$username/public_html/.htaccess");
+		open(HTACCESS,"$UsersHomeDir/public_html/.htaccess");
 		@HTACCESS=<HTACCESS>;
 		close(HTACCESS);
 		foreach $htaline(@HTACCESS) {
