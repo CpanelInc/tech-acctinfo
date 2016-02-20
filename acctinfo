@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.20";
+my $VERSION="2.4.21";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -295,7 +295,7 @@ my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
 $statmode = sprintf "%lo", $statmode;
 #print "\n";
 if ( $statmode != 711 ) { 
-    print RED " - WARNING! - $UsersHomeDir permissions are not 711 [$statmode]\n";
+    print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
 	print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
 }
 print "\n";
@@ -310,7 +310,7 @@ print WHITE "Shell: " . CYAN $RealShell . "\n";
 print WHITE "UID/GID: " . CYAN $UID . "/" . $GID;
 if ( version_compare($os_release, qw( > 6.9 ))) { ;
 	if ($UID < 1000 or $GID < 1000) {
-		print RED " - WARNING! - UID/GID is less than 1000!\n";
+		print RED " - [WARN] - UID/GID is less than 1000!\n";
 	}
 	else { 
 	   print "\n";
@@ -318,11 +318,22 @@ if ( version_compare($os_release, qw( > 6.9 ))) { ;
 }
 else { 
 	if ($UID < 500 or $GID < 500) {
-		print RED " - WARNING! - UID/GID is less than 500!\n";
+		print RED " - [WARN] - UID/GID is less than 500!\n";
 	}
 	else { 
 	   print "\n";
 	}
+}
+
+# Check if account is over quota, warn if so.
+# -s human-readable, -l local only (ignore NFS), -q quiet, -Q quiet-refuse 
+# (in case rpc.rquotad isn't running)
+my $BlockLimit=qx[ /usr/bin/quota -slq $username ];
+if ($BlockLimit) {
+    my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas'];
+    $OverQuota =~ s/\s+/ /g;
+    chomp($OverQuota);
+    print RED "[WARN] - Account is over quota: (" . $OverQuota . ")\n";
 }
 
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
@@ -973,7 +984,7 @@ sub cruft_check {
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/cpanel/users/$username",$dirstatus);
 	if ($DNSLineCnt != $TotalDomainCnt) { 
-				print RED "\t \\_ WARNING: One or more DNS lines may be missing from this file!\n";
+				print RED "\t \\_ [WARN]: One or more DNS lines may be missing from this file!\n";
 	}
 	# Check /var/named/$MAINDOMAIN.db file
 	my $dirstatus=&check_dir("/var/named/$MAINDOMAIN.db");
