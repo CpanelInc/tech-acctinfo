@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.21";
+my $VERSION="2.4.22";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -328,16 +328,33 @@ else {
 # Check if account is over quota, warn if so.
 # -s human-readable, -l local only (ignore NFS), -q quiet, -Q quiet-refuse 
 # (in case rpc.rquotad isn't running)
-my $BlockLimit=qx[ /usr/bin/quota -slq $username ];
+my $BlockLimit=qx[ /usr/bin/quota -slq $username | egrep -v "virtfs|deleted" ];
 if ($BlockLimit) {
-    my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas'];
+    my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas|virtfs|deleted'];
     $OverQuota =~ s/\s+/ /g;
     chomp($OverQuota);
     print RED "[WARN] - Account is over quota: (" . $OverQuota . ")\n";
 }
 
+# Check for custom style (Paper Lantern Theme)
+my $custom_style_path = "$RealHome/var/cpanel/styled/current_style";
+my $custom_style_link;
+my $custom_style;
+my @custom_style_array;
+my $custom_style_array;
+if (-e("$custom_style_path")) { 
+    $custom_style_link = readlink($custom_style_path);
+    @custom_style_array = split("\/",$custom_style_link);
+    $custom_style = $custom_style_array[-1];
+}
+
 print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
-print WHITE "Theme: " . CYAN $THEME . "\n";
+if ($custom_style) { 
+    print WHITE "Theme: " . CYAN $THEME . " (Style: $custom_style)\n";
+}
+else { 
+    print WHITE "Theme: " . CYAN $THEME . "\n";
+}
 my $PHPDefaultVersion;
 my $PHPversion;
 my $isEA4=0;
@@ -559,17 +576,7 @@ if ($listdbs or $all) {
 		   foreach $PgDb(@PSQLDBS) { 
 			   chomp($PgDb);
 			   $PgDb=substr($PgDb,1);
-#			   $pg_table=qx[ psql -U postgres $PgDb -c "SELECT relname FROM pg_catalog.pg_class WHERE relkind = 'r' AND pg_get_userbyid(relowner) = '$username'" | grep -v '\-' | grep -v 'relname' | grep -v ' row' ];
-#			   chomp($pg_table);
-#			   chomp($pg_table);
-#			   $pg_table =~ s/^\s+//;
-#			   $pg_table =~ s/\s+/, /g;
-#			   if ($pg_table eq "") { 
-#				   print YELLOW "\t \\_" .  $PgDb . WHITE " has no tables\n";
-#			   }
-#			   else { 
-				   print YELLOW "\t \\_" .  $PgDb . "\n";
-#			   }
+			   print YELLOW "\t \\_" .  $PgDb . "\n";
 		   }
 	   }
    }
@@ -614,7 +621,6 @@ if ($listdbs or $all) {
 
 # NEW SSL INFO ROUTINE - 12/13/2015 - PSE
 if ($listssls or $all) { 
-	#my $basedir="$HOMEDIR/$username/ssl/certs";
 	my $basedir="$UsersHomeDir/ssl/certs";
 	my @certs;
 	my $cert;
@@ -891,28 +897,32 @@ sub cruft_check {
 		my $isAddon;
 		my $isSub;
 		my $isParked;
-		$isAddon = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==addon==' ];
+		#$isAddon = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==addon==' ];
+		$isAddon = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==addon==' ];
 		if ($isAddon) { 
 			($username) = (split(/\s+/,$isAddon))[1];
 			($username) = (split(/==/,$username));
 			($isAddon) = (split(/:/,$isAddon));
 			print "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
 		}
-		$isSub = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==sub==' ];
+		#$isSub = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==sub==' ];
+		$isSub = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==sub==' ];
 		if ($isSub) { 
 			($username) = (split(/\s+/,$isSub))[1];
 			($username) = (split(/==/,$username));
 			($isSub) = (split(/:/,$isSub));
 			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n";
 		}
-		$isParked = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==parked==' ];
+		#$isParked = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==parked==' ];
+		$isParked = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==parked==' ];
 		if ($isParked) { 
 			($username) = (split(/\s+/,$isParked))[1];
 			($username) = (split(/==/,$username));
 			($isParked) = (split(/:/,$isParked));
 			print "$QUERY has an entry in /etc/userdatadomains as a Parked Domain $isParked\n";
 		}
-		($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
+		#($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
+		($MAINDOMAIN)=(split(/\s+/,qx[ egrep '^$username$' /etc/trueuserdomains ]));
 		$MAINDOMAIN =~ s/://g;
 		if ($MAINDOMAIN and $username) { 
 			print "Checking main account $MAINDOMAIN ($username) instead...\n";
@@ -1109,7 +1119,6 @@ sub check_dir() {
 		return 0;
 	}
 }
-
 
 sub uniq { 
 	my %seen;

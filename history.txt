@@ -1,3 +1,4 @@
+V2.4.22- Added check for custom style (PaperLantern theme)
 V2.4.21- Added quota check and warn if account is over quota.
 V2.4.20- Added permissions check of /home/USERNAME directory to make sure it is 711.
 v2.4.19- Added to cruft check a count of DNS lines in /var/cpanel/users/username file. 
