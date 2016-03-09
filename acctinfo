@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.22";
+my $VERSION="2.4.23";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -329,6 +329,9 @@ else {
 # -s human-readable, -l local only (ignore NFS), -q quiet, -Q quiet-refuse 
 # (in case rpc.rquotad isn't running)
 my $BlockLimit=qx[ /usr/bin/quota -slq $username | egrep -v "virtfs|deleted" ];
+if ($BlockLimit =~ m/Cannot stat/ or $BlockLimit =~ m/No such file or directory/) { 
+    $BlockLimit = "";
+}
 if ($BlockLimit) {
     my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas|virtfs|deleted'];
     $OverQuota =~ s/\s+/ /g;
