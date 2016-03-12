@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.23";
+my $VERSION="2.4.24";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -281,8 +281,6 @@ foreach $passline(@PASSWDS) {
 
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
-#my $AccessDate="";
-#if (-e("$HOMEDIR/$username/.lastlogin")) { 
 if (-e("$UsersHomeDir/.lastlogin")) { 
 	$LastLoginIP=qx[ tail -1 $HOMEDIR/$username/.lastlogin ];
 	chomp($LastLoginIP);
@@ -329,9 +327,6 @@ else {
 # -s human-readable, -l local only (ignore NFS), -q quiet, -Q quiet-refuse 
 # (in case rpc.rquotad isn't running)
 my $BlockLimit=qx[ /usr/bin/quota -slq $username | egrep -v "virtfs|deleted" ];
-if ($BlockLimit =~ m/Cannot stat/ or $BlockLimit =~ m/No such file or directory/) { 
-    $BlockLimit = "";
-}
 if ($BlockLimit) {
     my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas|virtfs|deleted'];
     $OverQuota =~ s/\s+/ /g;
@@ -365,7 +360,7 @@ $isEA4 = &isEA4;
 if ($isEA4) { 
 	$PHPDefaultVersion = &get_system_php_version();
 	$PHPversion = &get_php_version();
-	if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) { $PHPversion = "Inherit"; }
+	if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) { $PHPversion = "Inherited"; }
    $PHPversion = " " . $PHPversion;
 	print WHITE "PHP Version:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
 }
@@ -1205,15 +1200,17 @@ sub get_php_version() {
 	my $phpUserVersion;
 	my @HTACCESS;
 	my $htaline;
-	#if (-e("$HOMEDIR/$username/public_html/.htaccess")) { 
 	if (-e("$UsersHomeDir/public_html/.htaccess")) { 
-		#open(HTACCESS,"$HOMEDIR/$username/public_html/.htaccess");
 		open(HTACCESS,"$UsersHomeDir/public_html/.htaccess");
 		@HTACCESS=<HTACCESS>;
 		close(HTACCESS);
 		foreach $htaline(@HTACCESS) {
-			if ($htaline =~ m/as default/) { 
+			if ($htaline =~ m/as the default/) { 
 				($phpUserVersion) = (split(/\s+/,$htaline))[3];
+				# For some odd reason we are using curly quotes around the php version 
+				# within the .htaccess file.  No idea why that is.  But we need to remove them. 
+				$phpUserVersion =~ s/\xE2\x80\x9D//g;
+				$phpUserVersion =~ s/\xE2\x80\x9C//g;
 				chomp($phpUserVersion);
 			}
 		}
@@ -1227,10 +1224,10 @@ sub get_system_php_version() {
 	my @PHPCONF=<PHPCONF>;
 	close(PHPCONF);
 	my $phpconfline;
-	my $phpDefault = "Inherit";
+	my $phpDefault = "";
 	foreach $phpconfline(@PHPCONF) { 
 		chomp($phpconfline);
-		if ($phpconfline =~ m/as default/) { 
+		if ($phpconfline =~ m/as the system default/) { 
 			($phpDefault)=(split(/\s+/,$phpconfline))[2];
 		}
 	}
