@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.24";
+my $VERSION="2.4.25";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -324,14 +324,26 @@ else {
 }
 
 # Check if account is over quota, warn if so.
-# -s human-readable, -l local only (ignore NFS), -q quiet, -Q quiet-refuse 
-# (in case rpc.rquotad isn't running)
-my $BlockLimit=qx[ /usr/bin/quota -slq $username | egrep -v "virtfs|deleted" ];
-if ($BlockLimit) {
-    my $OverQuota = qx[ /usr/bin/quota -slQ $username | egrep -v 'Filesystem|Disk quotas|virtfs|deleted'];
-    $OverQuota =~ s/\s+/ /g;
-    chomp($OverQuota);
-    print RED "[WARN] - Account is over quota: (" . $OverQuota . ")\n";
+# -s human-readable, -l local only (ignore NFS), -q quiet
+# First check if the account is over quota (slq does this, if nothing return it's not over quota.
+open(QUOTACHK, "/usr/bin/quota -slq $username|");
+my @quotachk=<QUOTACHK>;
+close(QUOTACHK);
+my $BlockLimitReached;
+foreach $BlockLimitReached(@quotachk) { 
+    chomp($BlockLimitReached);
+    if ($BlockLimitReached =~ m/Block limit reached/) { 
+        print RED "[WARN] - $username is over quota (";
+        # Get the partition/drive and block size of the account. (quota -sl does this) 
+        open(QUOTA, "/usr/bin/quota -sl $username|");
+        my @quotaline=<QUOTA>;
+        close(QUOTA);
+        foreach $quotaline(@quotaline) { 
+            chomp($quotaline);
+            $quotaline =~ s/\s+/ /g;
+            print "$quotaline)\n" unless ($quotaline =~ m/Filesystem|blocks|Disk quotas for/);
+        }
+    }
 }
 
 # Check for custom style (Paper Lantern Theme)
@@ -896,7 +908,6 @@ sub cruft_check {
 		my $isSub;
 		my $isParked;
 		$isAddon = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==addon==' ];
-		#$isAddon = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==addon==' ];
 		if ($isAddon) { 
 			($username) = (split(/\s+/,$isAddon))[1];
 			($username) = (split(/==/,$username));
@@ -904,7 +915,6 @@ sub cruft_check {
 			print "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
 		}
 		$isSub = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==sub==' ];
-		#$isSub = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==sub==' ];
 		if ($isSub) { 
 			($username) = (split(/\s+/,$isSub))[1];
 			($username) = (split(/==/,$username));
@@ -912,7 +922,6 @@ sub cruft_check {
 			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n";
 		}
 		$isParked = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==parked==' ];
-		#$isParked = qx[ egrep '^$QUERY$' /etc/userdatadomains | grep '==parked==' ];
 		if ($isParked) { 
 			($username) = (split(/\s+/,$isParked))[1];
 			($username) = (split(/==/,$username));
@@ -920,7 +929,6 @@ sub cruft_check {
 			print "$QUERY has an entry in /etc/userdatadomains as a Parked Domain $isParked\n";
 		}
 		($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
-		#($MAINDOMAIN)=(split(/\s+/,qx[ egrep '^$username$' /etc/trueuserdomains ]));
 		$MAINDOMAIN =~ s/://g;
 		if ($MAINDOMAIN and $username) { 
 			print "Checking main account $MAINDOMAIN ($username) instead...\n";
@@ -976,12 +984,9 @@ sub cruft_check {
 		&print_output($file2search,$filestatus);
 	}
 	# Check for home directory and others to see if they exist
-	# Check Home Directory
-	#my $dirstatus=&check_dir("$HOMEDIR/$username");
 	my $UsersHomeDir = File::HomeDir::users_home($username);
 	my $dirstatus=&check_dir($UsersHomeDir);
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	#&print_output("$HOMEDIR/$username",$dirstatus);
 	&print_output($UsersHomeDir,$dirstatus);
 	# Check /var/cpanel/userdata/$username
 	my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
@@ -1020,7 +1025,6 @@ sub cruft_check {
 	else { 
 		$dbindex = "/var/cpanel/databases/dbindex.db.json";
 	}	
-	#my $dirstatus=&check_dir($dbindex);
 	my $dirstatus=&check_file_existance($dbindex,$username);
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output($dbindex,$dirstatus);

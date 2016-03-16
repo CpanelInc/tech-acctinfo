@@ -1,3 +1,4 @@
+V2.4.25- Revamped quota check.  Didn't like the first method I had. 
 V2.4.24- Fix php version check for EA4 (was changed at tome time). 
 V2.4.23- Fix quota check if Cannot stat() mounted device error.
 V2.4.22- Added check for custom style (PaperLantern theme)
