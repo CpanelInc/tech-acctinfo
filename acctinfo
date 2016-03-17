@@ -330,6 +330,7 @@ open(QUOTACHK, "/usr/bin/quota -slq $username|");
 my @quotachk=<QUOTACHK>;
 close(QUOTACHK);
 my $BlockLimitReached;
+my $quotaline;
 foreach $BlockLimitReached(@quotachk) { 
     chomp($BlockLimitReached);
     if ($BlockLimitReached =~ m/Block limit reached/) { 
