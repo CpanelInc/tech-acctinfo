@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.25";
+my $VERSION="2.4.26";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -289,12 +289,13 @@ if (-e("$UsersHomeDir/.lastlogin")) {
 print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
 # Perm check - make sure $UsersHomeDir is 711 - Warn if not!
-my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
-$statmode = sprintf "%lo", $statmode;
-#print "\n";
-if ( $statmode != 711 ) { 
-    print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
-	print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
+if (-e("$UsersHomeDir")) { 
+    my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
+    $statmode = sprintf "%lo", $statmode;
+    if ( $statmode != 711 ) { 
+        print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
+	    print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
+    }
 }
 print "\n";
 if ($Is_Reseller) { 
@@ -1232,7 +1233,7 @@ sub get_system_php_version() {
 	my $phpDefault = "";
 	foreach $phpconfline(@PHPCONF) { 
 		chomp($phpconfline);
-		if ($phpconfline =~ m/as the system default/) { 
+		if ($phpconfline =~ m/default/) { 
 			($phpDefault)=(split(/\s+/,$phpconfline))[2];
 		}
 	}
