@@ -1232,7 +1232,7 @@ sub get_system_php_version() {
 	my $phpDefault = "";
 	foreach $phpconfline(@PHPCONF) { 
 		chomp($phpconfline);
-		if ($phpconfline =~ m/as the system default/) { 
+		if ($phpconfline =~ m/default/) { 
 			($phpDefault)=(split(/\s+/,$phpconfline))[2];
 		}
 	}
