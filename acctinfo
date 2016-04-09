@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.26";
+my $VERSION="2.4.27";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -41,6 +41,7 @@ my $clearscreen = undef;
 my $helpME = undef;
 my $SearchFor = undef;
 my $cruft = undef;
+my $mail = undef;
 
 GetOptions(
 	'listdbs' => \$listdbs,
@@ -52,6 +53,7 @@ GetOptions(
 	'all' => \$all,
 	'help' => \$helpME,
 	'cruft' => \$cruft,
+	'mail' => \$mail,
 	'q' => \$clearscreen,
 );
 
@@ -189,12 +191,10 @@ my @ResolvedIP;
 my $ResolvedIP;
 if ($IS_USERNAME) { 
 	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-	#@ResolvedIP=qx[ dig \@8.8.8.8 $MAINDOMAIN A +short ];
 	@ResolvedIP=qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
 }
 else {  
 	## a domain name was entered so we should resolve the IP of that instead. 
-	#@ResolvedIP=qx[ dig \@8.8.8.8 $DOMAIN A +short ];
 	@ResolvedIP=qx[ dig \@208.67.222.222 $DOMAIN A +short ];
 }
 my $IPTYPE="";
@@ -278,6 +278,7 @@ foreach $passline(@PASSWDS) {
 		last;
 	}
 }
+
 
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
@@ -428,6 +429,10 @@ if ($defaultsite) {
 	print YELLOW "Not seeing the site you're expecting (or defaultwebpage.cgi)? - This may be why!\n";
 }
 
+if ($all or $mail) { 
+    &display_mail_info;
+}
+
 # Last Login IP
 if($LastLoginIP) { 
 	print WHITE "Last logged in to cPanel from IP: " . CYAN $LastLoginIP . "\n";
@@ -454,7 +459,7 @@ else {
 print "\n";
 print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "PARKED: " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
 &border;
-exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller);
+exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller or $mail);
 
 # END OF BASIC INFORMATION (no switches were added) 
 # ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
@@ -694,6 +699,8 @@ sub Usage {
    print GREEN "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
    print CYAN "acctinfo" . WHITE " --cruft cptestdomain.net\n";
    print GREEN "\t Perform a cruft check on cptestdomain.net.\n\n";
+   print CYAN "acctinfo" . WHITE " --mail cptestdomain.net\n";
+   print GREEN "\t Display mail information for cptestdomain.net.\n\n";
    print CYAN "acctinfo" . WHITE " --all cptestdomain.net\n";
    print GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n";
    print CYAN "acctinfo" . WHITE " --help\n";
@@ -1211,7 +1218,7 @@ sub get_php_version() {
 		@HTACCESS=<HTACCESS>;
 		close(HTACCESS);
 		foreach $htaline(@HTACCESS) {
-			if ($htaline =~ m/as the default/) { 
+			if ($htaline =~ m/default/) { 
 				($phpUserVersion) = (split(/\s+/,$htaline))[3];
 				# For some odd reason we are using curly quotes around the php version 
 				# within the .htaccess file.  No idea why that is.  But we need to remove them. 
@@ -1252,4 +1259,199 @@ sub isEA4 {
 		return 1;
 	}
 	return undef;
+}
+
+sub display_mail_info { 
+	if ($IS_USERNAME) { 
+		print RED "\n[WARN] - Email check skipped because you entered a username!\n\n";
+		return;
+	}
+	print "\n";
+    # first let's get the email accounts.
+    my $emailacctline;
+    opendir(EMAILACCTS,"$RealHome/mail/$DOMAIN");
+    my @EMAILACCTS=readdir(EMAILACCTS);
+    closedir(EMAILACCTS);
+	&smborder;
+    print "Email accounts for $DOMAIN: \n";
+    foreach $emailacctline(@EMAILACCTS) { 
+        chomp($emailacctline);
+        if ($emailacctline eq "." or $emailacctline eq "..") { 
+            next;
+        }
+        $emailacctline =~ s/\///g;   ## Strip trailing / 
+        print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
+		# Check the passwd and shadow files to make sure an entry exists
+		my $upasswdline;
+		my $ushadowline;
+		my $upasswdOK=0;
+		my $ushadowOK=0;
+		if (-e("$RealHome/etc/$DOMAIN/passwd")) { 
+			open(UPASSWD,"$RealHome/etc/$DOMAIN/passwd");
+			my @UPASSWD=<UPASSWD>;
+			close(UPASSWD);
+			my $upasswdstring = "$emailacctline:x:$UID:$GID";
+			foreach $upasswdline(@UPASSWD) { 
+				chomp($upasswdline);
+				if ($upasswdline =~ m/^$upasswdstring/) { 
+					$upasswdOK=1;
+					last;
+				}
+			}
+		}
+		else { 
+			print RED "[WARN] - $RealHome/etc/$DOMAIN/passwd file is missing!\n";
+			$upasswdOK=0;
+			next;
+		}
+		if (-e("$RealHome/etc/$DOMAIN/passwd")) { 
+			open(USHADOW,"$RealHome/etc/$DOMAIN/shadow");
+			my @USHADOW=<USHADOW>;
+			close(USHADOW);
+			foreach $ushadowline(@USHADOW) { 
+				chomp($ushadowline);
+				if ($ushadowline =~ m/^$emailacctline/) { 
+					$ushadowOK=1;
+					last;
+				}
+			}
+		}
+		else { 
+			print RED "[WARN] - $RealHome/etc/$DOMAIN/shadow file is missing!\n";
+			$ushadowOK=0;
+			next;
+		}
+		if (!($upasswdOK)) { print RED "[WARN] - Missing/Misconfigured passwd entry for $emailacctline\@$DOMAIN"; };
+		if (!($ushadowOK)) { print RED "[WARN] - Missing/Misconfigured shadow entry for $emailacctline\@$DOMAIN"; };
+		print "\n";
+		# If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory, 
+		# Count the number of filters and display that here.  
+		# As \_ User Level Filters: nn  
+		my $filtercnt=0;
+		my $ufilter;
+		my @UFILTER;
+		my @ufiltname;
+
+		if (-e("$RealHome/etc/$DOMAIN/$emailacctline/filter")) { 
+			open(FILTFILE,"$RealHome/etc/$DOMAIN/$emailacctline/filter");
+			my @UFILTER=<FILTFILE>;
+			close(FILTFILE);
+			foreach $ufilter(@UFILTER) { 
+				if (substr($ufilter,0,2) =~ m/# / or substr($ufilter,0,2) =~ m/#$/) { 
+					next;
+				}
+				if (substr($ufilter,0,1) eq "#") { 
+					push(@ufiltname,substr($ufilter,1)); 
+					$filtercnt++;
+				}
+			}
+			print YELLOW "\t \t \\_ has " . $filtercnt . " user level filters\n";
+			my $listfilt;
+			foreach $listfilt(@ufiltname) { 
+				chomp($listfilt);
+				print MAGENTA "\t\t\t \\_ Name: " . $listfilt . "\n";
+			}
+		}
+    }
+    # Now let's get the MX record and make sure the A record for it points to this server.
+	&smborder;
+	print "Checking MX records for $DOMAIN...\n";
+	my @MXRecords=qx[ dig \@208.67.220.220 $DOMAIN MX +short ];
+    my $IsRemote=0;
+    my $MXRecord;
+	if (@MXRecords) { 
+	    foreach $MXRecord(@MXRecords) { 
+        	chomp($MXRecord);
+        	my($pref,$theMX)=(split(/\s+/,$MXRecord));
+        	my $ARecordForMX=qx[ dig \@208.67.222.222 $theMX +short ];
+			chomp($ARecordForMX);
+        	if ($ARecordForMX eq $ResolvedIP) { 
+            	print YELLOW "\t \\_ $theMX resolves to $ARecordForMX (which is on this server)\n";
+        	}
+        	else { 
+            	print YELLOW "\t \\_ $theMX resolves to $ARecordForMX (which is NOT on this server)\n";
+            	$IsRemote=1;
+        	}
+    	} 
+	}
+	else {
+		print CYAN "\t \\_ None\n";
+	}
+    # Depending on whether $IsRemote is true or false, we check if the domain is listed in
+    # /etc/localdomains or /etc/remotedomains
+	&smborder;
+	print "Checking email routing...\n";
+    if ($IsRemote) { 
+        my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+        if ($IsInRemoteDomains) { 
+            print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/remotedomains\n";
+        }
+        else { 
+            print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/remotedomains\n";
+        }
+    }
+    else { 
+        my $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+        if ($IsInLocalDomains) { 
+            print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
+        }
+        else { 
+            print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
+        }
+    }
+	# Now list aliases (if any)
+	my $emailfwd;
+	my $fwdtype;
+	my $listfwd;
+	&smborder;
+	print "Aliases/Forwarders:\n";
+	open(FORWARDERS,"/etc/valiases/$DOMAIN");
+	my @FWDS=<FORWARDERS>;
+	close(FORWARDERS);
+	if (@FWDS) { 
+		foreach $emailfwd(@FWDS) { 
+			chomp($emailfwd);
+			if ($emailfwd =~ m/: /) { $fwdtype="(normal forward/alias)"; }
+			if ($emailfwd =~ m/\*:/) { $fwdtype="(deliver to $username main account)"; }
+			if ($emailfwd =~ m/:fail:/) { $fwdtype="(fail - bounce with message)"; }
+			if ($emailfwd =~ m/:blackhole:/) { $fwdtype="(blackhole - discard [not recommended])"; }
+			if ($emailfwd =~ m/\|/) { $fwdtype="(pipe to program)"; }
+			if ($emailfwd =~ m/mailman\/mail/) { $fwdtype="(mailman list)"; ($listfwd)=(split(/\s+/,$emailfwd))[0]; $emailfwd=$listfwd; }
+			print YELLOW "\t \\_ " . $emailfwd . " $fwdtype\n";;
+		}
+	}
+	else { 
+		print CYAN "\t \\_ None\n";
+	}
+	# get any system level filters (from /etc/vfilters/$DOMAIN file)
+	my $gfilter;
+	&smborder;
+	print "Global Level (system) Filters:\n";
+	open(GFILTFILE,"/etc/vfilters/$DOMAIN");
+	my @GFILTER=<GFILTFILE>;
+	my $gfiltercnt=0;
+	my @gfiltname;
+	close(GFILTFILE);
+	if (@GFILTER) { 
+		foreach $gfilter(@GFILTER) { 
+			if (substr($gfilter,0,2) =~ m/# / or substr($gfilter,0,2) =~ m/#$/) { 
+				next;
+			}
+			if (substr($gfilter,0,1) eq "#") { 
+				push(@gfiltname,substr($gfilter,1)); 
+				$gfiltercnt++;
+			}
+		}
+		print CYAN "\t \t \\_ " . $DOMAIN . " has " . $gfiltercnt . " global level filters\n";
+		my $glistfilt;
+		foreach $glistfilt(@gfiltname) { 
+			chomp($glistfilt);
+			print YELLOW "\t\t\t \\_ Name: " . $glistfilt . "\n";
+		}
+	}
+	else { 
+		print CYAN "\t \\_ None\n";
+	}
+	# Here we add the spf record and dkim record (if they exist).
+	&border;
 }
