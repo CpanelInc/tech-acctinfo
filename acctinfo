@@ -1366,10 +1366,12 @@ sub display_mail_info {
         	my $ARecordForMX=qx[ dig \@208.67.222.222 $theMX +short ];
 			chomp($ARecordForMX);
         	if ($ARecordForMX eq $ResolvedIP) { 
-            	print YELLOW "\t \\_ $theMX resolves to $ARecordForMX (which is on this server)\n";
+            	#print YELLOW "\t \\_ $pref $theMX resolves to $ARecordForMX (which is on this server)\n";
+            	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is on this server)\n";
         	}
         	else { 
-            	print YELLOW "\t \\_ $theMX resolves to $ARecordForMX (which is NOT on this server)\n";
+            	#print YELLOW "\t \\_ $pref $theMX resolves to $ARecordForMX (which is NOT on this server)\n";
+            	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is NOT on this server)\n";
             	$IsRemote=1;
         	}
     	} 
@@ -1380,7 +1382,7 @@ sub display_mail_info {
     # Depending on whether $IsRemote is true or false, we check if the domain is listed in
     # /etc/localdomains or /etc/remotedomains
 	&smborder;
-	print "Checking email routing...\n";
+	print "Checking email routing (based on MX check above)...\n";
     if ($IsRemote) { 
         my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
         if ($IsInRemoteDomains) { 
