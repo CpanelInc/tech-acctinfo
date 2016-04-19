@@ -1350,13 +1350,15 @@ sub display_mail_info {
 					$filtercnt++;
 				}
 			}
-			print YELLOW "\t \t \\_ has " . $filtercnt . " user level filters\n";
-			my $listfilt;
-			foreach $listfilt(@ufiltname) { 
-				chomp($listfilt);
-				print MAGENTA "\t\t\t \\_ Name: " . $listfilt . "\n";
-			}
-		}
+            if ($filtercnt > 0) { 
+			    print YELLOW "\t \t \\_ has " . $filtercnt . " user level filters\n";
+			    my $listfilt;
+			    foreach $listfilt(@ufiltname) { 
+				    chomp($listfilt);
+				    print MAGENTA "\t\t\t \\_ Name: " . $listfilt . "\n";
+			    }
+		    }
+        }
     }
     # Now let's get the MX record and make sure the A record for it points to this server.
 	&smborder;
@@ -1370,12 +1372,11 @@ sub display_mail_info {
         	my($pref,$theMX)=(split(/\s+/,$MXRecord));
         	my $ARecordForMX=qx[ dig \@208.67.222.222 $theMX +short ];
 			chomp($ARecordForMX);
-        	if ($ARecordForMX eq $ResolvedIP) { 
-            	#print YELLOW "\t \\_ $pref $theMX resolves to $ARecordForMX (which is on this server)\n";
+            my $Is_IP_OnServer = qx[ ifconfig | grep '$ARecordForMX' ];
+        	if ($Is_IP_OnServer) { 
             	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is on this server)\n";
         	}
         	else { 
-            	#print YELLOW "\t \\_ $pref $theMX resolves to $ARecordForMX (which is NOT on this server)\n";
             	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is NOT on this server)\n";
             	$IsRemote=1;
         	}
