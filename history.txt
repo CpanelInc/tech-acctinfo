@@ -1,3 +1,4 @@
+V2.4.29- Redirect quota STDERR output to /dev/null 
 V2.4.28- Fix --mail option to ignore uid:gid in ~/etc/domain.tld/passwd file. 
 V2.4.27- Add --mail option.  Displays email accounts, aliases, filters, mx records, and 
          does syntax checking of email routing (/etc/{local,remote}domains), passwd and 

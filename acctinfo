@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.28";
+my $VERSION="2.4.29";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -328,7 +328,7 @@ else {
 # Check if account is over quota, warn if so.
 # -s human-readable, -l local only (ignore NFS), -q quiet
 # First check if the account is over quota (slq does this, if nothing return it's not over quota.
-open(QUOTACHK, "/usr/bin/quota -slq $username|");
+open(QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |");
 my @quotachk=<QUOTACHK>;
 close(QUOTACHK);
 my $BlockLimitReached;
@@ -338,7 +338,7 @@ foreach $BlockLimitReached(@quotachk) {
     if ($BlockLimitReached =~ m/Block limit reached/) { 
         print RED "[WARN] - $username is over quota (";
         # Get the partition/drive and block size of the account. (quota -sl does this) 
-        open(QUOTA, "/usr/bin/quota -sl $username|");
+        open(QUOTA, "/usr/bin/quota -sl $username 2> /dev/null |");
         my @quotaline=<QUOTA>;
         close(QUOTA);
         foreach $quotaline(@quotaline) { 
