@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.29";
+my $VERSION="2.4.30";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -1324,10 +1324,8 @@ sub display_mail_info {
 			$ushadowOK=0;
 			next;
 		}
-		#if (!($upasswdOK)) { print RED "[WARN] - Missing/Misconfigured passwd entry for $emailacctline\@$DOMAIN"; };
-		if (!($upasswdOK)) { print RED "[WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
-		#if (!($ushadowOK)) { print RED "[WARN] - Missing/Misconfigured shadow entry for $emailacctline\@$DOMAIN"; };
-		if (!($ushadowOK)) { print RED "[WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
+		if (!($upasswdOK)) { print RED "\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
+		if (!($ushadowOK)) { print RED "\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
 		print "\n";
 		# If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory, 
 		# Count the number of filters and display that here.  
