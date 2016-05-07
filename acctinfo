@@ -1324,8 +1324,8 @@ sub display_mail_info {
 			$ushadowOK=0;
 			next;
 		}
-		if (!($upasswdOK)) { print RED "\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
-		if (!($ushadowOK)) { print RED "\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
+		if (!($upasswdOK)) { print RED "\n\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
+		if (!($ushadowOK)) { print RED "\n\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
 		print "\n";
 		# If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory, 
 		# Count the number of filters and display that here.  
