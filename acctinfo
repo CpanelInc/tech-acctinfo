@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.30";
+my $VERSION="2.4.31";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -260,7 +260,7 @@ else {
 }
 # Get home directory from /etc/passwd
 my @PASSWDS=undef;
-my $RealHome="";
+our $RealHome="";
 my $RealShell="";
 my $UID="";
 my $GID="";
@@ -282,19 +282,23 @@ foreach $passline(@PASSWDS) {
 
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
-if (-e("$UsersHomeDir/.lastlogin")) { 
-	$LastLoginIP=qx[ tail -1 $HOMEDIR/$username/.lastlogin ];
+#if (-e("$UsersHomeDir/.lastlogin")) { 
+if (-e("$RealHome/.lastlogin")) { 
+	$LastLoginIP=qx[ tail -1 $RealHome/$username/.lastlogin ];
 	chomp($LastLoginIP);
 }
 
 print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
 # Perm check - make sure $UsersHomeDir is 711 - Warn if not!
-if (-e("$UsersHomeDir")) { 
-    my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
+#if (-e("$UsersHomeDir")) { 
+if (-e("$RealHome")) { 
+    #my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
+    my $statmode = ( stat($RealHome) )[2] & 07777;
     $statmode = sprintf "%lo", $statmode;
     if ( $statmode != 711 ) { 
-        print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
+        #print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
+        print RED " - [WARN] - $RealHome permissions are not 711 [$statmode]\n";
 	    print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
     }
 }
@@ -341,10 +345,20 @@ foreach $BlockLimitReached(@quotachk) {
         open(QUOTA, "/usr/bin/quota -sl $username 2> /dev/null |");
         my @quotaline=<QUOTA>;
         close(QUOTA);
+	my $quotadev;
+	my $quotaHR;
         foreach $quotaline(@quotaline) { 
             chomp($quotaline);
             $quotaline =~ s/\s+/ /g;
-            print "$quotaline)\n" unless ($quotaline =~ m/Filesystem|blocks|Disk quotas for/);
+            ($quotadev)=(split(/\s+/,$quotaline))[0];
+            if ($quotaline =~ m/Filesystem|blocks|Disk quotas for/) { 
+                next;
+            }
+            else { 
+                $quotaHR=qx[ grep $quotadev /etc/mtab | awk '{print $2}' ];
+                #print "$quotaline)\n" unless ($quotaline =~ m/Filesystem|blocks|Disk quotas for/);
+                print "($quotaHR is over quota) - $quotaline\n";
+            }
         }
     }
 }
@@ -603,42 +617,10 @@ if ($listdbs or $all) {
 	&border;
 }
 
-# SSL INFO
-#if ($listssls or $all) { 
-#	my $sslline="";
-#	my $ssldomain="";
-#	my @SSLDATA=undef;
-#	my @SSLFOLDER=undef;
-#	my $SSLFILE="";
-#	my $SSLDOMAIN="";
-#	opendir(SSL,"/var/cpanel/userdata/$username/");
-#	@SSLFOLDER=readdir(SSL);
-#	closedir(SSL);
-#	foreach $SSLFILE(@SSLFOLDER) {
-#   	chomp($SSLFILE);
-#   	if ($SSLFILE =~ m/_SSL$/) { 
-#      	($SSLDOMAIN)=(split(/_/,$SSLFILE))[0];
-#      	push(@SSLDATA,"$SSLDOMAIN"); 
-#   	}    
-#	}
-#	splice(@SSLDATA,0,1);   ## Remove the first element since it will be blank
-#	my $sslcnt=@SSLDATA;
-#	if ($sslcnt > 0) {
-#		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-#		foreach $sslline(@SSLDATA) { 
-#			chomp($sslline);
-#			print YELLOW "\t \\_ " . $sslline . "\n";
-#		}
-#	}
-#	else { 
-#		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-#	}
-#	&border;
-#}
-
-# NEW SSL INFO ROUTINE - 12/13/2015 - PSE
 if ($listssls or $all) { 
-	my $basedir="$UsersHomeDir/ssl/certs";
+	#my $basedir="$UsersHomeDir/ssl/certs";
+	my $basedir="$RealHome/ssl/certs";
+    my $sslcnt=0;
 	my @certs;
 	my $cert;
 	my $domain;
@@ -653,8 +635,8 @@ if ($listssls or $all) {
 			chomp($cert);
 			if ($cert eq "." or $cert eq "..") { next; }
 			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
-         $domain =~ s/DNS://g;
-         $domain = &alltrim($domain);
+            $domain =~ s/DNS://g;
+            $domain = &alltrim($domain);
 			chomp($domain);
 			if ($domain eq "") { 
 				$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
@@ -672,6 +654,7 @@ if ($listssls or $all) {
 			print YELLOW . $domain . "\n";
 			print "\t \\_ " . GREEN . $startdate . "\n";
 			print "\t \\_ " . GREEN . $expiredate . "\n";
+            $sslcnt++;
 			&border;
 		}
 	}
@@ -679,6 +662,9 @@ if ($listssls or $all) {
 		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 		&border;
 	}
+    if ($sslcnt == 0) { 
+		print "\t " . WHITE "None.\n";
+    }
 }
 
 exit;
@@ -993,14 +979,21 @@ sub cruft_check {
 		&print_output($file2search,$filestatus);
 	}
 	# Check for home directory and others to see if they exist
-	my $UsersHomeDir = File::HomeDir::users_home($username);
-	my $dirstatus=&check_dir($UsersHomeDir);
+	my $dirstatus=&check_dir("$HOMEDIR/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output($UsersHomeDir,$dirstatus);
+	&print_output("$HOMEDIR/$username",$dirstatus);
 	# Check /var/cpanel/userdata/$username
 	my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/cpanel/userdata/$username",$dirstatus);
+	# Check /etc/valiases/$MAINDOMAIN
+	my $dirstatus=&check_dir("/etc/valiases/$MAINDOMAIN");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("/etc/valiases/$MAINDOMAIN",$dirstatus);
+	# Check /etc/vfilters/$MAINDOMAIN
+	my $dirstatus=&check_dir("/etc/vfilters/$MAINDOMAIN");
+	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	&print_output("/etc/vfilters/$MAINDOMAIN",$dirstatus);
 	# Check /var/cpanel/users/$username
 	my $dirstatus=&check_dir("/var/cpanel/users/$username");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
@@ -1272,11 +1265,13 @@ sub display_mail_info {
     opendir(EMAILACCTS,"$RealHome/mail/$DOMAIN");
     my @EMAILACCTS=readdir(EMAILACCTS);
     closedir(EMAILACCTS);
+    my @SORTED2=sort(@EMAILACCTS);
+    @EMAILACCTS=@SORTED2;
 	&smborder;
     print "Email accounts for $DOMAIN: \n";
     foreach $emailacctline(@EMAILACCTS) { 
         chomp($emailacctline);
-        if ($emailacctline eq "." or $emailacctline eq "..") { 
+        if ($emailacctline eq "." or $emailacctline eq ".." or $emailacctline eq "new" or $emailacctline eq "cur" or $emailacctline eq "tmp") { 
             next;
         }
         $emailacctline =~ s/\///g;   ## Strip trailing / 
@@ -1290,9 +1285,6 @@ sub display_mail_info {
 			open(UPASSWD,"$RealHome/etc/$DOMAIN/passwd");
 			my @UPASSWD=<UPASSWD>;
 			close(UPASSWD);
-            # Apparently we don't care about the UID and GID in these files. They need to be
-            # there for webmail only, but we don't care what the values are.  
-			#my $upasswdstring = "$emailacctline:x:$UID:$GID";
 			my $upasswdstring = "$emailacctline:x:";
 			foreach $upasswdline(@UPASSWD) { 
 				chomp($upasswdline);
@@ -1324,9 +1316,10 @@ sub display_mail_info {
 			$ushadowOK=0;
 			next;
 		}
-		if (!($upasswdOK)) { print RED "\n\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
-		if (!($ushadowOK)) { print RED "\n\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
+		if (!($upasswdOK)) { print RED "\n\t\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
+		if (!($ushadowOK)) { print RED "\n\t\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
 		print "\n";
+        # Add a check here for .boxtrapperenable touch file - enabled if it exists.
 		# If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory, 
 		# Count the number of filters and display that here.  
 		# As \_ User Level Filters: nn  
@@ -1422,6 +1415,7 @@ sub display_mail_info {
 			if ($emailfwd =~ m/:fail:/) { $fwdtype="(fail - bounce with message)"; }
 			if ($emailfwd =~ m/:blackhole:/) { $fwdtype="(blackhole - discard [not recommended])"; }
 			if ($emailfwd =~ m/\|/) { $fwdtype="(pipe to program)"; }
+            if ($emailfwd =~ m/autorespond/) { $fwdtype="(auto responder)"; }
 			if ($emailfwd =~ m/mailman\/mail/) { $fwdtype="(mailman list)"; ($listfwd)=(split(/\s+/,$emailfwd))[0]; $emailfwd=$listfwd; }
 			print YELLOW "\t \\_ " . $emailfwd . " $fwdtype\n";;
 		}
