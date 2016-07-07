@@ -284,7 +284,7 @@ foreach $passline(@PASSWDS) {
 my $LastLoginIP="";
 #if (-e("$UsersHomeDir/.lastlogin")) { 
 if (-e("$RealHome/.lastlogin")) { 
-	$LastLoginIP=qx[ tail -1 $RealHome/$username/.lastlogin ];
+	$LastLoginIP=qx[ tail -1 $RealHome/.lastlogin ];
 	chomp($LastLoginIP);
 }
 
