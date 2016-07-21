@@ -1,36 +1,63 @@
+V2.4.32- Reworked phpversion (default and account for EA4) 
+V2.4.32- Reworked SSL certificate check (much smaller now)
+V2.4.32- Code clean up
+
 V2.4.31- Add /etc/valiases and /etc/vfilters to cruft check (Thanks Kyle). 
+
 V2.4.29- Redirect quota STDERR output to /dev/null 
+
 V2.4.28- Fix --mail option to ignore uid:gid in ~/etc/domain.tld/passwd file. 
+
 V2.4.27- Add --mail option.  Displays email accounts, aliases, filters, mx records, and 
          does syntax checking of email routing (/etc/{local,remote}domains), passwd and 
          shadow files. Still going to add SPF/DKIM info. 
+
 V2.4.26- Fix php version check for EA4 (patch provided by salt-lick) - Thanks!
+
 V2.4.25- Revamped quota check.  Didn't like the first method I had. 
+
 V2.4.24- Fix php version check for EA4 (was changed at some time). 
+
 V2.4.23- Fix quota check if Cannot stat() mounted device error.
+
 V2.4.22- Added check for custom style (PaperLantern theme)
+
 V2.4.21- Added quota check and warn if account is over quota.
+
 V2.4.20- Added permissions check of /home/USERNAME directory to make sure it is 711.
+
 v2.4.19- Added to cruft check a count of DNS lines in /var/cpanel/users/username file. 
+
 V2.4.17- Fixed SSL info display and added check for uid/gid less than 500 on CentOS 5/6.
+
 V2.4.16- Added PHP Version check (if EA4)
+
 V2.4.15- Added CageFS check (if CageFS is installed).
+
 V2.4.14- Reworked the SSL certificate check (now uses /home/user/ssl/certs)
 V2.4.14- Fixed last login IP to only pull the last IP address
+
 V2.4.11- Added CentOS/CloudLinux Version 7 check - for MINUID less than 1000
          Added check for /var/cpanel/databases/username.yaml/json (11.50 uses .json)
          
 V2.4.10- Fixed empty string in cruft check that was sometimes causing missing data to show as
          exists.  
+
 V2.4.9-  Removed exit from cruft check if no data found in /var/cpanel/accounting.log
          which would allow the cruft check to continue.
+
 V2.4.8-  Completed cruft check (Yay!) - and did a few more bug fixes.
-V2.4.7-  Fixed small bug when domain name can not resolve (it was displaying the dig output with connection timed out) 
+
+V2.4.7-  Fixed small bug when domain name can not resolve (it was displaying the dig 
+         output with connection timed out) 
+
 V2.4.6-  Continued on cruft check - still need to check postgresql databases
+
 V2.4.2-  Started cruft check routine - almost done.  
 V2.4.2-  Added border to end of main output.
 V2.4.2-  Fixed Usage: display ($0 was sometimes returning /dev/fd/63 instead of acctinfo)
 V2.4.2-  Added theme and shell information to output.
+
 V2.4  -  Fixed issue with it occasionally getting the wrong real home directory from /etc/passwd
          Fixed issue with [Not on this server] IP resolution so that it does not display 
          default webpage cgi

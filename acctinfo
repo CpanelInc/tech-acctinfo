@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.31";
+my $VERSION="2.4.32";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -116,7 +116,6 @@ if ($MAINDOMAIN eq "" and $username eq "") {
 
 # Load /var/cpanel/users/$username into config hash variable
 my $user_conf = Cpanel::Config::LoadCpUserFile::load($username);
-my $UsersHomeDir = File::HomeDir::users_home($username);
 my $DOMAIN = $QUERY;
 my $IS_PARKED="";
 my $IS_ADDON="";
@@ -282,7 +281,6 @@ foreach $passline(@PASSWDS) {
 
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP="";
-#if (-e("$UsersHomeDir/.lastlogin")) { 
 if (-e("$RealHome/.lastlogin")) { 
 	$LastLoginIP=qx[ tail -1 $RealHome/.lastlogin ];
 	chomp($LastLoginIP);
@@ -290,14 +288,11 @@ if (-e("$RealHome/.lastlogin")) {
 
 print GREEN ON_BLACK "The main domain is " . BLUE $MAINDOMAIN . GREEN ON_BLACK $RO_TEXT . "\n";
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
-# Perm check - make sure $UsersHomeDir is 711 - Warn if not!
-#if (-e("$UsersHomeDir")) { 
+# Perm check - make sure $RealHome is 711 - Warn if not!
 if (-e("$RealHome")) { 
-    #my $statmode = ( stat($UsersHomeDir) )[2] & 07777;
     my $statmode = ( stat($RealHome) )[2] & 07777;
     $statmode = sprintf "%lo", $statmode;
     if ( $statmode != 711 ) { 
-        #print RED " - [WARN] - $UsersHomeDir permissions are not 711 [$statmode]\n";
         print RED " - [WARN] - $RealHome permissions are not 711 [$statmode]\n";
 	    print YELLOW "(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
     }
@@ -356,7 +351,6 @@ foreach $BlockLimitReached(@quotachk) {
             }
             else { 
                 $quotaHR=qx[ grep $quotadev /etc/mtab | awk '{print $2}' ];
-                #print "$quotaline)\n" unless ($quotaline =~ m/Filesystem|blocks|Disk quotas for/);
                 print "($quotaHR is over quota) - $quotaline\n";
             }
         }
@@ -391,7 +385,7 @@ if ($isEA4) {
 	$PHPversion = &get_php_version();
 	if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) { $PHPversion = "Inherited"; }
    $PHPversion = " " . $PHPversion;
-	print WHITE "PHP Version:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
+	print WHITE "PHP Version [EA4]:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
 }
 
 my $cageFSStats = &check_for_cagefs();
@@ -401,7 +395,7 @@ if ($cageFSStats) {
 else {
 	print WHITE "CageFS: " . CYAN . "Not installed!\n";
 }
-my $IS_IP_ON_SERVER = qx[ ifconfig | grep $IPADDR ];
+my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
 my $NOTONSERVER="[ Is configured on this server ] ";
 if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER="[ Not configured on this server ]"; }
 print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") - $NOTONSERVER\n";
@@ -473,7 +467,6 @@ else {
 print "\n";
 print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "PARKED: " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
 &border;
-exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $listssls or $listreseller or $mail);
 
 # END OF BASIC INFORMATION (no switches were added) 
 # ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
@@ -482,7 +475,7 @@ exit unless($all or $listsubs or $listaddons or $listparked or $listdbs or $list
 my $SUB="";
 my $PARK="";
 my $ADDON="";
-if ($subcnt+$addoncnt+$parkcnt>1 or ($all or $listsubs or $listaddons or $listparked)) { 
+if ($subcnt+$addoncnt+$parkcnt>1 and ($all or $listsubs or $listaddons or $listparked)) { 
 	print WHITE "The following are associated with " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
 	&smborder;
 }
@@ -538,9 +531,7 @@ if ($listreseller or $all) {
 	if ($Is_Reseller and $ResellerAcctsCnt > 0) { 
 		print CYAN $MAINDOMAIN . WHITE " is a reseller and has the following ($ResellerAcctsCnt) accounts under it\n";
 		shift @ACCTSOWNEDBYRESELLER;
-      # Sort @ACCTSOWNEDBYRESELLER here
       my @SORTEDRESELLERACCTS=sort(@ACCTSOWNEDBYRESELLER);
-		#foreach $owned_by_reseller(@ACCTSOWNEDBYRESELLER) { 
 		foreach $owned_by_reseller(@SORTEDRESELLERACCTS) { 
 			chomp($owned_by_reseller);
 			print BOLD YELLOW ON_BLACK "\t \\_ $owned_by_reseller\n";
@@ -565,17 +556,11 @@ if ($listdbs or $all) {
 	my $first8;
 	if ($DBPrefix) { 
 		$first8=substr($username,0,8);
-		#@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User like '$first8%'" | mysql -BN ];
 		@USERDBS=qx[ echo "SHOW DATABASES like '$first8%'" | mysql -BN ];
 	}
 	else { 
-		#@USERDBS=qx[ echo "select distinct(Db) from mysql.db where User = '$username'" | mysql -BN ];
 		@USERDBS=qx[ echo "SHOW DATABASES WHERE User = '$username%'" | mysql -BN ];
 	}
-#	print "DEBUG: first8 = $first8\n";
-	#@USERDBS=qx[ echo "show databases like '$first8%'" | mysql ];
-	#@USERDBS=qx[ echo "select Db from mysql.db where User = '$first8'" | mysql -BN ];
-#	splice(@USERDBS,0,1);
 	my $DBCNT=@USERDBS;
 	if ($DBCNT == 0) {
 		print WHITE "No MySQL databases found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
@@ -618,53 +603,42 @@ if ($listdbs or $all) {
 }
 
 if ($listssls or $all) { 
-	#my $basedir="$UsersHomeDir/ssl/certs";
-	my $basedir="$RealHome/ssl/certs";
-    my $sslcnt=0;
+	my $basedir="$RealHome/ssl";
+	my $sslcertdir="$RealHome/ssl/certs";
+	my $sslkeydir="$RealHome/ssl/keys";
 	my @certs;
 	my $cert;
-	my $domain;
+	my $sslsubject;
 	my $startdate;
 	my $expiredate;
-	if (-e("$basedir")) { 
+	if (-e("$sslcertdir")) { 
 		print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-		opendir(ssldir,"$basedir");
+		opendir(ssldir,"$sslcertdir");
 		my @certs=readdir(ssldir);
 		closedir(ssldir);
 		foreach $cert(@certs) {
 			chomp($cert);
 			if ($cert eq "." or $cert eq "..") { next; }
-			$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'DNS:' ];
-            $domain =~ s/DNS://g;
-            $domain = &alltrim($domain);
-			chomp($domain);
-			if ($domain eq "") { 
-				$domain=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Subject: CN=' ];
-				chomp($domain);
-				$domain =~ s/^\s*(.*?)\s*$/$1/;
-				$domain = substr($domain,12);
-				($domain)=(split(/,/,$domain))[0];
-			} 
-			$startdate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not Before:' ];
-			$expiredate=qx[ openssl x509 -in "$basedir/$cert" -text -noout | grep 'Not After :' ];
+			$sslsubject=qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
+			my $CNloc=index($sslsubject, "CN=");
+			my $CN=substr($sslsubject,$CNloc);
+			my $domainloc=index($CN, "/");
+			my $domain=substr($CN,3,($domainloc-3));
+			$startdate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notBefore' ];
+			$expiredate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notAfter' ];
 			chomp($startdate);
 			chomp($expiredate);
-			$startdate =~ s/^\s*(.*?)\s*$/$1/;
-			$expiredate =~ s/^\s*(.*?)\s*$/$1/;
+			($startdate)=(split(/=/,$startdate))[1];
+			($expiredate)=(split(/=/,$expiredate))[1];
 			print YELLOW . $domain . "\n";
-			print "\t \\_ " . GREEN . $startdate . "\n";
-			print "\t \\_ " . GREEN . $expiredate . "\n";
-            $sslcnt++;
-			&border;
+			print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
+			print WHITE "\t \\_ Not After : " . GREEN . $expiredate . "\n";
 		}
 	}
 	else { 
 		print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
-		&border;
 	}
-    if ($sslcnt == 0) { 
-		print "\t " . WHITE "None.\n";
-    }
+	&border;
 }
 
 exit;
@@ -761,7 +735,7 @@ sub check_cloudflare_ips {
 
 sub check_for_nat { 
 	return if (!(-e("/var/cpanel/cpnat")));
-   my $chkIP=$_[0];
+	my $chkIP=$_[0];
 	open(CPNAT,"/var/cpanel/cpnat");
 	my @CPNAT=<CPNAT>;
 	close(CPNAT);
@@ -789,7 +763,7 @@ sub check_resolved_ip {
    else {
       $defaultsite=1;
    }
-	my $Is_IP_OnServer = qx[ ifconfig | grep '$IP2CHK' ];
+	my $Is_IP_OnServer = qx[ ip addr | grep '$IP2CHK' ];
 	if (!($Is_IP_OnServer)) { 
 		$RetVal = $RetVal .= " [Not on this server]";
 		$defaultsite=1;
@@ -807,7 +781,7 @@ sub check_resolved_ip {
          $defaultsite=0;
       }
 	}
-	my $Is_IP_OnServer = qx[ ifconfig | grep '$IS_NAT' ];
+	my $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
 	if (!($Is_IP_OnServer)) { 
 		$RetVal = $RetVal .= " [Not on this server]";
 		$defaultsite=1;
@@ -1204,21 +1178,15 @@ sub check_for_cagefs() {
 sub get_php_version() { 
 	return unless($isEA4);
 	my $phpUserVersion;
-	my @HTACCESS;
-	my $htaline;
-	if (-e("$UsersHomeDir/public_html/.htaccess")) { 
-		open(HTACCESS,"$UsersHomeDir/public_html/.htaccess");
-		@HTACCESS=<HTACCESS>;
-		close(HTACCESS);
-		foreach $htaline(@HTACCESS) {
-			if ($htaline =~ m/default/) { 
-				($phpUserVersion) = (split(/\s+/,$htaline))[3];
-				# For some odd reason we are using curly quotes around the php version 
-				# within the .htaccess file.  No idea why that is.  But we need to remove them. 
-				$phpUserVersion =~ s/\xE2\x80\x9D//g;
-				$phpUserVersion =~ s/\xE2\x80\x9C//g;
-				chomp($phpUserVersion);
-			}
+	my $userdataline;
+	my @USERDATA;
+	open(USERDATA,"/var/cpanel/userdata/$username/$DOMAIN");
+	@USERDATA=<USERDATA>;
+	close(USERDATA);
+	foreach $userdataline(@USERDATA) {
+		if ($userdataline =~ m/phpversion:/) { 
+			($phpUserVersion) = (split(/: /,$userdataline))[1];
+			chomp($phpUserVersion);
 		}
 	}
 	return $phpUserVersion;
@@ -1226,18 +1194,17 @@ sub get_php_version() {
 
 sub get_system_php_version() { 
 	return unless($isEA4);
-	open(PHPCONF,"/etc/apache2/conf.d/php.conf");
+	open(PHPCONF,"/etc/cpanel/ea4/php.conf");
 	my @PHPCONF=<PHPCONF>;
 	close(PHPCONF);
 	my $phpconfline;
-	my $phpDefault = "";
+	my $phpDefault;
 	foreach $phpconfline(@PHPCONF) { 
 		chomp($phpconfline);
-		if ($phpconfline =~ m/default/) { 
-			($phpDefault)=(split(/\s+/,$phpconfline))[2];
+		if ($phpconfline =~ m/default:/) { 
+			($phpDefault)=(split(/: /,$phpconfline))[1];
 		}
 	}
-	$phpDefault = &alltrim($phpDefault);
 	return $phpDefault;
 }
 
@@ -1256,10 +1223,8 @@ sub isEA4 {
 
 sub display_mail_info { 
 	if ($IS_USERNAME) { 
-		print RED "\n[WARN] - Email check skipped because you entered a username!\n\n";
-		return;
+		$DOMAIN = $MAINDOMAIN;
 	}
-	print "\n";
     # first let's get the email accounts.
     my $emailacctline;
     opendir(EMAILACCTS,"$RealHome/mail/$DOMAIN");
@@ -1316,8 +1281,8 @@ sub display_mail_info {
 			$ushadowOK=0;
 			next;
 		}
-		if (!($upasswdOK)) { print RED "\n\t\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
-		if (!($ushadowOK)) { print RED "\n\t\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
+		if (!($upasswdOK)) { print RED "\n\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN"; };
+		if (!($ushadowOK)) { print RED "\n\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN"; };
 		print "\n";
         # Add a check here for .boxtrapperenable touch file - enabled if it exists.
 		# If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory, 
@@ -1357,19 +1322,26 @@ sub display_mail_info {
 	my @MXRecords=qx[ dig \@208.67.220.220 $DOMAIN MX +short ];
     my $IsRemote=0;
     my $MXRecord;
+	my $Is_IP_OnServer;
 	if (@MXRecords) { 
 	    foreach $MXRecord(@MXRecords) { 
         	chomp($MXRecord);
         	my($pref,$theMX)=(split(/\s+/,$MXRecord));
         	my $ARecordForMX=qx[ dig \@208.67.222.222 $theMX +short ];
 			chomp($ARecordForMX);
-            my $Is_IP_OnServer = qx[ ifconfig | grep '$ARecordForMX' ];
-        	if ($Is_IP_OnServer) { 
-            	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is on this server)\n";
-        	}
-        	else { 
-            	print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (which is NOT on this server)\n";
-            	$IsRemote=1;
+			my $IS_NAT=&check_for_nat($ARecordForMX);
+			if ($IS_NAT) {    ## NAT IP ADDRESS RETURNED!
+           		$Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
+        		if ($Is_IP_OnServer) { 
+            		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX => $IS_NAT (Configured on this server)\n";
+				}
+			}
+        	else {  ## NO NAT FOUND!
+           		$Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
+        		if ($Is_IP_OnServer) { 
+            		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
+	            	$IsRemote=1;
+				}
         	}
     	} 
 	}
