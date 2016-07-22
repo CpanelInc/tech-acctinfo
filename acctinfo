@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.32";
+my $VERSION="2.4.33";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -1335,10 +1335,17 @@ sub display_mail_info {
         		if ($Is_IP_OnServer) { 
             		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX => $IS_NAT (Configured on this server)\n";
 				}
+                else { 
+            		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
+	            	$IsRemote=1;
+                }
 			}
         	else {  ## NO NAT FOUND!
-           		$Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
+           		$Is_IP_OnServer = qx[ ip addr | grep '$ARecordForMX' ];
         		if ($Is_IP_OnServer) { 
+            		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (Configured on this server)\n";
+                }
+                else { 
             		print YELLOW "\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
 	            	$IsRemote=1;
 				}

@@ -1,3 +1,6 @@
+
+V2.4.33- Fix logic error with --mail function (oops)
+
 V2.4.32- Reworked phpversion (default and account for EA4) 
 V2.4.32- Reworked SSL certificate check (much smaller now)
 V2.4.32- Code clean up
