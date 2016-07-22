@@ -623,7 +623,8 @@ if ($listssls or $all) {
 			my $CNloc=index($sslsubject, "CN=");
 			my $CN=substr($sslsubject,$CNloc);
 			my $domainloc=index($CN, "/");
-			my $domain=substr($CN,3,($domainloc-3));
+			#my $domain=substr($CN,3,($domainloc-3));
+			my $domain=substr($CN,3,($domainloc));
 			$startdate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notBefore' ];
 			$expiredate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notAfter' ];
 			chomp($startdate);
