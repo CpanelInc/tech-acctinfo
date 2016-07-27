@@ -1,3 +1,6 @@
+V2.4.35- Rework/clean the cruft check and add MySQL databases to cruft check.
+
+V2.4.34- Fix SSL function (was stippring out the TLD for some odd reason).  
 
 V2.4.33- Fix logic error with --mail function (oops)
 

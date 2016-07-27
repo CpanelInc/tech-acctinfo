@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.33";
+my $VERSION="2.4.35";
 
 use File::HomeDir;
 use Getopt::Long;
@@ -244,6 +244,7 @@ foreach $RESELLER(@ALL_RESELLERS) {
 			}
 		}
 		$ResellerAcctsCnt=@ACCTSOWNEDBYRESELLER;
+		$ResellerAcctsCnt--;
 		last;
 	}
 }
@@ -620,11 +621,10 @@ if ($listssls or $all) {
 			chomp($cert);
 			if ($cert eq "." or $cert eq "..") { next; }
 			$sslsubject=qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
-			my $CNloc=index($sslsubject, "CN=");
-			my $CN=substr($sslsubject,$CNloc);
-			my $domainloc=index($CN, "/");
-			#my $domain=substr($CN,3,($domainloc-3));
-			my $domain=substr($CN,3,($domainloc));
+            my $CNloc=index($sslsubject, "CN=");
+            my $CN=substr($sslsubject,$CNloc);
+            my $domainloc=index($CN, "/");
+            my $domain=substr($CN,3,($domainloc));
 			$startdate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notBefore' ];
 			$expiredate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notAfter' ];
 			chomp($startdate);
@@ -801,12 +801,14 @@ sub cruft_check {
 	my $len=0;
 	my $filestatus="";
 	my $TrueUserLine = "";
+	my $isTerminated=0;
 	my $termdate="";
 	my @temp=undef;
 	my $DNSLineCnt=0;
 	my $TotalDomainCnt=0;
 
 	# Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
+	# ONLY MAIN ACCT / DOMAIN is checked 
 	print BLUE "From your query of " . GREEN $QUERY . BLUE " I have determined:\n";
 	my $isActive;
 	my $is_acct;
@@ -824,6 +826,7 @@ sub cruft_check {
 			$is_acct = 1;
 			if (/CREATE/) { 
 				$isActive = 1;
+				$isTerminated=0;
 				chomp($username = $temp[-1]);
 				chomp($MAINDOMAIN = $temp[-3]);
 			}
@@ -831,6 +834,7 @@ sub cruft_check {
 				chomp($username = $temp[-1]);
 				chomp($MAINDOMAIN = $temp[-2]);
 				$isActive = 0;
+				$isTerminated=1;
 				@temp = ();
 				@temp = split(/:/);
 				$termdate=@temp[0].":".@temp[1].":".@temp[2];
@@ -838,9 +842,11 @@ sub cruft_check {
 		}
 	}
 	close(ACCOUNTING);	
-	
+	if ($isTerminated) {    ## $is_acct is true if this is the main account/domain
+		print "$MAINDOMAIN ($username) was terminated on $termdate\n";
+	}
 	if ($isActive) { 
-		print "$MAINDOMAIN ($username) is an active account (according to /var/cpanel/accounting.log)\n";
+		print "$MAINDOMAIN ($username) is active (according to /var/cpanel/accounting.log)\n";
 		if ($addoncnt > 0) { 
 			print "It has $addoncnt Addon domains\n";
 		}
@@ -858,54 +864,52 @@ sub cruft_check {
 		# it equalts $TotalDomainCnt.  Warn if it does NOT!
 		$DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
 	}
-	if ($is_acct and !$isActive) { 
-		print "$MAINDOMAIN ($username) was terminated on $termdate\n";
-	}
 	# END OF ACCOUNTING LOG CHECK
 
 	my $useQuery = 0;
-	if (!($MAINDOMAIN) and !($username)) { 
-		print "No data found for your query of: $QUERY (in /var/cpanel/accounting.log)\n";
-		if ($IS_USERNAME) { 
-			$username = $QUERY;
-		}	
-		else { 
-			exit;
-		}
+	if (!$isActive and !$is_acct and !$isTerminated and !$MAINDOMAIN and !$username) { 
+		print "No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
+		exit;
+#		if ($IS_USERNAME) { 
+#			$username = $QUERY;
+#		}	
+#		else { 
+#			$MAINDOMAIN = $QUERY;
+#		}
 	}
-	if (!$isActive) { 
+	if (!$isActive) {   
 		my $isAddon;
 		my $isSub;
 		my $isParked;
-		$isAddon = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==addon==' ];
+		$isAddon = qx[ grep '$QUERY' /etc/userdatadomains | grep '==addon==' ];
 		if ($isAddon) { 
 			($username) = (split(/\s+/,$isAddon))[1];
 			($username) = (split(/==/,$username));
 			($isAddon) = (split(/:/,$isAddon));
 			print "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
 		}
-		$isSub = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==sub==' ];
+		$isSub = qx[ grep '$QUERY' /etc/userdatadomains | grep '==sub==' ];
 		if ($isSub) { 
 			($username) = (split(/\s+/,$isSub))[1];
 			($username) = (split(/==/,$username));
 			($isSub) = (split(/:/,$isSub));
-			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n";
+			print "$QUERY has an entry in /etc/userdatadomains as a Sub Domain $isSub\n" unless($isAddon);
 		}
-		$isParked = qx[ grep '\b$QUERY\b' /etc/userdatadomains | grep '==parked==' ];
+		$isParked = qx[ grep '$QUERY' /etc/userdatadomains | grep '==parked==' ];
 		if ($isParked) { 
 			($username) = (split(/\s+/,$isParked))[1];
 			($username) = (split(/==/,$username));
 			($isParked) = (split(/:/,$isParked));
 			print "$QUERY has an entry in /etc/userdatadomains as a Parked Domain $isParked\n";
 		}
-		($MAINDOMAIN)=(split(/\s+/,qx[ grep '$username' /etc/trueuserdomains ]));
-		$MAINDOMAIN =~ s/://g;
-		if ($MAINDOMAIN and $username) { 
-			print "Checking main account $MAINDOMAIN ($username) instead...\n";
-			$useQuery=0;
+		if (!$MAINDOMAIN and $username) { 
+			($MAINDOMAIN) = (split(/:/,qx[ grep '$username' /etc/trueuserdomains ]))[0];
+			chomp($MAINDOMAIN);
 		}
-		else { 
-			$useQuery=1;
+		$useQuery = ($IS_USERNAME) ? 1 : 0;
+		if ($useQuery and ($isAddon or $isSub or $isParked)) { 
+			print "Checking main domain $MAINDOMAIN ($username) instead...\n";
+			$QUERY=$username;
 		}
 	}
 	&smborder;
@@ -953,76 +957,93 @@ sub cruft_check {
 		if ($filestatus) { $filestatus = GREEN "[EXISTS]"; } else { $filestatus = RED "[MISSING]"; }
 		&print_output($file2search,$filestatus);
 	}
-	# Check for home directory and others to see if they exist
-	my $dirstatus=&check_dir("$HOMEDIR/$username");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("$HOMEDIR/$username",$dirstatus);
-	# Check /var/cpanel/userdata/$username
-	my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/var/cpanel/userdata/$username",$dirstatus);
-	# Check /etc/valiases/$MAINDOMAIN
-	my $dirstatus=&check_dir("/etc/valiases/$MAINDOMAIN");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/etc/valiases/$MAINDOMAIN",$dirstatus);
-	# Check /etc/vfilters/$MAINDOMAIN
-	my $dirstatus=&check_dir("/etc/vfilters/$MAINDOMAIN");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/etc/vfilters/$MAINDOMAIN",$dirstatus);
-	# Check /var/cpanel/users/$username
-	my $dirstatus=&check_dir("/var/cpanel/users/$username");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/var/cpanel/users/$username",$dirstatus);
-	if ($DNSLineCnt != $TotalDomainCnt) { 
-				print RED "\t \\_ [WARN]: One or more DNS lines may be missing from this file!\n";
+	if ($username) { 
+		# Check for home directory and others to see if they exist
+		my $dirstatus=&check_dir("$HOMEDIR/$username");
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output("$HOMEDIR/$username",$dirstatus);
+		# Check /var/cpanel/userdata/$username
+		my $dirstatus=&check_dir("/var/cpanel/userdata/$username");
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output("/var/cpanel/userdata/$username",$dirstatus);
+		# Check /var/cpanel/users/$username
+		my $dirstatus=&check_dir("/var/cpanel/users/$username");
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output("/var/cpanel/users/$username",$dirstatus);
+		if ($DNSLineCnt != $TotalDomainCnt) { 
+			print RED "\t \\_ [WARN]: One or more DNS lines may be missing from this file!\n";
+		}
+		# Check if /var/cpanel/databases/grants_$username.yaml exists!
+		my $dirstatus=&check_dir("/var/cpanel/databases/grants_$username.yaml");
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output("/var/cpanel/databases/grants_$username.yaml",$dirstatus);
+		my $CPVersion = `cat /usr/local/cpanel/version`;
+		my $yaml_json = ($CPVersion < 11.50) ? "yaml" : "json";
+		my $dirstatus=&check_dir("/var/cpanel/databases/$username.$yaml_json");
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output("/var/cpanel/databases/$username.$yaml_json",$dirstatus);
+		my $dbindex = ($CPVersion < 11.50) ? "/var/cpanel/databases/dbindex.db" : "/var/cpanel/databases/dbindex.db.json";
+		my $dirstatus=&check_file_existance($dbindex,$username);
+		if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+		&print_output($dbindex,$dirstatus);
 	}
+	else { 
+		print "Could not determine username so skipping all username checks!\n";
+	}
+	if (!$IS_USERNAME) { 
+		# Check /etc/valiases/$QUERY
+    	my $dirstatus=&check_dir("/etc/valiases/$QUERY");
+    	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+    	&print_output("/etc/valiases/$QUERY",$dirstatus);
+		# Check /etc/vfilters/$QUERY
+    	my $dirstatus=&check_dir("/etc/vfilters/$QUERY");
+    	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+    	&print_output("/etc/vfilters/$QUERY",$dirstatus);
+	}
+	else { 
+	    my $dirstatus=&check_dir("/etc/valiases/$MAINDOMAIN");
+	    if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	    &print_output("/etc/valiases/$MAINDOMAIN",$dirstatus);
+	    # Check /etc/vfilters/$MAINDOMAIN
+	    my $dirstatus=&check_dir("/etc/vfilters/$MAINDOMAIN");
+	    if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
+	    &print_output("/etc/vfilters/$MAINDOMAIN",$dirstatus);
+    }
 	# Check /var/named/$MAINDOMAIN.db file
 	my $dirstatus=&check_dir("/var/named/$MAINDOMAIN.db");
 	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
 	&print_output("/var/named/$MAINDOMAIN.db",$dirstatus);
-	my $dirstatus=&check_dir("/var/cpanel/databases/grants_$username.yaml");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/var/cpanel/databases/grants_$username.yaml",$dirstatus);
-	my $CPVersion = `cat /usr/local/cpanel/version`;
-	my $yaml_json;
-	if ($CPVersion < 11.50) { 
-		$yaml_json="yaml";
-	}
-	else { 
-		$yaml_json="json";
-	}
-	my $dirstatus=&check_dir("/var/cpanel/databases/$username.$yaml_json");
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output("/var/cpanel/databases/$username.$yaml_json",$dirstatus);
-	# Move /var/cpanel/databases/dbindex.db check here - as of 11.50 it's a json file.
-	my $dbindex;
-	if ($CPVersion < 11.50) { 
-		$dbindex = "/var/cpanel/databases/dbindex.db";
-	}
-	else { 
-		$dbindex = "/var/cpanel/databases/dbindex.db.json";
-	}	
-	my $dirstatus=&check_file_existance($dbindex,$username);
-	if ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; } else { $dirstatus = RED "[MISSING]"; }
-	&print_output($dbindex,$dirstatus);
-
 	# Check MySQL users table. 
 	my @MySQLUsers = undef;
+	my @MySQLDBs = undef;
 	my $MySQLUser;
+	my $MySQLDB;
 	my $first8;
 	if ($DBPrefix) { 
 		if (length($username)>8) { 
 			$first8 = substr($username,0,8);
-			$first8="^".$first8;
+#			$first8="^".$first8;
 		}
 		else { 
 			$first8 = $username;
-			$first8="^".$first8."\$";
+#			$first8="^".$first8."\$";
 		}
 	}
 	else { 
 		$first8 = $username;
 	}
+	# Check for MySQL databases
+	my @MySQLDBs=qx[ mysql -BNe "show databases like '$first8%'" ];
+	my @MySQLDBsUnique = uniq(@MySQLDBs);
+	my $dbnum=@MySQLDBsUnique;
+	if ($dbnum > 0) { 
+		print YELLOW "MySQL Databases Found\n";
+		foreach $MySQLDB(@MySQLDBsUnique) { 
+			chomp($MySQLDB);
+			print WHITE "\t \\_ " . $MySQLDB . "\n";
+		}
+	}
+	# Check for database users
 	my @MySQLUsers=qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -BN ];
 	my @MySQLUsersUnique = uniq(@MySQLUsers);
 	my $num=@MySQLUsersUnique;
