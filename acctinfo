@@ -12,9 +12,9 @@ BEGIN {
 }
 
 use strict;
-my $VERSION="2.4.35";
+my $VERSION="2.4.36";
 
-use File::HomeDir;
+#use File::HomeDir;
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -377,25 +377,34 @@ if ($custom_style) {
 else { 
     print WHITE "Theme: " . CYAN $THEME . "\n";
 }
+
 my $PHPDefaultVersion;
 my $PHPversion;
 my $isEA4=0;
+my $cageFSStats = &check_for_cagefs();
+if ($cageFSStats) { 
+	print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
+	# See if /home/$username/.cl.selector/defaults.cfg is present. If so grab PHP Version from it.
+	if (-e("$RealHome/.cl.selector/defaults.cfg")) { 
+		my $clPHP=qx[ grep '^php=' $RealHome/.cl.selector/defaults.cfg ];
+		my ($clPHPVer)=(split(/=/,$clPHP))[1];
+		chomp($clPHPVer);
+		print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n";
+	}
+}
+else {
+	print WHITE "CageFS: " . CYAN . "Not installed!\n";
+}
+
 $isEA4 = &isEA4;
 if ($isEA4) { 
 	$PHPDefaultVersion = &get_system_php_version();
 	$PHPversion = &get_php_version();
 	if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) { $PHPversion = "Inherited"; }
-   $PHPversion = " " . $PHPversion;
-	print WHITE "PHP Version [EA4]:" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
+	$PHPversion = " " . $PHPversion;
+	print WHITE "[EA4] PHP Version :" . CYAN $PHPversion . " (System Default: $PHPDefaultVersion)\n";
 }
 
-my $cageFSStats = &check_for_cagefs();
-if ($cageFSStats) { 
-	print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
-}
-else {
-	print WHITE "CageFS: " . CYAN . "Not installed!\n";
-}
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
 my $NOTONSERVER="[ Is configured on this server ] ";
 if ($IS_IP_ON_SERVER eq "") { $NOTONSERVER="[ Not configured on this server ]"; }
@@ -621,12 +630,16 @@ if ($listssls or $all) {
 			chomp($cert);
 			if ($cert eq "." or $cert eq "..") { next; }
 			$sslsubject=qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
-            my $CNloc=index($sslsubject, "CN=");
+			my $CNloc=index($sslsubject, "CN=");
             my $CN=substr($sslsubject,$CNloc);
-            my $domainloc=index($CN, "/");
-            my $domain=substr($CN,3,($domainloc));
-			$startdate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notBefore' ];
-			$expiredate=qx[ openssl x509 -in "$sslcertdir/$cert" -dates -noout | grep 'notAfter' ];
+            my ($domain,$crap)=(split(/\//,$CN))[0];
+            $domain=substr($domain,3);
+#            my $CNloc=index($sslsubject, "CN=");
+#            my $CN=substr($sslsubject,$CNloc);
+#            my $domainloc=index($CN, "/");
+#            my $domain=substr($CN,3,($domainloc));
+			$startdate=qx[ openssl x509 -in "$sslcertdir/$cert" -startdate -noout ];
+			$expiredate=qx[ openssl x509 -in "$sslcertdir/$cert" -enddate -noout ];
 			chomp($startdate);
 			chomp($expiredate);
 			($startdate)=(split(/=/,$startdate))[1];
@@ -1418,7 +1431,7 @@ sub display_mail_info {
 			if ($emailfwd =~ m/\|/) { $fwdtype="(pipe to program)"; }
             if ($emailfwd =~ m/autorespond/) { $fwdtype="(auto responder)"; }
 			if ($emailfwd =~ m/mailman\/mail/) { $fwdtype="(mailman list)"; ($listfwd)=(split(/\s+/,$emailfwd))[0]; $emailfwd=$listfwd; }
-			print YELLOW "\t \\_ " . $emailfwd . " $fwdtype\n";;
+			print YELLOW "\t \\_ " . $emailfwd . " " . $fwdtype . "\n";
 		}
 	}
 	else { 
@@ -1454,5 +1467,22 @@ sub display_mail_info {
 		print CYAN "\t \\_ None\n";
 	}
 	# Here we add the spf record and dkim record (if they exist).
+	my $spf=qx[ dig \@208.67.222.222 $DOMAIN TXT +short ];
+	my $dkim=qx[ dig \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
+	print "Checking SPF Record For $DOMAIN\n";
+	if ($spf) { 
+		print YELLOW "\t \\_ " . $spf . "\n";
+	}
+	else { 
+		print YELLOW "\t \\_ None\n";
+	}
+	print "Checking DKIM Record For default._domainkey.$DOMAIN\n";
+	if ($dkim) { 
+		print YELLOW "\t \\_ " . $dkim . "\n";
+	}
+	else { 
+		print YELLOW "\t \\_ None\n";
+	}
+	
 	&border;
 }
