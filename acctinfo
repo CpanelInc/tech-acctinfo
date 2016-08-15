@@ -389,7 +389,7 @@ if ($cageFSStats) {
 		my $clPHP=qx[ grep '^php=' $RealHome/.cl.selector/defaults.cfg ];
 		my ($clPHPVer)=(split(/=/,$clPHP))[1];
 		chomp($clPHPVer);
-		print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n";
+		print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n" unless($clPHPVer eq "");
 	}
 }
 else {
