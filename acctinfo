@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.37";
+my $VERSION = "2.4.38";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -434,8 +434,8 @@ $isEA4 = &isEA4;
 if ($isEA4) {
     $PHPDefaultVersion = &get_system_php_version();
     $PHPversion        = &get_php_version();
-    if ( $PHPversion eq "" or $PHPversion eq $PHPDefaultVersion ) {
-        $PHPversion = "Inherited";
+    if ( $PHPversion eq "" ) {
+        $PHPversion = "Undefined";
     }
     $PHPversion = " " . $PHPversion;
     print WHITE "[EA4] PHP Version :"
@@ -1405,7 +1405,15 @@ sub get_php_version() {
     my $phpUserVersion;
     my $userdataline;
     my @USERDATA;
-    open( USERDATA, "/var/cpanel/userdata/$username/$DOMAIN" );
+	# NOTE: If $IS_USERNAME, then use $MAINDOMAIN, otherwise use $QUERY.
+	my $tcDomain="";
+	if ( $IS_USERNAME ) { 
+		$tcDomain = $MAINDOMAIN;
+	}
+	else { 
+		$tcDomain = $QUERY;
+	}	
+    open( USERDATA, "/var/cpanel/userdata/$username/$tcDomain" );
     @USERDATA = <USERDATA>;
     close(USERDATA);
     foreach $userdataline (@USERDATA) {

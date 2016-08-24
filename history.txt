@@ -1,4 +1,6 @@
-V2.4.47- Fixed some minor bug fixes and ran through perltidy.
+V2.4.38- Fixed bug in EA4 php version check. It was returning an empty string ""
+
+V2.4.37- Fixed some minor bug fixes and ran through perltidy.
 
 V2.4.36- Add SPF/DKIM to --mail check, add CloudLinux PHP version if available.
 
