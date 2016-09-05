@@ -38,6 +38,7 @@ my $listsubs     = undef;
 my $listaddons   = undef;
 my $listparked   = undef;
 my $reselleraccts = undef;
+my $resellerperms = undef;
 my $clearscreen  = undef;
 my $helpME       = undef;
 my $SearchFor    = undef;
@@ -51,6 +52,7 @@ GetOptions(
     'listaddons'   => \$listaddons,
     'listparked'   => \$listparked,
     'reselleraccts' => \$reselleraccts,
+    'resellerperms' => \$resellerperms,
     'all'          => \$all,
     'help'         => \$helpME,
     'cruft'        => \$cruft,
@@ -626,11 +628,44 @@ if ( $reselleraccts or $all ) {
         &border;
     }
     else {
-        print WHITE "No Reseller information found for "
+        print WHITE "No Reseller accounts found for "
           . CYAN $MAINDOMAIN
           . WHITE " ("
           . GREEN $username
           . WHITE ")\n";
+        &border;
+    }
+}
+
+if ( $resellerperms or $all ) {
+    if ($all) { &border; }
+    if ( $Is_Reseller ) {
+		open(RESELLERS,"/var/cpanel/resellers");
+		my @RESELLERS=<RESELLERS>;
+		close(RESELLERS);
+		my $resellerline="";
+		my @rperms = undef;
+		my $rperm = "";
+        print CYAN "The reseller " . $MAINDOMAIN
+          . WHITE
+" has the following reseller permissions\n";
+		foreach $resellerline(@RESELLERS) { 	
+            chomp($resellerline);
+			my ($reseller,$rperms)=(split(/:/,$resellerline));
+			if ($reseller eq $username) { 
+				my @rperms=split /,/,$rperms;
+				foreach $rperm(@rperms) { 
+					chomp($rperm);
+            		print BOLD YELLOW ON_BLACK "\t \\_ $rperm ";
+					if ($rperm eq "all") { 
+						print RED "[WARN] - HAS ROOT PRIVILEGES!!!\n";
+					}
+					else { 
+						print "\n";
+					}
+				}
+			}
+        }
         &border;
     }
 }
@@ -790,6 +825,9 @@ sub Usage {
     print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo\n";
     print GREEN
 "\t Lists reseller information and domains under the cptestdo user name.\n\n";
+    print CYAN "acctinfo" . WHITE " --resellerperms cptestdo\n";
+    print GREEN
+"\t Lists reseller permissions under the cptestdo user name.\n\n";
     print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
     print GREEN
       "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
