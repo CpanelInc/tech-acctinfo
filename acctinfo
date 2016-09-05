@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.38";
+my $VERSION = "2.4.39";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -37,7 +37,7 @@ my $listssls     = undef;
 my $listsubs     = undef;
 my $listaddons   = undef;
 my $listparked   = undef;
-my $listreseller = undef;
+my $reselleraccts = undef;
 my $clearscreen  = undef;
 my $helpME       = undef;
 my $SearchFor    = undef;
@@ -50,7 +50,7 @@ GetOptions(
     'listsubs'     => \$listsubs,
     'listaddons'   => \$listaddons,
     'listparked'   => \$listparked,
-    'listreseller' => \$listreseller,
+    'reselleraccts' => \$reselleraccts,
     'all'          => \$all,
     'help'         => \$helpME,
     'cruft'        => \$cruft,
@@ -128,6 +128,9 @@ my @SUBDOMAINS    = "";
 my @ADDONDOMAINS  = "";
 my @PARKEDDOMAINS = "";
 my $ACCT          = "";
+my $MAILBOX_FORMAT = "";
+my $MAX_EMAIL_PER_HOUR = 0;
+my $MAX_DEFER_FAIL_PERCENTAGE = 0;
 open( USERDATAFILE, "/etc/userdatadomains" );
 my @USERDATADOMAINS = <USERDATAFILE>;
 close(USERDATAFILE);
@@ -607,7 +610,7 @@ if ( $all or $listparked ) {
 }
 
 # RESELLER INFO
-if ( $listreseller or $all ) {
+if ( $reselleraccts or $all ) {
     if ($all) { &border; }
     my $owned_by_reseller = "";
     if ( $Is_Reseller and $ResellerAcctsCnt > 0 ) {
@@ -784,7 +787,7 @@ sub Usage {
     print CYAN "acctinfo" . WHITE " --listparked cptestdomain.net\n";
     print GREEN
       "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
-    print CYAN "acctinfo" . WHITE " --listreseller cptestdo\n";
+    print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo\n";
     print GREEN
 "\t Lists reseller information and domains under the cptestdo user name.\n\n";
     print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
@@ -1478,7 +1481,13 @@ sub display_mail_info {
           );
         $emailacctline =~ s/\///g;    ## Strip trailing /
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
-
+	# If v58+, get quota via doveadm command.
+        my $CPVersion = `cat /usr/local/cpanel/version`;
+	if ($CPVersion >= 11.58) { 
+		my $quotaline=qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
+		my ($qused,$qlimit,$qpercent)=(split(/\s+/,$quotaline))[2,3,4];
+		print "[Quota Used $qused of $qlimit ($qpercent%)]";
+	}
         # Check the passwd and shadow files to make sure an entry exists
         my $upasswdline;
         my $ushadowline;
@@ -1531,7 +1540,10 @@ sub display_mail_info {
         }
         print "\n";
 
-   # Add a check here for .boxtrapperenable touch file - enabled if it exists.
+   # Check for .boxtrapperenable touch file - enabled if it exists.
+	if (-e("$RealHome/etc/$DOMAIN/$emailacctline/.boxtrapperenable")) { 
+                print YELLOW "\t \t \\_ Spam Boxtrapper Enabled\n"
+	}
    # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
    # Count the number of filters and display that here.
    # As \_ User Level Filters: nn
@@ -1731,6 +1743,13 @@ sub display_mail_info {
     else {
         print YELLOW "\t \\_ None\n";
     }
+   	# Add MAX_EMAIL_PER_HOUR, MAX_DEFER_FAIL_PERCENTAGE, MAILBOX_FORMAT	 
+   	$MAILBOX_FORMAT = $user_conf->{'MAILBOX_FORMAT'};
+   	$MAX_EMAIL_PER_HOUR = $user_conf->{'MAX_EMAIL_PER_HOUR'};
+   	$MAX_DEFER_FAIL_PERCENTAGE = $user_conf->{'MAX_DEFER_FAIL_PERCENTAGE'};
+	print WHITE "Mailbox Format: " . CYAN ucfirst($MAILBOX_FORMAT) . "\n";
+	print WHITE "Max Emails Per Hour: " . CYAN ucfirst($MAX_EMAIL_PER_HOUR) . "\n";
+	print WHITE "Max Defer Fail %: " . CYAN ucfirst($MAX_DEFER_FAIL_PERCENTAGE) . "\n";
 
     &border;
 }

@@ -1,3 +1,6 @@
+V2.4.39- Add quota info as well as max defer, max emails and mailbox format info to --mail 
+         output. change listresellers switch to reselleraccts.
+
 V2.4.38- Fixed bug in EA4 php version check. It was returning an empty string ""
 
 V2.4.37- Fixed some minor bug fixes and ran through perltidy.
