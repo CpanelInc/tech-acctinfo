@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.41";
+my $VERSION = "2.4.42";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -749,7 +749,6 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
 if ( $listssls or $all ) {
     my $sslcertdir    = "$RealHome/ssl/certs";
     my $sslsyscertdir = "/var/cpanel/ssl/installed/certs";
-    my $sslcertdir = "$RealHome/ssl/certs";
     my @certs;
     my $cert;
     my $sslsubject;
@@ -788,6 +787,7 @@ if ( $listssls or $all ) {
             ($startdate)  = ( split( /=/, $startdate ) )[1];
             ($expiredate) = ( split( /=/, $expiredate ) )[1];
             print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
+
             if ($SSLNotInstalled) {
                 print RED
                   "\t \\_ THIS SSL IS NOT INSTALLED OR HAS BEEN DELETED!\n";
@@ -801,7 +801,6 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
             if ($isSelfSigned) {
                 print RED "\t \\_ [WARN] "
                   . WHITE "- Self-Signed Certificate\n";
-                print RED "\t \\_ [WARN] - Self-Signed Certificate\n";
             }
             else {
                 # Get Issuer and display it.
@@ -814,7 +813,6 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
                 chomp($SSLIssuer);
                 print GREEN "\t \\_ [CA SIGNED] "
                   . WHITE "Issued by: $SSLIssuer\n";
-                print GREEN "\t \\_ Issued by: $SSLIssuer\n";
             }
         }
     }
@@ -1713,14 +1711,6 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 "\t\t \\_ [WARN] - $ARecordForMX does NOT reverse back to $MXRecord\n";
                 print RED "\t\t \\_ ($MXReverse)\n";
             }
-			# Add check here for reverse of the IP address. 
-			my $MXReverse = qx [ dig -x $ARecordForMX +short ];
-			chomp($MXReverse);
-			chop($MXReverse);
-			if ($MXReverse ne $MXRecord) { 
-              	print RED "\t\t \\_ [WARN] - $ARecordForMX does NOT reverse back to $MXRecord\n";
-              	print RED "\t\t \\_ ($MXReverse)\n";
-			}
         }
     }
     else {
