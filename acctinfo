@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.39";
+my $VERSION = "2.4.40";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -31,33 +31,33 @@ $Term::ANSIColor::AUTORESET = 1;
 # Turn off buffering
 $| = 1;
 
-my $all          = undef;
-my $listdbs      = undef;
-my $listssls     = undef;
-my $listsubs     = undef;
-my $listaddons   = undef;
-my $listparked   = undef;
+my $all           = undef;
+my $listdbs       = undef;
+my $listssls      = undef;
+my $listsubs      = undef;
+my $listaddons    = undef;
+my $listparked    = undef;
 my $reselleraccts = undef;
 my $resellerperms = undef;
-my $clearscreen  = undef;
-my $helpME       = undef;
-my $SearchFor    = undef;
-my $cruft        = undef;
-my $mail         = undef;
+my $clearscreen   = undef;
+my $helpME        = undef;
+my $SearchFor     = undef;
+my $cruft         = undef;
+my $mail          = undef;
 
 GetOptions(
-    'listdbs'      => \$listdbs,
-    'listssls'     => \$listssls,
-    'listsubs'     => \$listsubs,
-    'listaddons'   => \$listaddons,
-    'listparked'   => \$listparked,
+    'listdbs'       => \$listdbs,
+    'listssls'      => \$listssls,
+    'listsubs'      => \$listsubs,
+    'listaddons'    => \$listaddons,
+    'listparked'    => \$listparked,
     'reselleraccts' => \$reselleraccts,
     'resellerperms' => \$resellerperms,
-    'all'          => \$all,
-    'help'         => \$helpME,
-    'cruft'        => \$cruft,
-    'mail'         => \$mail,
-    'q'            => \$clearscreen,
+    'all'           => \$all,
+    'help'          => \$helpME,
+    'cruft'         => \$cruft,
+    'mail'          => \$mail,
+    'q'             => \$clearscreen,
 );
 
 if ($clearscreen) {
@@ -121,17 +121,17 @@ if ( $MAINDOMAIN eq "" and $username eq "" ) {
 }
 
 # Load /var/cpanel/users/$username into config hash variable
-my $user_conf     = Cpanel::Config::LoadCpUserFile::load($username);
-my $DOMAIN        = $QUERY;
-my $IS_PARKED     = "";
-my $IS_ADDON      = "";
-my $IS_SUB        = "";
-my @SUBDOMAINS    = "";
-my @ADDONDOMAINS  = "";
-my @PARKEDDOMAINS = "";
-my $ACCT          = "";
-my $MAILBOX_FORMAT = "";
-my $MAX_EMAIL_PER_HOUR = 0;
+my $user_conf                 = Cpanel::Config::LoadCpUserFile::load($username);
+my $DOMAIN                    = $QUERY;
+my $IS_PARKED                 = "";
+my $IS_ADDON                  = "";
+my $IS_SUB                    = "";
+my @SUBDOMAINS                = "";
+my @ADDONDOMAINS              = "";
+my @PARKEDDOMAINS             = "";
+my $ACCT                      = "";
+my $MAILBOX_FORMAT            = "";
+my $MAX_EMAIL_PER_HOUR        = 0;
 my $MAX_DEFER_FAIL_PERCENTAGE = 0;
 open( USERDATAFILE, "/etc/userdatadomains" );
 my @USERDATADOMAINS = <USERDATAFILE>;
@@ -639,32 +639,31 @@ if ( $reselleraccts or $all ) {
 
 if ( $resellerperms or $all ) {
     if ($all) { &border; }
-    if ( $Is_Reseller ) {
-		open(RESELLERS,"/var/cpanel/resellers");
-		my @RESELLERS=<RESELLERS>;
-		close(RESELLERS);
-		my $resellerline="";
-		my @rperms = undef;
-		my $rperm = "";
+    if ($Is_Reseller) {
+        open( RESELLERS, "/var/cpanel/resellers" );
+        my @RESELLERS = <RESELLERS>;
+        close(RESELLERS);
+        my $resellerline = "";
+        my @rperms       = undef;
+        my $rperm        = "";
         print CYAN "The reseller " . $MAINDOMAIN
-          . WHITE
-" has the following reseller permissions\n";
-		foreach $resellerline(@RESELLERS) { 	
+          . WHITE " has the following reseller permissions\n";
+        foreach $resellerline (@RESELLERS) {
             chomp($resellerline);
-			my ($reseller,$rperms)=(split(/:/,$resellerline));
-			if ($reseller eq $username) { 
-				my @rperms=split /,/,$rperms;
-				foreach $rperm(@rperms) { 
-					chomp($rperm);
-            		print BOLD YELLOW ON_BLACK "\t \\_ $rperm ";
-					if ($rperm eq "all") { 
-						print RED "[WARN] - HAS ROOT PRIVILEGES!!!\n";
-					}
-					else { 
-						print "\n";
-					}
-				}
-			}
+            my ( $reseller, $rperms ) = ( split( /:/, $resellerline ) );
+            if ( $reseller eq $username ) {
+                my @rperms = split /,/, $rperms;
+                foreach $rperm (@rperms) {
+                    chomp($rperm);
+                    print BOLD YELLOW ON_BLACK "\t \\_ $rperm ";
+                    if ( $rperm eq "all" ) {
+                        print RED "[WARN] - HAS ROOT PRIVILEGES!!!\n";
+                    }
+                    else {
+                        print "\n";
+                    }
+                }
+            }
         }
         &border;
     }
@@ -748,9 +747,7 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
 }
 
 if ( $listssls or $all ) {
-    my $basedir    = "$RealHome/ssl";
     my $sslcertdir = "$RealHome/ssl/certs";
-    my $sslkeydir  = "$RealHome/ssl/keys";
     my @certs;
     my $cert;
     my $sslsubject;
@@ -775,11 +772,7 @@ if ( $listssls or $all ) {
             my $CN = substr( $sslsubject, $CNloc );
             my ( $domain, $crap ) = ( split( /\//, $CN ) )[0];
             $domain = substr( $domain, 3 );
-
-            #            my $CNloc=index($sslsubject, "CN=");
-            #            my $CN=substr($sslsubject,$CNloc);
-            #            my $domainloc=index($CN, "/");
-            #            my $domain=substr($CN,3,($domainloc));
+            chomp($domain);
             $startdate =
               qx[ openssl x509 -in "$sslcertdir/$cert" -startdate -noout ];
             $expiredate =
@@ -788,9 +781,27 @@ if ( $listssls or $all ) {
             chomp($expiredate);
             ($startdate)  = ( split( /=/, $startdate ) )[1];
             ($expiredate) = ( split( /=/, $expiredate ) )[1];
-            print YELLOW . $domain . "\n";
+            print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
             print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
             print WHITE "\t \\_ Not After : " . GREEN . $expiredate . "\n";
+
+            # Check if self-signed
+            my $isSelfSigned =
+qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
+            if ($isSelfSigned) {
+                print RED "\t \\_ [WARN] - Self-Signed Certificate\n";
+            }
+            else {
+                # Get Issuer and display it.
+                my $SSLIssuer =
+                  qx[ openssl x509 -in "$sslcertdir/$cert" -issuer -noout ];
+                my $Oloc = index( $SSLIssuer, "O=" );
+                my $O = substr( $SSLIssuer, $Oloc );
+                my ( $SSLIssuer, $crap ) = ( split( /\//, $O ) )[0];
+                $SSLIssuer = substr( $SSLIssuer, 2 );
+                chomp($SSLIssuer);
+                print GREEN "\t \\_ Issued by: $SSLIssuer\n";
+            }
         }
     }
     else {
@@ -827,7 +838,7 @@ sub Usage {
 "\t Lists reseller information and domains under the cptestdo user name.\n\n";
     print CYAN "acctinfo" . WHITE " --resellerperms cptestdo\n";
     print GREEN
-"\t Lists reseller permissions under the cptestdo user name.\n\n";
+      "\t Lists reseller permissions under the cptestdo user name.\n\n";
     print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
     print GREEN
       "\t Lists any SSL's under the cptestdomain.net domain name.\n\n";
@@ -1446,14 +1457,15 @@ sub get_php_version() {
     my $phpUserVersion;
     my $userdataline;
     my @USERDATA;
-	# NOTE: If $IS_USERNAME, then use $MAINDOMAIN, otherwise use $QUERY.
-	my $tcDomain="";
-	if ( $IS_USERNAME ) { 
-		$tcDomain = $MAINDOMAIN;
-	}
-	else { 
-		$tcDomain = $QUERY;
-	}	
+
+    # NOTE: If $IS_USERNAME, then use $MAINDOMAIN, otherwise use $QUERY.
+    my $tcDomain = "";
+    if ($IS_USERNAME) {
+        $tcDomain = $MAINDOMAIN;
+    }
+    else {
+        $tcDomain = $QUERY;
+    }
     open( USERDATA, "/var/cpanel/userdata/$username/$tcDomain" );
     @USERDATA = <USERDATA>;
     close(USERDATA);
@@ -1519,13 +1531,33 @@ sub display_mail_info {
           );
         $emailacctline =~ s/\///g;    ## Strip trailing /
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
-	# If v58+, get quota via doveadm command.
+
+        # If v58+, get quota via doveadm command.
         my $CPVersion = `cat /usr/local/cpanel/version`;
-	if ($CPVersion >= 11.58) { 
-		my $quotaline=qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
-		my ($qused,$qlimit,$qpercent)=(split(/\s+/,$quotaline))[2,3,4];
-		print "[Quota Used $qused of $qlimit ($qpercent%)]";
-	}
+        if ( $CPVersion >= 11.58 ) {
+            my $quotaline =
+qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
+            my ( $qused, $qlimit, $qpercent ) =
+              ( split( /\s+/, $quotaline ) )[ 2, 3, 4 ];
+            if ( $qused == 0 ) {
+                $qused = 0;
+            }
+            else {
+                $qused = ( $qused / 1024 );
+            }
+            if ( $qlimit eq "-" ) {
+                $qlimit = "Unlimited";
+            }
+            else {
+                $qlimit = ( $qlimit / 1024 );
+            }
+            print "[Quota Used "
+              . $qused
+              . " MB of "
+              . $qlimit . " MB ("
+              . $qpercent . "%)]";
+        }
+
         # Check the passwd and shadow files to make sure an entry exists
         my $upasswdline;
         my $ushadowline;
@@ -1578,10 +1610,11 @@ sub display_mail_info {
         }
         print "\n";
 
-   # Check for .boxtrapperenable touch file - enabled if it exists.
-	if (-e("$RealHome/etc/$DOMAIN/$emailacctline/.boxtrapperenable")) { 
-                print YELLOW "\t \t \\_ Spam Boxtrapper Enabled\n"
-	}
+        # Check for .boxtrapperenable touch file - enabled if it exists.
+        if ( -e ("$RealHome/etc/$DOMAIN/$emailacctline/.boxtrapperenable") ) {
+            print YELLOW "\t \t \\_ Spam Boxtrapper Enabled\n";
+        }
+
    # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
    # Count the number of filters and display that here.
    # As \_ User Level Filters: nn
@@ -1656,6 +1689,14 @@ sub display_mail_info {
                     $IsRemote = 1;
                 }
             }
+			# Add check here for reverse of the IP address. 
+			my $MXReverse = qx [ dig -x $ARecordForMX +short ];
+			chomp($MXReverse);
+			chop($MXReverse);
+			if ($MXReverse ne $MXRecord) { 
+              	print RED "\t\t \\_ [WARN] - $ARecordForMX does NOT reverse back to $MXRecord\n";
+              	print RED "\t\t \\_ ($MXReverse)\n";
+			}
         }
     }
     else {
@@ -1781,13 +1822,16 @@ sub display_mail_info {
     else {
         print YELLOW "\t \\_ None\n";
     }
-   	# Add MAX_EMAIL_PER_HOUR, MAX_DEFER_FAIL_PERCENTAGE, MAILBOX_FORMAT	 
-   	$MAILBOX_FORMAT = $user_conf->{'MAILBOX_FORMAT'};
-   	$MAX_EMAIL_PER_HOUR = $user_conf->{'MAX_EMAIL_PER_HOUR'};
-   	$MAX_DEFER_FAIL_PERCENTAGE = $user_conf->{'MAX_DEFER_FAIL_PERCENTAGE'};
-	print WHITE "Mailbox Format: " . CYAN ucfirst($MAILBOX_FORMAT) . "\n";
-	print WHITE "Max Emails Per Hour: " . CYAN ucfirst($MAX_EMAIL_PER_HOUR) . "\n";
-	print WHITE "Max Defer Fail %: " . CYAN ucfirst($MAX_DEFER_FAIL_PERCENTAGE) . "\n";
+
+    # Add MAX_EMAIL_PER_HOUR, MAX_DEFER_FAIL_PERCENTAGE, MAILBOX_FORMAT
+    $MAILBOX_FORMAT            = $user_conf->{'MAILBOX_FORMAT'};
+    $MAX_EMAIL_PER_HOUR        = $user_conf->{'MAX_EMAIL_PER_HOUR'};
+    $MAX_DEFER_FAIL_PERCENTAGE = $user_conf->{'MAX_DEFER_FAIL_PERCENTAGE'};
+    print WHITE "Mailbox Format: " . CYAN ucfirst($MAILBOX_FORMAT) . "\n";
+    print WHITE "Max Emails Per Hour: "
+      . CYAN ucfirst($MAX_EMAIL_PER_HOUR) . "\n";
+    print WHITE "Max Defer Fail %: "
+      . CYAN ucfirst($MAX_DEFER_FAIL_PERCENTAGE) . "\n";
 
     &border;
 }
