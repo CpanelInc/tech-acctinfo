@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.42";
+my $VERSION = "2.4.43";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -25,6 +25,8 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
+use Net::DNS;
+use Socket;
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -203,11 +205,13 @@ my $ResolvedIP;
 if ($IS_USERNAME) {
 
  # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-    @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+ #    @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+    @ResolvedIP = getArecords($MAINDOMAIN);
 }
 else {
     ## a domain name was entered so we should resolve the IP of that instead.
-    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+    #    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+    @ResolvedIP = getArecords($DOMAIN);
 }
 my $IPTYPE = "";
 if ( $IPADDR eq $SERVER_IP ) {
@@ -1666,50 +1670,79 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 
 # Now let's get the MX record and make sure the A record for it points to this server.
     print "Checking MX records for $DOMAIN...\n";
-    my @MXRecords = qx[ dig \@208.67.220.220 $DOMAIN MX +short ];
-    my $IsRemote  = 0;
+    my @MXRecords = getMXrecord($DOMAIN);
+    my $myline;
+    my $skipMXchk = 0;
+    foreach $myline (@MXRecords) {
+        chomp($myline);
+        if ( $myline eq "NONE" ) {
+            $skipMXchk = 1;
+            last;
+        }
+    }
+    my $IsRemote = 0;
     my $MXRecord;
     my $Is_IP_OnServer;
-    if (@MXRecords) {
-        foreach $MXRecord (@MXRecords) {
-            chomp($MXRecord);
-            my ( $pref, $theMX ) = ( split( /\s+/, $MXRecord ) );
-            my $ARecordForMX = qx[ dig \@208.67.222.222 $theMX +short ];
-            chomp($ARecordForMX);
-            my $IS_NAT = &check_for_nat($ARecordForMX);
-            if ($IS_NAT) {    ## NAT IP ADDRESS RETURNED!
-                $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
-                if ($Is_IP_OnServer) {
-                    print YELLOW
+    if ( !$skipMXchk ) {
+        if (@MXRecords) {
+            foreach $MXRecord (@MXRecords) {
+                chomp($MXRecord);
+                my $ARecordForMX;
+                my @ARecordForMX = getArecords($MXRecord);
+                foreach $ARecordForMX (@ARecordForMX) {
+                    chomp($ARecordForMX);
+                    my $IS_NAT = &check_for_nat($ARecordForMX);
+                    if ($IS_NAT) {    ## NAT IP ADDRESS RETURNED!
+                        $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
+                        if ($Is_IP_OnServer) {
+                            print YELLOW
 "\t \\_ $MXRecord resolves to $ARecordForMX => $IS_NAT (Configured on this server)\n";
-                }
-                else {
-                    print YELLOW
-"\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
-                    $IsRemote = 1;
-                }
-            }
-            else {            ## NO NAT FOUND!
-                $Is_IP_OnServer = qx[ ip addr | grep '$ARecordForMX' ];
-                if ($Is_IP_OnServer) {
-                    print YELLOW
-"\t \\_ $MXRecord resolves to $ARecordForMX (Configured on this server)\n";
-                }
-                else {
-                    print YELLOW
-"\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
-                    $IsRemote = 1;
-                }
-            }
 
-            # Add check here for reverse of the IP address.
-            my $MXReverse = qx [ dig -x $ARecordForMX +short ];
-            chomp($MXReverse);
-            chop($MXReverse);
-            if ( $MXReverse ne $MXRecord ) {
-                print RED
-"\t\t \\_ [WARN] - $ARecordForMX does NOT reverse back to $MXRecord\n";
-                print RED "\t\t \\_ ($MXReverse)\n";
+                            # Check reverse
+                            my $ReverseOfMX = getptr($MXRecord);
+                            if (   $ReverseOfMX eq $MXRecord
+                                or $ReverseOfMX eq $HOSTNAME )
+                            {
+                                print GREEN
+"\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
+                            }
+                            else {
+                                print RED
+"\t\t \\_ [WARN] - $ARecordForMX does not reverse back to $MXRecord or $HOSTNAME\n";
+                            }
+                        }
+                        else {
+                            print YELLOW
+"\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
+                            $IsRemote = 1;
+                        }
+                    }
+                    else {    ## NO NAT FOUND!
+                        $Is_IP_OnServer = qx[ ip addr | grep '$ARecordForMX' ];
+                        if ($Is_IP_OnServer) {
+                            print YELLOW
+"\t \\_ $MXRecord resolves to $ARecordForMX (Configured on this server)\n";
+
+                            # Check reverse
+                            my $ReverseOfMX = getptr($MXRecord);
+                            if (   $ReverseOfMX eq $MXRecord
+                                or $ReverseOfMX eq $HOSTNAME )
+                            {
+                                print GREEN
+"\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
+                            }
+                            else {
+                                print RED
+"\t \\_ [WARN] - $ARecordForMX does not reverse back to $MXRecord or $HOSTNAME\n";
+                            }
+                        }
+                        else {
+                            print YELLOW
+"\t \\_ $MXRecord resolves to $ARecordForMX (NOT configured on this server)\n";
+                            $IsRemote = 1;
+                        }
+                    }
+                }
             }
         }
     }
@@ -1849,3 +1882,36 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 
     &border;
 }
+
+sub getMXrecord {
+    my $tcDomain = $_[0];
+    my $rr;
+    my @NEWMX;
+    my $res = Net::DNS::Resolver->new;
+    my @mx = mx( $res, $tcDomain );
+    if (@mx) {
+        foreach $rr (@mx) {
+            push( @NEWMX, $rr->exchange );
+        }
+        return @NEWMX;
+    }
+    else {
+        return "NONE";
+    }
+}
+
+sub getptr() {
+    my $ip = $_[0];
+    chomp($ip);
+    my $ipaddr = inet_aton($ip);
+    my $ptrname = gethostbyaddr( $ipaddr, AF_INET );
+    return $ptrname;
+}
+
+sub getArecords {
+    my $tcDomain  = $_[0];
+    my @addresses = gethostbyname($tcDomain);
+    @addresses = map { inet_ntoa($_) } @addresses[ 4 .. $#addresses ];
+    return @addresses;
+}
+
