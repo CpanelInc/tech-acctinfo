@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.43";
+my $VERSION = "2.4.45";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -27,6 +27,7 @@ use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
 use Net::DNS;
 use Socket;
+use integer;
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -373,7 +374,7 @@ my $BlockLimitReached;
 my $quotaline;
 foreach $BlockLimitReached (@quotachk) {
     chomp($BlockLimitReached);
-    if ( $BlockLimitReached =~ m/Block limit reached/ ) {
+    if ( $BlockLimitReached =~ m/Block limit reached on / ) {
         print RED "[WARN] - $username is over quota (";
 
   # Get the partition/drive and block size of the account. (quota -sl does this)
@@ -1553,25 +1554,30 @@ sub display_mail_info {
         if ( $CPVersion >= 11.58 ) {
             my $quotaline =
 qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
-            my ( $qused, $qlimit, $qpercent ) =
-              ( split( /\s+/, $quotaline ) )[ 2, 3, 4 ];
-            if ( $qused == 0 ) {
-                $qused = 0;
+            if ( $quotaline =~ m/Error: User doesn't exist/ ) {
+                print "[Quota cannot be determined]\n";
             }
             else {
-                $qused = ( $qused / 1024 );
+                my ( $qused, $qlimit, $qpercent ) =
+                  ( split( /\s+/, $quotaline ) )[ 2, 3, 4 ];
+                if ( $qused == 0 ) {
+                    $qused = 0;
+                }
+                else {
+                    $qused = ( $qused / 1024 );
+                }
+                if ( $qlimit eq "-" ) {
+                    $qlimit = "Unlimited";
+                }
+                else {
+                    $qlimit = ( $qlimit / 1024 );
+                }
+                print "[Quota Used "
+                  . $qused
+                  . " MB of "
+                  . $qlimit . " MB ("
+                  . $qpercent . "%)]";
             }
-            if ( $qlimit eq "-" ) {
-                $qlimit = "Unlimited";
-            }
-            else {
-                $qlimit = ( $qlimit / 1024 );
-            }
-            print "[Quota Used "
-              . $qused
-              . " MB of "
-              . $qlimit . " MB ("
-              . $qpercent . "%)]";
         }
 
         # Check the passwd and shadow files to make sure an entry exists
@@ -1598,13 +1604,25 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
             $upasswdOK = 0;
             next;
         }
-        if ( -e ("$RealHome/etc/$DOMAIN/passwd") ) {
+
+        # Check for suspended from incoming email
+        if ( -e ("$RealHome/etc/.$emailacctline\@$DOMAIN.suspended_incoming") )
+        {
+            print RED "\n\t \t \\_ incoming email suspended\n";
+        }
+
+        # Shadow file
+        if ( -e ("$RealHome/etc/$DOMAIN/shadow") ) {
             open( USHADOW, "$RealHome/etc/$DOMAIN/shadow" );
             my @USHADOW = <USHADOW>;
             close(USHADOW);
+            my $shadowstring = "$emailacctline:!!";
             foreach $ushadowline (@USHADOW) {
                 chomp($ushadowline);
                 if ( $ushadowline =~ m/^$emailacctline/ ) {
+                    if ( $ushadowline =~ m/^$shadowstring/ ) {
+                        print RED "\n\t \t \\_ email login suspended\n";
+                    }
                     $ushadowOK = 1;
                     last;
                 }
@@ -1619,12 +1637,13 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
         if ( !($upasswdOK) ) {
             print RED
 "\n\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN";
+            print "\n";
         }
         if ( !($ushadowOK) ) {
             print RED
 "\n\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN";
+            print "\n";
         }
-        print "\n";
 
         # Check for .boxtrapperenable touch file - enabled if it exists.
         if ( -e ("$RealHome/etc/$DOMAIN/$emailacctline/.boxtrapperenable") ) {
@@ -1701,7 +1720,8 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
                             # Check reverse
                             my $ReverseOfMX = getptr($MXRecord);
                             if (   $ReverseOfMX eq $MXRecord
-                                or $ReverseOfMX eq $HOSTNAME )
+                                or $ReverseOfMX eq $HOSTNAME
+                                or $ReverseOfMX eq "mail.$MXRecord" )
                             {
                                 print GREEN
 "\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
@@ -1726,7 +1746,8 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
                             # Check reverse
                             my $ReverseOfMX = getptr($MXRecord);
                             if (   $ReverseOfMX eq $MXRecord
-                                or $ReverseOfMX eq $HOSTNAME )
+                                or $ReverseOfMX eq $HOSTNAME
+                                or $ReverseOfMX eq "mail.$MXRecord" )
                             {
                                 print GREEN
 "\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
@@ -1857,7 +1878,24 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
     my $dkim = qx[ dig \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
     print "Checking SPF Record For $DOMAIN\n";
     if ($spf) {
-        print YELLOW "\t \\_ " . $spf . "\n";
+        print YELLOW "\t \\_ " . $spf;
+        if ( $spf =~ m/\+all/ ) {
+            print CYAN
+"\t\t \\_ Pass All (Allow all email! Like not having any SPF at all)\n";
+        }
+        if ( $spf =~ m/\-all/ ) {
+            print CYAN
+"\t\t \\_ Hard Fail (Reject all email unless from ipv4/ipv6, mx or a)\n";
+        }
+        if ( $spf =~ m/\~all/ ) {
+            print CYAN
+"\t\t \\_ Soft Fail (Allow mail from anywhere, but mark as possible forgery) [DEFAULT]\n";
+        }
+        if ( $spf =~ m/\?all/ ) {
+            print CYAN
+"\t\t \\_ Neutral (No policy statement! Like not having any SPF at all)\n";
+        }
+        print "\n";
     }
     else {
         print YELLOW "\t \\_ None\n";

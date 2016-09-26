@@ -1,4 +1,8 @@
-V2.4.44- Added Net::DNS and Socket code to streamline the A record and MX record check. 
+V2.4.45- Add email suspended / email receiving suspended checks
+
+V2.4.44- Add check for various SPF policy flags, fix email quota rounding
+
+V2.4.43- Add Net::DNS and Socket code to streamline the A record and MX record check. 
 
 V2.4.40- Add SSL issuer (or warn if self-signed) to ssl check. 
          Improve quota check for mail.
