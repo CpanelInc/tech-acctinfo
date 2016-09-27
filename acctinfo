@@ -1576,7 +1576,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
                   . $qused
                   . " MB of "
                   . $qlimit . " MB ("
-                  . $qpercent . "%)]";
+                  . $qpercent . "%)]\n";
             }
         }
 
