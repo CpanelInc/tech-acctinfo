@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.45";
+my $VERSION = "2.4.46";
 
 #use File::HomeDir;
 use Getopt::Long;
@@ -47,6 +47,7 @@ my $helpME        = undef;
 my $SearchFor     = undef;
 my $cruft         = undef;
 my $mail          = undef;
+my $noquota       = 0;
 
 GetOptions(
     'listdbs'       => \$listdbs,
@@ -60,8 +61,13 @@ GetOptions(
     'help'          => \$helpME,
     'cruft'         => \$cruft,
     'mail'          => \$mail,
+    'noquota'       => \$noquota,
     'q'             => \$clearscreen,
 );
+
+if ($noquota) { 
+    $noquota = 1;
+}
 
 if ($clearscreen) {
     system("clear");
@@ -364,35 +370,37 @@ else {
     }
 }
 
-# Check if account is over quota, warn if so.
+# Check if account is over quota, warn if so, unless --noquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
 # First check if the account is over quota (slq does this, if nothing return it's not over quota.
-open( QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |" );
-my @quotachk = <QUOTACHK>;
-close(QUOTACHK);
-my $BlockLimitReached;
-my $quotaline;
-foreach $BlockLimitReached (@quotachk) {
-    chomp($BlockLimitReached);
-    if ( $BlockLimitReached =~ m/Block limit reached on / ) {
-        print RED "[WARN] - $username is over quota (";
-
-  # Get the partition/drive and block size of the account. (quota -sl does this)
-        open( QUOTA, "/usr/bin/quota -sl $username 2> /dev/null |" );
-        my @quotaline = <QUOTA>;
-        close(QUOTA);
-        my $quotadev;
-        my $quotaHR;
-        foreach $quotaline (@quotaline) {
-            chomp($quotaline);
-            $quotaline =~ s/\s+/ /g;
-            ($quotadev) = ( split( /\s+/, $quotaline ) )[0];
-            if ( $quotaline =~ m/Filesystem|blocks|Disk quotas for/ ) {
-                next;
-            }
-            else {
-                $quotaHR = qx[ grep $quotadev /etc/mtab | awk '{print $2}' ];
-                print "($quotaHR is over quota) - $quotaline\n";
+if ($noquota == 0) { 
+    open( QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |" );
+    my @quotachk = <QUOTACHK>;
+    close(QUOTACHK);
+    my $BlockLimitReached;
+    my $quotaline;
+    foreach $BlockLimitReached (@quotachk) {
+        chomp($BlockLimitReached);
+        if ( $BlockLimitReached =~ m/Block limit reached on / ) {
+            print RED "[WARN] - $username is over quota (";
+    
+    # Get the partition/drive and block size of the account. (quota -sl does this)
+            open( QUOTA, "/usr/bin/quota -sl $username 2> /dev/null |" );
+            my @quotaline = <QUOTA>;
+            close(QUOTA);
+            my $quotadev;
+            my $quotaHR;
+            foreach $quotaline (@quotaline) {
+                chomp($quotaline);
+                $quotaline =~ s/\s+/ /g;
+                ($quotadev) = ( split( /\s+/, $quotaline ) )[0];
+                if ( $quotaline =~ m/Filesystem|blocks|Disk quotas for|cagefs-skeleton/ ) {
+                    next;
+                }
+                else {
+                    $quotaHR = qx[ grep $quotadev /etc/mtab | awk '{print $2}' ];
+                    print "($quotaHR is over quota) - $quotaline\n";
+                }
             }
         }
     }
