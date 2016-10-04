@@ -12,9 +12,8 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.46";
+my $VERSION = "2.4.47";
 
-#use File::HomeDir;
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -212,13 +211,13 @@ my $ResolvedIP;
 if ($IS_USERNAME) {
 
  # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
- #    @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
-    @ResolvedIP = getArecords($MAINDOMAIN);
+     @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+ #   @ResolvedIP = getArecords($MAINDOMAIN);
 }
 else {
     ## a domain name was entered so we should resolve the IP of that instead.
-    #    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
-    @ResolvedIP = getArecords($DOMAIN);
+    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+#    @ResolvedIP = getArecords($DOMAIN);
 }
 my $IPTYPE = "";
 if ( $IPADDR eq $SERVER_IP ) {

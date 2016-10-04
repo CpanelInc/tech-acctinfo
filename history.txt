@@ -1,3 +1,6 @@
+V2.4.47- Revert use of Net::DNS on obtaining A record. Seems to be getting the incorrect
+         information from time to time.  Not sure yet why.
+
 V2.4.46- Add --noquota check which sometimes causes the quota check to fail on cagefs systems.
 
 V2.4.45- Add email suspended / email receiving suspended checks
