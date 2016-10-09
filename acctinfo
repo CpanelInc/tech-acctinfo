@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.47";
+my $VERSION = "2.4.48";
 
 use Getopt::Long;
 use Cpanel::MysqlUtils;
@@ -46,6 +46,7 @@ my $helpME        = undef;
 my $SearchFor     = undef;
 my $cruft         = undef;
 my $mail          = undef;
+my $scan          = undef;
 my $noquota       = 0;
 
 GetOptions(
@@ -60,6 +61,7 @@ GetOptions(
     'help'          => \$helpME,
     'cruft'         => \$cruft,
     'mail'          => \$mail,
+    'scan'          => \$scan,
     'noquota'       => \$noquota,
     'q'             => \$clearscreen,
 );
@@ -115,6 +117,11 @@ chomp($username);
 if ( !($MAINDOMAIN) ) {
     $username   = &FindUser($QUERY);
     $MAINDOMAIN = &FindMainDomain($username);
+}
+
+if ($scan) { 
+	&scan;
+	exit;
 }
 
 # If both variables are still empty, neither the username nor the domain name were found!
@@ -342,6 +349,15 @@ if ( -e ("$RealHome") ) {
     }
 }
 print "\n";
+# Check if user is in demo mode
+my $InDemo=qx[ grep $username /etc/demousers /etc/demodomains];
+if ($InDemo) {
+    print RED "[WARN] - $username is in demo mode!\n";
+}
+# Check if bandwidth limit exceeded
+if (-e("/var/cpanel/bwlimited/$username") or -e("/var/cpanel/bwlimited/$MAINDOMAIN") or -e("/var/cpanel/bwlimited/$QUERY")) { 
+    print RED "[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
+}
 if ($Is_Reseller) {
     print GREEN ON_BLACK "This account is also a reseller!\n";
 }
@@ -800,9 +816,9 @@ if ( $listssls or $all ) {
             ($expiredate) = ( split( /=/, $expiredate ) )[1];
             print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
 
-            if ($SSLNotInstalled) {
+            if ($SSLNotInstalled and $all) {
                 print RED
-                  "\t \\_ THIS SSL IS NOT INSTALLED OR HAS BEEN DELETED!\n";
+                  "\t \\_ THIS SSL IS NOT INSTALLED (MAY BE EXPIRED) OR HAS BEEN DELETED!\n";
             }
             print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
             print WHITE "\t \\_ Not After : " . GREEN . $expiredate . "\n";
@@ -870,6 +886,8 @@ sub Usage {
     print GREEN "\t Perform a cruft check on cptestdomain.net.\n\n";
     print CYAN "acctinfo" . WHITE " --mail cptestdomain.net\n";
     print GREEN "\t Display mail information for cptestdomain.net.\n\n";
+    print CYAN "acctinfo" . WHITE " --scan cptest\n";
+    print GREEN "\t Scan users home directory for known infection strings.\n\n";
     print CYAN "acctinfo" . WHITE " --all cptestdomain.net\n";
     print GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n";
     print CYAN "acctinfo" . WHITE " --help\n";
@@ -1557,8 +1575,10 @@ sub display_mail_info {
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
 
         # If v58+, get quota via doveadm command.
+        # Need to add a skipquota option here.  
         my $CPVersion = `cat /usr/local/cpanel/version`;
-        if ( $CPVersion >= 11.58 ) {
+        chomp($CPVersion);
+        if ( $CPVersion >= 11.58.0.0 ) {
             my $quotaline =
 qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
@@ -1960,3 +1980,35 @@ sub getArecords {
     return @addresses;
 }
 
+sub scan { 
+	my $URL="https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
+	my @DEFINITIONS = qx[ curl -s $URL ];
+	my $StringCnt=@DEFINITIONS;
+	print "Scanning $HOMEDIR/$username for ($StringCnt) known infections\n\n";
+	my @SEARCHSTRING=sort(@DEFINITIONS);
+	my @FOUND=undef;
+	my $SOMETHING_FOUND=0;
+	my $SEARCHSTRING;
+	my $cntFound=0;
+    foreach $SEARCHSTRING(@SEARCHSTRING) {
+        chomp($SEARCHSTRING);
+        my $SCAN=qx[ grep -rIl --exclude-dir=www "$SEARCHSTRING" $HOMEDIR/$username/* ];
+        chomp($SCAN);
+        if($SCAN) {
+            $cntFound++;
+            $SOMETHING_FOUND=1;
+            push(@FOUND,"The phrase $SEARCHSTRING was found in file $SCAN");
+        }
+    }
+    my $found;
+    if ($SOMETHING_FOUND > 0) {
+        foreach $found(@FOUND) {
+            chomp($found);
+            print "$found\n";
+        }
+    }
+    else { 
+        print "Nothing suspicious found!\n";
+    }
+	print "\n";
+}

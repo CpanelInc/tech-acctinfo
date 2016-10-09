@@ -1,3 +1,6 @@
+V2.4.48- Add simple scan (--scan) to scan for known infection strings. 
+         Add check for demo mode and if bandwidth limit may have been exceeded
+
 V2.4.47- Revert use of Net::DNS on obtaining A record. Seems to be getting the incorrect
          information from time to time.  Not sure yet why.
 
