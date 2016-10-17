@@ -1,4 +1,8 @@
-V2.4.48- Added --useDig switch to skip the Net::DNS setting.  Without --useDig, it uses Net::DNS
+V2.4.50- Skip any SSL certs not installed. Add a check for expired SSL's and warn if expired 
+
+V2.4.49- Added --useDig switch to skip the Net::DNS setting.  Without --useDig, it uses Net::DNS
+         (see version 2.4.47 below)
+
 V2.4.49- Rework the Quota check - made it a little faster and CloudLinux fault tolerent. 
 
 V2.4.48- Add simple scan (--scan) to scan for known infection strings. 

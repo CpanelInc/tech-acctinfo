@@ -24,6 +24,7 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
+use Date::Manip;
 use Net::DNS;
 use Socket;
 use integer;
@@ -68,7 +69,7 @@ GetOptions(
     'q'             => \$clearscreen,
 );
 
-if ($skipquota) { 
+if ($skipquota) {
     $skipquota = 1;
 }
 
@@ -121,9 +122,9 @@ if ( !($MAINDOMAIN) ) {
     $MAINDOMAIN = &FindMainDomain($username);
 }
 
-if ($scan) { 
-	&scan;
-	exit;
+if ($scan) {
+    &scan;
+    exit;
 }
 
 # If both variables are still empty, neither the username nor the domain name were found!
@@ -218,22 +219,23 @@ my $STARTDATE = scalar localtime( $user_conf->{'STARTDATE'} );
 my @ResolvedIP;
 my $ResolvedIP;
 if ($IS_USERNAME) {
-	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-	if ($useDig) { 
-		@ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
-	}
-	else { 
-		@ResolvedIP = getArecords($MAINDOMAIN);
-	}
+
+ # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
+    if ($useDig) {
+        @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+    }
+    else {
+        @ResolvedIP = getArecords($MAINDOMAIN);
+    }
 }
 else {
-	# a domain name was entered so we should resolve the IP of that instead.
-	if ($useDig) { 
-	    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
-	}
-	else { 
-    	@ResolvedIP = getArecords($DOMAIN);
-	}
+    # a domain name was entered so we should resolve the IP of that instead.
+    if ($useDig) {
+        @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+    }
+    else {
+        @ResolvedIP = getArecords($DOMAIN);
+    }
 }
 my $IPTYPE = "";
 if ( $IPADDR eq $SERVER_IP ) {
@@ -358,14 +360,20 @@ if ( -e ("$RealHome") ) {
     }
 }
 print "\n";
+
 # Check if user is in demo mode
-my $InDemo=qx[ grep $username /etc/demousers /etc/demodomains];
+my $InDemo = qx[ grep $username /etc/demousers /etc/demodomains];
 if ($InDemo) {
     print RED "[WARN] - $username is in demo mode!\n";
 }
+
 # Check if bandwidth limit exceeded
-if (-e("/var/cpanel/bwlimited/$username") or -e("/var/cpanel/bwlimited/$MAINDOMAIN") or -e("/var/cpanel/bwlimited/$QUERY")) { 
-    print RED "[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
+if (   -e ("/var/cpanel/bwlimited/$username")
+    or -e ("/var/cpanel/bwlimited/$MAINDOMAIN")
+    or -e ("/var/cpanel/bwlimited/$QUERY") )
+{
+    print RED
+"[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
 }
 if ($Is_Reseller) {
     print GREEN ON_BLACK "This account is also a reseller!\n";
@@ -397,7 +405,7 @@ else {
 # Check if account is over quota, warn if so, unless --skipquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
 # check if the account is over quota (slq does this, if nothing return it's not over quota.
-if ($skipquota == 0) { 
+if ( $skipquota == 0 ) {
     open( QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |" );
     my @quotachk = <QUOTACHK>;
     close(QUOTACHK);
@@ -406,9 +414,9 @@ if ($skipquota == 0) {
         chomp($BlockLimitReached);
         if ( $BlockLimitReached =~ m/Block limit reached on / ) {
             print RED "[WARN] - $username is over quota ";
-            my ($quotadev)=(split(/\s+/,$BlockLimitReached))[5]; 
+            my ($quotadev) = ( split( /\s+/, $BlockLimitReached ) )[5];
             my $quotaHR1 = qx[ grep $quotadev /etc/mtab ];
-			my ($quotaHR)=(split(/\s+/,$quotaHR1))[1];
+            my ($quotaHR) = ( split( /\s+/, $quotaHR1 ) )[1];
             print "($quotaHR is over quota)\n";
         }
     }
@@ -788,9 +796,14 @@ if ( $listssls or $all ) {
         foreach $cert (@certs) {
             my $SSLNotInstalled = 0;
             chomp($cert);
-            if ( $cert eq "." or $cert eq ".." ) { next; }
+            if (   $cert eq "."
+                or $cert eq ".."
+                or ( substr( $cert, -4 ) ne '.crt' ) )
+            {
+                next;
+            }
             if ( !( -e ("$sslsyscertdir/$cert") ) ) {
-                $SSLNotInstalled = 1;
+                next;
             }
             $sslsubject =
               qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
@@ -807,14 +820,21 @@ if ( $listssls or $all ) {
             chomp($expiredate);
             ($startdate)  = ( split( /=/, $startdate ) )[1];
             ($expiredate) = ( split( /=/, $expiredate ) )[1];
-            print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
+            my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
+            my $time_now = qx[ date -u ];
+            chomp($time_now);
+            my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
+            my $isExpired = GREEN "[VALID]";
 
-            if ($SSLNotInstalled and $all) {
-                print RED
-                  "\t \\_ THIS SSL IS NOT INSTALLED (MAY BE EXPIRED) OR HAS BEEN DELETED!\n";
+            if ( $unix_time_now > $unix_time ) {
+                $isExpired = RED "[EXPIRED]";
             }
+            print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
             print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
-            print WHITE "\t \\_ Not After : " . GREEN . $expiredate . "\n";
+            print WHITE "\t \\_ Not After : "
+              . GREEN
+              . $expiredate . " "
+              . $isExpired . "\n";
 
             # Check if self-signed
             my $isSelfSigned =
@@ -1568,7 +1588,7 @@ sub display_mail_info {
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
 
         # If v58+, get quota via doveadm command.
-        # Need to add a skipquota option here.  
+        # Need to add a skipquota option here.
         my $CPVersion = `cat /usr/local/cpanel/version`;
         chomp($CPVersion);
         if ( $CPVersion >= 11.58.0.0 ) {
@@ -1973,35 +1993,38 @@ sub getArecords {
     return @addresses;
 }
 
-sub scan { 
-	my $URL="https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
-	my @DEFINITIONS = qx[ curl -s $URL ];
-	my $StringCnt=@DEFINITIONS;
-	print "Scanning $HOMEDIR/$username for ($StringCnt) known infections\n\n";
-	my @SEARCHSTRING=sort(@DEFINITIONS);
-	my @FOUND=undef;
-	my $SOMETHING_FOUND=0;
-	my $SEARCHSTRING;
-	my $cntFound=0;
-    foreach $SEARCHSTRING(@SEARCHSTRING) {
+sub scan {
+    my $URL =
+"https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
+    my @DEFINITIONS = qx[ curl -s $URL ];
+    my $StringCnt   = @DEFINITIONS;
+    print "Scanning $HOMEDIR/$username for ($StringCnt) known infections\n\n";
+    my @SEARCHSTRING    = sort(@DEFINITIONS);
+    my @FOUND           = undef;
+    my $SOMETHING_FOUND = 0;
+    my $SEARCHSTRING;
+    my $cntFound = 0;
+
+    foreach $SEARCHSTRING (@SEARCHSTRING) {
         chomp($SEARCHSTRING);
-        my $SCAN=qx[ grep -rIl --exclude-dir=www "$SEARCHSTRING" $HOMEDIR/$username/* ];
+        my $SCAN =
+qx[ grep -rIl --exclude-dir=www "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
-        if($SCAN) {
+        if ($SCAN) {
             $cntFound++;
-            $SOMETHING_FOUND=1;
-            push(@FOUND,"The phrase $SEARCHSTRING was found in file $SCAN");
+            $SOMETHING_FOUND = 1;
+            push( @FOUND, "The phrase $SEARCHSTRING was found in file $SCAN" );
         }
     }
     my $found;
-    if ($SOMETHING_FOUND > 0) {
-        foreach $found(@FOUND) {
+    if ( $SOMETHING_FOUND > 0 ) {
+        foreach $found (@FOUND) {
             chomp($found);
             print "$found\n";
         }
     }
-    else { 
+    else {
         print "Nothing suspicious found!\n";
     }
-	print "\n";
+    print "\n";
 }
