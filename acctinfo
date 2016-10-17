@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.48";
+my $VERSION = "2.4.49";
 
 use Getopt::Long;
 use Cpanel::MysqlUtils;
@@ -44,10 +44,11 @@ my $resellerperms = undef;
 my $clearscreen   = undef;
 my $helpME        = undef;
 my $SearchFor     = undef;
+my $useDig        = undef;
 my $cruft         = undef;
 my $mail          = undef;
 my $scan          = undef;
-my $noquota       = 0;
+my $skipquota     = 0;
 
 GetOptions(
     'listdbs'       => \$listdbs,
@@ -59,15 +60,16 @@ GetOptions(
     'resellerperms' => \$resellerperms,
     'all'           => \$all,
     'help'          => \$helpME,
+    'useDig'        => \$useDig,
     'cruft'         => \$cruft,
     'mail'          => \$mail,
     'scan'          => \$scan,
-    'noquota'       => \$noquota,
+    'skipquota'     => \$skipquota,
     'q'             => \$clearscreen,
 );
 
-if ($noquota) { 
-    $noquota = 1;
+if ($skipquota) { 
+    $skipquota = 1;
 }
 
 if ($clearscreen) {
@@ -216,15 +218,22 @@ my $STARTDATE = scalar localtime( $user_conf->{'STARTDATE'} );
 my @ResolvedIP;
 my $ResolvedIP;
 if ($IS_USERNAME) {
-
- # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-     @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
- #   @ResolvedIP = getArecords($MAINDOMAIN);
+	# Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
+	if ($useDig) { 
+		@ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+	}
+	else { 
+		@ResolvedIP = getArecords($MAINDOMAIN);
+	}
 }
 else {
-    ## a domain name was entered so we should resolve the IP of that instead.
-    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
-#    @ResolvedIP = getArecords($DOMAIN);
+	# a domain name was entered so we should resolve the IP of that instead.
+	if ($useDig) { 
+	    @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+	}
+	else { 
+    	@ResolvedIP = getArecords($DOMAIN);
+	}
 }
 my $IPTYPE = "";
 if ( $IPADDR eq $SERVER_IP ) {
@@ -385,38 +394,22 @@ else {
     }
 }
 
-# Check if account is over quota, warn if so, unless --noquota is passed.
+# Check if account is over quota, warn if so, unless --skipquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
-# First check if the account is over quota (slq does this, if nothing return it's not over quota.
-if ($noquota == 0) { 
+# check if the account is over quota (slq does this, if nothing return it's not over quota.
+if ($skipquota == 0) { 
     open( QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |" );
     my @quotachk = <QUOTACHK>;
     close(QUOTACHK);
     my $BlockLimitReached;
-    my $quotaline;
     foreach $BlockLimitReached (@quotachk) {
         chomp($BlockLimitReached);
         if ( $BlockLimitReached =~ m/Block limit reached on / ) {
-            print RED "[WARN] - $username is over quota (";
-    
-    # Get the partition/drive and block size of the account. (quota -sl does this)
-            open( QUOTA, "/usr/bin/quota -sl $username 2> /dev/null |" );
-            my @quotaline = <QUOTA>;
-            close(QUOTA);
-            my $quotadev;
-            my $quotaHR;
-            foreach $quotaline (@quotaline) {
-                chomp($quotaline);
-                $quotaline =~ s/\s+/ /g;
-                ($quotadev) = ( split( /\s+/, $quotaline ) )[0];
-                if ( $quotaline =~ m/Filesystem|blocks|Disk quotas for|cagefs-skeleton/ ) {
-                    next;
-                }
-                else {
-                    $quotaHR = qx[ grep $quotadev /etc/mtab | awk '{print $2}' ];
-                    print "($quotaHR is over quota) - $quotaline\n";
-                }
-            }
+            print RED "[WARN] - $username is over quota ";
+            my ($quotadev)=(split(/\s+/,$BlockLimitReached))[5]; 
+            my $quotaHR1 = qx[ grep $quotadev /etc/mtab ];
+			my ($quotaHR)=(split(/\s+/,$quotaHR1))[1];
+            print "($quotaHR is over quota)\n";
         }
     }
 }

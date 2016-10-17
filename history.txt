@@ -1,3 +1,6 @@
+V2.4.48- Added --useDig switch to skip the Net::DNS setting.  Without --useDig, it uses Net::DNS
+V2.4.49- Rework the Quota check - made it a little faster and CloudLinux fault tolerent. 
+
 V2.4.48- Add simple scan (--scan) to scan for known infection strings. 
          Add check for demo mode and if bandwidth limit may have been exceeded
 
