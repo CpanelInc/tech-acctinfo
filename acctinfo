@@ -458,8 +458,8 @@ else {
 # Check for php-selector (CloudLinux)
 if ( -e ("$RealHome/.cl.selector/defaults.cfg") ) {
     my $clPHP = qx[ egrep '^php' $RealHome/.cl.selector/defaults.cfg ];
-    $clPHPVer =~ s/\s+//g;
-    my ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
+    my $clPHPVer =~ s/\s+//g;
+    ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
     print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n"
       unless ( $clPHPVer eq "" );
