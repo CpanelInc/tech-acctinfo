@@ -1,3 +1,6 @@
+v2.4.51- Add spinner to --scan option, exclude mail directory (may add an option to scan that
+         in the future), clean up scanning code and add colors.
+
 V2.4.50- Skip any SSL certs not installed. Add a check for expired SSL's and warn if expired 
 
 V2.4.49- Added --useDig switch to skip the Net::DNS setting.  Without --useDig, it uses Net::DNS

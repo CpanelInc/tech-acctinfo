@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.50";
+my $VERSION = "2.4.51";
 
 use Getopt::Long;
 use Cpanel::MysqlUtils;
@@ -24,6 +24,9 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
+
+# Just found out that Date::Manip is only available in 11.58+
+# (in 11.56 and lower, it's not installed).
 use Date::Manip;
 use Net::DNS;
 use Socket;
@@ -50,6 +53,7 @@ my $cruft         = undef;
 my $mail          = undef;
 my $scan          = undef;
 my $skipquota     = 0;
+our $spincounter;
 
 GetOptions(
     'listdbs'       => \$listdbs,
@@ -461,7 +465,7 @@ if ( -e ("$RealHome/.cl.selector/defaults.cfg") ) {
     my $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
-    print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n"
+    print WHITE "CloudLinux PHP Version:" . CYAN $clPHPVer . "\n"
       unless ( $clPHPVer eq "" );
 }
 
@@ -1760,16 +1764,21 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 
                             # Check reverse
                             my $ReverseOfMX = getptr($MXRecord);
-                            if (   $ReverseOfMX eq $MXRecord
-                                or $ReverseOfMX eq $HOSTNAME
-                                or $ReverseOfMX eq "mail.$MXRecord" )
-                            {
+                            if ( $ReverseOfMX eq $MXRecord ) {
                                 print GREEN
-"\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
+"\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord\n";
+                            }
+                            elsif ( $ReverseOfMX eq $HOSTNAME ) {
+                                print GREEN
+"\t\t \\_ [OK] - $ARecordForMX reverses back to $HOSTNAME\n";
+                            }
+                            elsif ( $ReverseOfMX eq "mail.$MXRecord" ) {
+                                print GREEN
+"\t\t \\_ [OK] - $ARecordForMX reverses back to mail.$MXRecord\n";
                             }
                             else {
                                 print RED
-"\t\t \\_ [WARN] - $ARecordForMX does not reverse back to $MXRecord or $HOSTNAME\n";
+"\t\t \\_ [WARN] - $ARecordForMX reverses back to $ReverseOfMX\n";
                             }
                         }
                         else {
@@ -1786,16 +1795,21 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 
                             # Check reverse
                             my $ReverseOfMX = getptr($MXRecord);
-                            if (   $ReverseOfMX eq $MXRecord
-                                or $ReverseOfMX eq $HOSTNAME
-                                or $ReverseOfMX eq "mail.$MXRecord" )
-                            {
+                            if ( $ReverseOfMX eq $MXRecord ) {
                                 print GREEN
-"\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord or $HOSTNAME\n";
+"\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord\n";
+                            }
+                            elsif ( $ReverseOfMX eq $HOSTNAME ) {
+                                print GREEN
+"\t\t \\_ [OK] - $ARecordForMX reverses back to $HOSTNAME\n";
+                            }
+                            elsif ( $ReverseOfMX eq "mail.$MXRecord" ) {
+                                print GREEN
+"\t\t \\_ [OK] - $ARecordForMX reverses back to mail.$MXRecord\n";
                             }
                             else {
                                 print RED
-"\t \\_ [WARN] - $ARecordForMX does not reverse back to $MXRecord or $HOSTNAME\n";
+"\t\t \\_ [WARN] - $ARecordForMX reverses back to $ReverseOfMX\n";
                             }
                         }
                         else {
@@ -1815,12 +1829,19 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
     &smborder;
+    my $IsInRemoteDomains;
+    my $IsInLocalDomains;
     print "Checking email routing (based on MX check above)...\n";
     if ($IsRemote) {
-        my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+        $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
         if ($IsInRemoteDomains) {
             print GREEN
               "\t \\_ [OK] - $DOMAIN is listed in /etc/remotedomains\n";
+            $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+            if ($IsInLocalDomains) {
+                print RED
+                  "\t \\_ [WARN] - $DOMAIN is also in /etc/localdomains\n";
+            }
         }
         else {
             print RED
@@ -1828,10 +1849,15 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
         }
     }
     else {
-        my $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+        $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
         if ($IsInLocalDomains) {
             print GREEN
               "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
+            $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+            if ($IsInRemoteDomains) {
+                print RED
+                  "\t \\_ [WARN] - $DOMAIN is also in /etc/remotedomains\n";
+            }
         }
         else {
             print RED
@@ -1999,33 +2025,39 @@ sub scan {
 "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
     my @DEFINITIONS = qx[ curl -s $URL ];
     my $StringCnt   = @DEFINITIONS;
-    print "Scanning $HOMEDIR/$username for ($StringCnt) known infections\n\n";
+    print "Scanning $HOMEDIR/$username for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
     my @FOUND           = undef;
     my $SOMETHING_FOUND = 0;
     my $SEARCHSTRING;
-    my $cntFound = 0;
 
     foreach $SEARCHSTRING (@SEARCHSTRING) {
+        &spin;
         chomp($SEARCHSTRING);
         my $SCAN =
-qx[ grep -rIl --exclude-dir=www "$SEARCHSTRING" $HOMEDIR/$username/* ];
+qx[ grep -rIl --exclude-dir=www --exclude-dir=mail "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
         if ($SCAN) {
-            $cntFound++;
             $SOMETHING_FOUND = 1;
-            push( @FOUND, "The phrase $SEARCHSTRING was found in file $SCAN" );
+            print YELLOW "\n\n\bThe phrase "
+              . CYAN
+              . $SEARCHSTRING
+              . YELLOW
+              . " was found in file(s)\n";
+            print GREEN
+"==================================================================\n";
+            print RED "$SCAN\n";
         }
     }
-    my $found;
-    if ( $SOMETHING_FOUND > 0 ) {
-        foreach $found (@FOUND) {
-            chomp($found);
-            print "$found\n";
-        }
-    }
-    else {
-        print "Nothing suspicious found!\n";
+    if ( $SOMETHING_FOUND == 0 ) {
+        print GREEN "\bNothing suspicious found!\n";
     }
     print "\n";
 }
+
+sub spin {
+    my %spinner = ( '|' => '/', '/' => '-', '-' => '\\', '\\' => '|' );
+    $spincounter = ( !defined $spincounter ) ? '|' : $spinner{$spincounter};
+    print STDERR "\b$spincounter";
+}
+
