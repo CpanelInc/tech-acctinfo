@@ -1,3 +1,7 @@
+V2.4.52- Fix PHP Version check for addon domains
+         Add php.ini config file information for EA4
+         Add timestamp to scan with Elapsed time
+         
 v2.4.51- Add spinner to --scan option, exclude mail directory (may add an option to scan that
          in the future), clean up scanning code and add colors.
 

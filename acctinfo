@@ -12,7 +12,10 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.51";
+my $VERSION = "2.4.52";
+
+our $CPVersion = `cat /usr/local/cpanel/version`;
+chomp($CPVersion);
 
 use Getopt::Long;
 use Cpanel::MysqlUtils;
@@ -24,13 +27,19 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
-
-# Just found out that Date::Manip is only available in 11.58+
-# (in 11.56 and lower, it's not installed).
-use Date::Manip;
+use Time::Piece;
+use Time::Seconds;
 use Net::DNS;
 use Socket;
 use integer;
+
+# Just found out that Date::Manip is only available in 11.58+
+# (in 11.56 and lower, it's not installed).
+my $noDateManip = 0;
+eval("use Date::Manip");
+if ($@) {
+    $noDateManip = 1;
+}
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -460,13 +469,25 @@ else {
 }
 
 # Check for php-selector (CloudLinux)
-if ( -e ("$RealHome/.cl.selector/defaults.cfg") ) {
+if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats ) {
     my $clPHP = qx[ egrep '^php' $RealHome/.cl.selector/defaults.cfg ];
     my $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
-    print WHITE "CloudLinux PHP Version:" . CYAN $clPHPVer . "\n"
-      unless ( $clPHPVer eq "" );
+    if ($clPHPVer) {
+        print WHITE "CloudLinux PHP Version:" . CYAN $clPHPVer . "\n";
+
+        # BELOW IS UNTESTED
+        #		my $PHPiniFile=qx[ php -i | grep '^Configuration File' ];
+        #		my $PHPiniLoad=qx[ php -i | grep '^Loaded Configuration File' ];
+        #		my $PHPiniScan=qx[ php -i | grep '^Scan this dir' ];
+        #		chomp($PHPiniFile);
+        #		chomp($PHPiniLoad);
+        #		chomp($PHPiniScan);
+        #		print YELLOW "\t \\_ $PHPiniFile\n";
+        #		print YELLOW "\t \\_ $PHPiniLoad\n";
+        #		print YELLOW "\t \\_ $PHPiniScan\n";
+    }
 }
 
 $isEA4 = &isEA4;
@@ -476,10 +497,28 @@ if ($isEA4) {
     if ( $PHPversion eq "" ) {
         $PHPversion = "Undefined";
     }
-    $PHPversion = " " . $PHPversion;
-    print WHITE "[EA4] PHP Version :"
+    print WHITE "[EA4] PHP Version : "
       . CYAN $PHPversion
       . " (System Default: $PHPDefaultVersion)\n";
+    if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
+        print YELLOW "PHP-FPM pool detected\n";
+    }
+
+    # Get php.ini config info
+    if ( -e ("/etc/scl/conf/$PHPversion") ) {
+        my $PHPiniFile =
+qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Configuration File' ];
+        my $PHPiniLoad =
+qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Loaded Configuration File' ];
+        my $PHPiniScan =
+qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
+        chomp($PHPiniFile);
+        chomp($PHPiniLoad);
+        chomp($PHPiniScan);
+        print YELLOW "\t \\_ $PHPiniFile\n";
+        print YELLOW "\t \\_ $PHPiniLoad\n";
+        print YELLOW "\t \\_ $PHPiniScan\n";
+    }
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
@@ -825,14 +864,17 @@ if ( $listssls or $all ) {
             chomp($expiredate);
             ($startdate)  = ( split( /=/, $startdate ) )[1];
             ($expiredate) = ( split( /=/, $expiredate ) )[1];
-            my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
-            my $time_now = qx[ date -u ];
-            chomp($time_now);
-            my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
-            my $isExpired = GREEN "[VALID]";
+            my $isExpired;
 
-            if ( $unix_time_now > $unix_time ) {
-                $isExpired = RED "[EXPIRED]";
+            if ( $noDateManip == 0 ) {
+                my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
+                my $time_now = qx[ date -u ];
+                chomp($time_now);
+                my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
+                $isExpired = GREEN "[VALID]";
+                if ( $unix_time_now > $unix_time ) {
+                    $isExpired = RED "[EXPIRED]";
+                }
             }
             print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
             print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
@@ -1259,8 +1301,9 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/var/cpanel/databases/grants_$username.yaml",
             $dirstatus );
-        my $CPVersion = `cat /usr/local/cpanel/version`;
-        my $yaml_json = ( $CPVersion < 11.50 ) ? "yaml" : "json";
+
+        #        my $CPVersion = `cat /usr/local/cpanel/version`;
+        my $yaml_json = ( $CPVersion < 11.50.0.0 ) ? "yaml" : "json";
         my $dirstatus =
           &check_dir("/var/cpanel/databases/$username.$yaml_json");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -1268,7 +1311,7 @@ sub cruft_check {
         &print_output( "/var/cpanel/databases/$username.$yaml_json",
             $dirstatus );
         my $dbindex =
-          ( $CPVersion < 11.50 )
+          ( $CPVersion < 11.50.0.0 )
           ? "/var/cpanel/databases/dbindex.db"
           : "/var/cpanel/databases/dbindex.db.json";
         my $dirstatus = &check_file_existance( $dbindex, $username );
@@ -1311,6 +1354,43 @@ sub cruft_check {
     if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
     else              { $dirstatus = RED "[MISSING]"; }
     &print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
+
+    # Check for DNS Clustering
+    if ( -e "/var/cpanel/useclusteringdns" ) {
+        print "Found DNS Cluster - checking...\n";
+        opendir( CLUSTERS, "/var/cpanel/cluster/root/config" );
+        my @DNSCLUSTERS = readdir(CLUSTERS);
+        closedir(CLUSTERS);
+        my ( $dnscluster, $QueryCluster );
+        foreach $dnscluster (@DNSCLUSTERS) {
+            chomp($dnscluster);
+            if (   $dnscluster eq "."
+                or $dnscluster eq ".."
+                or $dnscluster =~ m/dnsrole/ )
+            {
+                next;
+            }
+            if ($IS_USERNAME) {
+                $QueryCluster = qx[ dig \@$dnscluster $MAINDOMAIN +short ];
+                if ($QueryCluster) {
+                    print YELLOW "\t \\_ $MAINDOMAIN found in $dnscluster\n";
+                }
+                else {
+                    print YELLOW
+                      "\t \\_ $MAINDOMAIN not found in $dnscluster\n";
+                }
+            }
+            else {
+                $QueryCluster = qx[ dig \@$dnscluster $QUERY +short ];
+                if ($QueryCluster) {
+                    print YELLOW "\t \\_ $QUERY found in $dnscluster\n";
+                }
+                else {
+                    print YELLOW "\t \\_ $QUERY not found in $dnscluster\n";
+                }
+            }
+        }
+    }
 
     # Check MySQL users table.
     my @MySQLUsers = undef;
@@ -1524,13 +1604,13 @@ sub get_php_version() {
         $tcDomain = $MAINDOMAIN;
     }
     else {
-        $tcDomain = $QUERY;
+        ($tcDomain) = ( split( /\./, $QUERY ) )[0];
+        $tcDomain = $tcDomain . "." . $MAINDOMAIN;
     }
     open( USERDATA, "/var/cpanel/userdata/$username/$tcDomain" );
     @USERDATA = <USERDATA>;
     close(USERDATA);
     foreach $userdataline (@USERDATA) {
-
         if ( $userdataline =~ m/phpversion:/ ) {
             ($phpUserVersion) = ( split( /: /, $userdataline ) )[1];
             chomp($phpUserVersion);
@@ -1593,10 +1673,7 @@ sub display_mail_info {
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
 
         # If v58+, get quota via doveadm command.
-        # Need to add a skipquota option here.
-        my $CPVersion = `cat /usr/local/cpanel/version`;
-        chomp($CPVersion);
-        if ( $CPVersion >= 11.58.0.0 ) {
+        if ( $CPVersion <= 11.58.0.0 ) {
             my $quotaline =
 qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
@@ -1623,6 +1700,9 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
                   . $qlimit . " MB ("
                   . $qpercent . "%)]\n";
             }
+        }
+        else {
+            print "\n";
         }
 
         # Check the passwd and shadow files to make sure an entry exists
@@ -1840,7 +1920,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
             $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
             if ($IsInLocalDomains) {
                 print RED
-                  "\t \\_ [WARN] - $DOMAIN is also in /etc/localdomains\n";
+"\t \\_ [WARN] - $DOMAIN was also found in /etc/localdomains\n";
             }
         }
         else {
@@ -1856,7 +1936,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
             $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
             if ($IsInRemoteDomains) {
                 print RED
-                  "\t \\_ [WARN] - $DOMAIN is also in /etc/remotedomains\n";
+"\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
             }
         }
         else {
@@ -2030,12 +2110,16 @@ sub scan {
     my @FOUND           = undef;
     my $SOMETHING_FOUND = 0;
     my $SEARCHSTRING;
+    my ( $sec, $min, $hour, $mday, $mon, $year );
+    my $scanstarttime = Time::Piece->new;
+
+    print "Scan started on $scanstarttime\n";
 
     foreach $SEARCHSTRING (@SEARCHSTRING) {
         &spin;
         chomp($SEARCHSTRING);
         my $SCAN =
-qx[ grep -rIl --exclude-dir=www --exclude-dir=mail "$SEARCHSTRING" $HOMEDIR/$username/* ];
+qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
         if ($SCAN) {
             $SOMETHING_FOUND = 1;
@@ -2053,6 +2137,10 @@ qx[ grep -rIl --exclude-dir=www --exclude-dir=mail "$SEARCHSTRING" $HOMEDIR/$use
         print GREEN "\bNothing suspicious found!\n";
     }
     print "\n";
+    my $scanendtime = Time::Piece->new;
+    print "Scan completed on $scanendtime\n";
+    my $scantimediff = ( $scanendtime - $scanstarttime );
+    print "Elapsed Time: ", $scantimediff->pretty, "\n";
 }
 
 sub spin {
