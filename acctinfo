@@ -1366,7 +1366,8 @@ sub cruft_check {
             chomp($dnscluster);
             if (   $dnscluster eq "."
                 or $dnscluster eq ".."
-                or $dnscluster =~ m/dnsrole/ )
+                or $dnscluster =~ m/dnsrole/ 
+                or $dnscluster =~ m/.cache/ )
             {
                 next;
             }
@@ -1846,19 +1847,19 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
                             my $ReverseOfMX = getptr($MXRecord);
                             if ( $ReverseOfMX eq $MXRecord ) {
                                 print GREEN
-"\t\t \\_ [OK] - $ARecordForMX reverses back to $MXRecord\n";
+"\t\t \\_ [OK] - $ARecordForMX reverses back to the MX: $MXRecord\n";
                             }
                             elsif ( $ReverseOfMX eq $HOSTNAME ) {
                                 print GREEN
-"\t\t \\_ [OK] - $ARecordForMX reverses back to $HOSTNAME\n";
+"\t\t \\_ [OK] - $ARecordForMX reverses back to the hostname: $HOSTNAME\n";
                             }
                             elsif ( $ReverseOfMX eq "mail.$MXRecord" ) {
                                 print GREEN
-"\t\t \\_ [OK] - $ARecordForMX reverses back to mail.$MXRecord\n";
+"\t\t \\_ [OK] - $ARecordForMX reverses back to: mail.$MXRecord\n";
                             }
                             else {
                                 print RED
-"\t\t \\_ [WARN] - $ARecordForMX reverses back to $ReverseOfMX\n";
+"\t\t \\_ [WARN] - $ARecordForMX reverses back to: $ReverseOfMX\n";
                             }
                         }
                         else {
