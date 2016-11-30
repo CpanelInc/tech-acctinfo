@@ -431,6 +431,9 @@ if ( $skipquota == 0 ) {
             my $quotaHR1 = qx[ grep $quotadev /etc/mtab ];
             my ($quotaHR) = ( split( /\s+/, $quotaHR1 ) )[1];
             print "($quotaHR is over quota)\n";
+            # Would be nice to still get the bytes/megs from quota -sl 
+            # quota -sl $username | egrep -v 'Filesystem|quotas' | tail -1 | awk '{print $1 " " $2}'
+            # Above is just an example.  
         }
     }
 }
@@ -495,7 +498,7 @@ if ($isEA4) {
     $PHPDefaultVersion = &get_system_php_version();
     $PHPversion        = &get_php_version();
     if ( $PHPversion eq "" ) {
-        $PHPversion = "Undefined";
+        $PHPversion = "inherit";
     }
     print WHITE "[EA4] PHP Version : "
       . CYAN $PHPversion
@@ -1762,12 +1765,12 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
         }
         if ( !($upasswdOK) ) {
             print RED
-"\n\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN";
+"\t\t \\_ [WARN] - Missing passwd entry for $emailacctline\@$DOMAIN";
             print "\n";
         }
         if ( !($ushadowOK) ) {
             print RED
-"\n\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN";
+"\t\t \\_ [WARN] - Missing shadow entry for $emailacctline\@$DOMAIN";
             print "\n";
         }
 
@@ -2022,7 +2025,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
     }
 
     # Here we add the spf record and dkim record (if they exist).
-    my $spf  = qx[ dig \@208.67.222.222 $DOMAIN TXT +short ];
+    my $spf  = qx[ dig \@208.67.222.222 $DOMAIN TXT +short | grep 'spf1' ];
     my $dkim = qx[ dig \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
     print "Checking SPF Record For $DOMAIN\n";
     if ($spf) {

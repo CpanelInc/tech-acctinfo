@@ -58,3 +58,12 @@ The following options are available:
 --cruft cptestdo
    Do a cruft check of all files for that user name (or domain name).  
 
+--mail cptestdomain.net
+   Lists mail accounts, aliases/forwarders, filters (both user and global), does some sanity 
+   checking on MX records and rDNS and mail delivery (/etc/localdomains vs /etc/remotedomains).
+
+--scan cptestdo
+   Run a small scan of the /home/cptestdo directory and grep for known phrases that have been 
+   found in various hacked scripts.  NOTE: THIS CAN HAVE FALSE POSITIVES SO EACH RESULT MUST
+   BE INVESTIGATED BY THE SERVER OWNER!!! - DO NOT REMOVE ANY FILE THAT IS REPORTED!
+
