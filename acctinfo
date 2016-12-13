@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.55";
+my $VERSION = "2.4.56";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -515,6 +515,9 @@ if ($isEA4) {
     }
 
     # Get php.ini config info
+    if ($PHPversion eq "inherit") { 
+		$PHPversion = $PHPDefaultVersion;
+    }
     if ( -e ("/etc/scl/conf/$PHPversion")
         or ( -e ("/etc/scl/prefixes/$PHPversion") ) )
     {
