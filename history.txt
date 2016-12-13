@@ -1,3 +1,8 @@
+V2.4.55- Add more information to --mail output (suspended outgoing/hold outgoing etc...)
+V2.4.54- Fix CloudLinux PHP Version to not display if CageFS is Disabled, 
+         Made over quota check more informative.
+V2.4.53- Add check for custom php.ini, .user.ini files in users home directory. Also add check
+         for presence of suPHP_ConfigPath in .htaccess files.
 V2.4.52- Fix PHP Version check for addon domains
          Add php.ini config file information for EA4
          Add timestamp to scan with Elapsed time

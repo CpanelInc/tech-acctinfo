@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.52";
+my $VERSION = "2.4.55";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -423,6 +423,8 @@ if ( $skipquota == 0 ) {
     my @quotachk = <QUOTACHK>;
     close(QUOTACHK);
     my $BlockLimitReached;
+    my $quotaused;
+    my $quotaallowed;
     foreach $BlockLimitReached (@quotachk) {
         chomp($BlockLimitReached);
         if ( $BlockLimitReached =~ m/Block limit reached on / ) {
@@ -430,10 +432,14 @@ if ( $skipquota == 0 ) {
             my ($quotadev) = ( split( /\s+/, $BlockLimitReached ) )[5];
             my $quotaHR1 = qx[ grep $quotadev /etc/mtab ];
             my ($quotaHR) = ( split( /\s+/, $quotaHR1 ) )[1];
-            print "($quotaHR is over quota)\n";
-            # Would be nice to still get the bytes/megs from quota -sl 
-            # quota -sl $username | egrep -v 'Filesystem|quotas' | tail -1 | awk '{print $1 " " $2}'
-            # Above is just an example.  
+            ( $quotaused, $quotaallowed ) = (
+                split(
+                    /\s+/,
+qx[ /usr/bin/quota -sl $username | egrep -v 'Filesystem|quotas' | tail -1 ]
+                )
+            )[ 2, 3 ];
+            print
+"($quotadev [$quotaHR] is over quota [$quotaused/$quotaallowed])\n";
         }
     }
 }
@@ -472,13 +478,14 @@ else {
 }
 
 # Check for php-selector (CloudLinux)
-if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats ) {
+if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" )
+{
     my $clPHP = qx[ egrep '^php' $RealHome/.cl.selector/defaults.cfg ];
     my $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
     if ($clPHPVer) {
-        print WHITE "CloudLinux PHP Version:" . CYAN $clPHPVer . "\n";
+        print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n";
 
         # BELOW IS UNTESTED
         #		my $PHPiniFile=qx[ php -i | grep '^Configuration File' ];
@@ -508,7 +515,9 @@ if ($isEA4) {
     }
 
     # Get php.ini config info
-    if ( -e ("/etc/scl/conf/$PHPversion") ) {
+    if ( -e ("/etc/scl/conf/$PHPversion")
+        or ( -e ("/etc/scl/prefixes/$PHPversion") ) )
+    {
         my $PHPiniFile =
 qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Configuration File' ];
         my $PHPiniLoad =
@@ -522,6 +531,38 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
         print YELLOW "\t \\_ $PHPiniLoad\n";
         print YELLOW "\t \\_ $PHPiniScan\n";
     }
+
+    # Search /home/username for any php.ini files and/or .user.ini files
+    my @customPHPINI  = qx[ find $RealHome -name 'php.ini' ];
+    my @customuserINI = qx[ find $RealHome -name '.user.ini' ];
+    my $customPHPINIfile;
+    my $customuserINIfile;
+    if (@customPHPINI) {
+        print GREEN "Custom php.ini file found in: \n";
+        foreach $customPHPINIfile (@customPHPINI) {
+            chomp($customPHPINIfile);
+            print YELLOW "\t \\_ $customPHPINIfile\n";
+        }
+    }
+    if (@customuserINI) {
+        print GREEN "Custom .user.ini file found in: \n";
+        foreach $customuserINIfile (@customuserINI) {
+            chomp($customuserINIfile);
+            print YELLOW "\t \\_ $customuserINIfile\n";
+        }
+    }
+
+    # Check for ^suPHP_ConfigPath variable in .htaccess files
+    my $suPHPConfPathFound =
+qx[ find $RealHome -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+    if ($suPHPConfPathFound) {
+        print RED "[WARN]"
+          . WHITE
+          . " - suPHPConfigPath found in "
+          . CYAN
+          . $suPHPConfPathFound;
+    }
+    print "\n";
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
@@ -1369,7 +1410,7 @@ sub cruft_check {
             chomp($dnscluster);
             if (   $dnscluster eq "."
                 or $dnscluster eq ".."
-                or $dnscluster =~ m/dnsrole/ 
+                or $dnscluster =~ m/dnsrole/
                 or $dnscluster =~ m/.cache/ )
             {
                 next;
@@ -1665,6 +1706,19 @@ sub display_mail_info {
     my @SORTED2 = sort(@EMAILACCTS);
     @EMAILACCTS = @SORTED2;
     &smborder;
+
+    # Check for suspended from outgoing email
+    my $SMTPUserSusp = qx[ grep $username /etc/outgoing_mail_suspended_users ];
+    if ($SMTPUserSusp) {
+        print RED "[WARN] - $username is suspended from sending email\n";
+    }
+
+    # Check for hold from outgoing email
+    my $SMTPUserHold = qx[ grep $username /etc/outgoing_mail_hold_users ];
+    if ($SMTPUserHold) {
+        print RED "[WARN] - $username is on hold from sending email\n";
+    }
+
     print "Email accounts for $DOMAIN: \n";
 
     foreach $emailacctline (@EMAILACCTS) {
@@ -1932,21 +1986,17 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
               "\t \\_ [WARN] - $DOMAIN is missing from /etc/remotedomains\n";
         }
     }
-    else {
-        $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
-        if ($IsInLocalDomains) {
-            print GREEN
-              "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
-            $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
-            if ($IsInRemoteDomains) {
-                print RED
-"\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
-            }
-        }
-        else {
+    $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+    if ($IsInLocalDomains) {
+        print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
+        $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+        if ($IsInRemoteDomains) {
             print RED
-              "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
+              "\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
         }
+    }
+    else {
+        print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
     }
 
     # Now list aliases (if any)
