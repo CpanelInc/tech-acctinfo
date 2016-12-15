@@ -1,3 +1,4 @@
+V2.4.57- Add --skipfind switch to skip searching for user level php.ini/.user.ini files.
 V2.4.56- Add additional php information if EA4 PHP version is set to inherit
 V2.4.55- Add more information to --mail output (suspended outgoing/hold outgoing etc...)
 V2.4.54- Fix CloudLinux PHP Version to not display if CageFS is Disabled, 

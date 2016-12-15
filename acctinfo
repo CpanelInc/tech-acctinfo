@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.56";
+my $VERSION = "2.4.57";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -62,6 +62,7 @@ my $cruft         = undef;
 my $mail          = undef;
 my $scan          = undef;
 my $skipquota     = 0;
+my $skipfind      = 0;
 our $spincounter;
 
 GetOptions(
@@ -79,11 +80,15 @@ GetOptions(
     'mail'          => \$mail,
     'scan'          => \$scan,
     'skipquota'     => \$skipquota,
+    'skipfind'      => \$skipfind,
     'q'             => \$clearscreen,
 );
 
 if ($skipquota) {
     $skipquota = 1;
+}
+if ($skipfind) {
+    $skipfind = 1;
 }
 
 if ($clearscreen) {
@@ -535,37 +540,39 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
         print YELLOW "\t \\_ $PHPiniScan\n";
     }
 
-    # Search /home/username for any php.ini files and/or .user.ini files
-    my @customPHPINI  = qx[ find $RealHome -name 'php.ini' ];
-    my @customuserINI = qx[ find $RealHome -name '.user.ini' ];
-    my $customPHPINIfile;
-    my $customuserINIfile;
-    if (@customPHPINI) {
-        print GREEN "Custom php.ini file found in: \n";
-        foreach $customPHPINIfile (@customPHPINI) {
-            chomp($customPHPINIfile);
-            print YELLOW "\t \\_ $customPHPINIfile\n";
+    # Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
+    if ($skipfind == 0) { 
+        my @customPHPINI  = qx[ find $RealHome -name 'php.ini' ];
+        my @customuserINI = qx[ find $RealHome -name '.user.ini' ];
+        my $customPHPINIfile;
+        my $customuserINIfile;
+        if (@customPHPINI) {
+            print GREEN "Custom php.ini file found in: \n";
+            foreach $customPHPINIfile (@customPHPINI) {
+                chomp($customPHPINIfile);
+                print YELLOW "\t \\_ $customPHPINIfile\n";
+            }
         }
-    }
-    if (@customuserINI) {
-        print GREEN "Custom .user.ini file found in: \n";
-        foreach $customuserINIfile (@customuserINI) {
-            chomp($customuserINIfile);
-            print YELLOW "\t \\_ $customuserINIfile\n";
+        if (@customuserINI) {
+            print GREEN "Custom .user.ini file found in: \n";
+            foreach $customuserINIfile (@customuserINI) {
+                chomp($customuserINIfile);
+                print YELLOW "\t \\_ $customuserINIfile\n";
+            }
         }
-    }
 
-    # Check for ^suPHP_ConfigPath variable in .htaccess files
-    my $suPHPConfPathFound =
-qx[ find $RealHome -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
-    if ($suPHPConfPathFound) {
-        print RED "[WARN]"
-          . WHITE
-          . " - suPHPConfigPath found in "
-          . CYAN
-          . $suPHPConfPathFound;
+        # Check for ^suPHP_ConfigPath variable in .htaccess files
+        my $suPHPConfPathFound =
+    qx[ find $RealHome -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+        if ($suPHPConfPathFound) {
+            print RED "[WARN]"
+            . WHITE
+            . " - suPHPConfigPath found in "
+            . CYAN
+            . $suPHPConfPathFound;
+        }
+        print "\n";
     }
-    print "\n";
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
