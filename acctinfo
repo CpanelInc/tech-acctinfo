@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.57";
+my $VERSION = "2.4.58";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -542,8 +542,8 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
     # Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
     if ($skipfind == 0) { 
-        my @customPHPINI  = qx[ find $RealHome -name 'php.ini' ];
-        my @customuserINI = qx[ find $RealHome -name '.user.ini' ];
+        my @customPHPINI  = qx[ find $RealHome/public_html -maxdepth 1 -name 'php.ini' ];
+        my @customuserINI = qx[ find $RealHome/public_html -maxdepth 1 -name '.user.ini' ];
         my $customPHPINIfile;
         my $customuserINIfile;
         if (@customPHPINI) {
@@ -563,7 +563,7 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
         # Check for ^suPHP_ConfigPath variable in .htaccess files
         my $suPHPConfPathFound =
-    qx[ find $RealHome -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+    qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
         if ($suPHPConfPathFound) {
             print RED "[WARN]"
             . WHITE
