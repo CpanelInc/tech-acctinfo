@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.58";
+my $VERSION = "2.4.59";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -1743,7 +1743,7 @@ sub display_mail_info {
         # If v58+, get quota via doveadm command.
         if ( $CPVersion <= 11.58.0.0 ) {
             my $quotaline =
-qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'STORAGE' ];
+qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE' ];
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
                 print "[Quota cannot be determined]\n";
             }

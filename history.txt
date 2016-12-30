@@ -1,3 +1,4 @@
+V2.4.59- Fix doveadm quota get command (output stopped working)
 V2.4.58- Add -maxdepth 1 to php.ini/.user.ini find command 
 V2.4.57- Add --skipfind switch to skip searching for user level php.ini/.user.ini files.
 V2.4.56- Add additional php information if EA4 PHP version is set to inherit
