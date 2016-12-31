@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.59";
+my $VERSION = "2.4.60";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -279,6 +279,10 @@ my $vcu_account          = "";
 my $ResellersAcct        = "";
 my $RESELLER             = "";
 my $FOUND                = "";
+my $ResellerSharedIP     = "None";
+my @ResellerIPS          = undef;
+my $ResellerIP           = "None";
+my $ResellerIPS          = "None";
 my @ALL_RESELLERS        = Cpanel::ResellerFunctions::getresellerslist();
 unshift @ALL_RESELLERS, 'root';
 
@@ -286,6 +290,17 @@ foreach $RESELLER (@ALL_RESELLERS) {
     chomp($RESELLER);
     if ( $RESELLER eq $username ) {
         $Is_Reseller = 1;
+
+  # Grab resellers shared IP (if configured) from /var/cpanel/mainips/$RESELLER.
+        if ( -e ("/var/cpanel/mainips/$RESELLER") ) {
+            $ResellerSharedIP = qx[ cat /var/cpanel/mainips/$RESELLER ];
+            chomp($ResellerSharedIP);
+        }
+        if ( -e ("/var/cpanel/dips/$RESELLER") ) {
+            open( RESELLERIPS, "/var/cpanel/dips/$RESELLER" );
+            @ResellerIPS = <RESELLERIPS>;
+            close(RESELLERIPS);
+        }
 
         # Read all accounts in /var/cpanel/users into array
         opendir( ACCTS, "/var/cpanel/users" );
@@ -395,6 +410,33 @@ if (   -e ("/var/cpanel/bwlimited/$username")
 }
 if ($Is_Reseller) {
     print GREEN ON_BLACK "This account is also a reseller!\n";
+    if ($ResellerSharedIP) {
+        print GREEN "Reseller's Shared IP: " . WHITE $ResellerSharedIP . "\n";
+    }
+    if (@ResellerIPS) {
+        print GREEN "Reseller's IP Delegation\n";
+        foreach $ResellerIP (@ResellerIPS) {
+            chomp($ResellerIP);
+            if ( $ResellerIP ne "" ) {
+                print YELLOW "\t \\_ $ResellerIP\n";
+            }
+            else {
+                print YELLOW "\t \\_ Open Delegation "
+                  . CYAN
+                  . "(any IP on this server can be used by "
+                  . WHITE $username
+                  . CYAN . ")\n";
+            }
+        }
+    }
+    else {
+        print GREEN "Reseller's IP Delegation: ";
+        print YELLOW "Open Delegation "
+          . CYAN
+          . "(any IP on this server can be used by "
+          . WHITE $username
+          . CYAN . ")\n";
+    }
 }
 print GREEN "$IS_PARKED\n" unless ( $IS_PARKED eq "" );
 print GREEN "$IS_ADDON\n"  unless ( $IS_ADDON eq "" );
@@ -520,8 +562,8 @@ if ($isEA4) {
     }
 
     # Get php.ini config info
-    if ($PHPversion eq "inherit") { 
-		$PHPversion = $PHPDefaultVersion;
+    if ( $PHPversion eq "inherit" ) {
+        $PHPversion = $PHPDefaultVersion;
     }
     if ( -e ("/etc/scl/conf/$PHPversion")
         or ( -e ("/etc/scl/prefixes/$PHPversion") ) )
@@ -540,10 +582,12 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
         print YELLOW "\t \\_ $PHPiniScan\n";
     }
 
-    # Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
-    if ($skipfind == 0) { 
-        my @customPHPINI  = qx[ find $RealHome/public_html -maxdepth 1 -name 'php.ini' ];
-        my @customuserINI = qx[ find $RealHome/public_html -maxdepth 1 -name '.user.ini' ];
+# Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
+    if ( $skipfind == 0 ) {
+        my @customPHPINI =
+          qx[ find $RealHome/public_html -maxdepth 1 -name 'php.ini' ];
+        my @customuserINI =
+          qx[ find $RealHome/public_html -maxdepth 1 -name '.user.ini' ];
         my $customPHPINIfile;
         my $customuserINIfile;
         if (@customPHPINI) {
@@ -563,13 +607,13 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
         # Check for ^suPHP_ConfigPath variable in .htaccess files
         my $suPHPConfPathFound =
-    qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
         if ($suPHPConfPathFound) {
             print RED "[WARN]"
-            . WHITE
-            . " - suPHPConfigPath found in "
-            . CYAN
-            . $suPHPConfPathFound;
+              . WHITE
+              . " - suPHPConfigPath found in "
+              . CYAN
+              . $suPHPConfPathFound;
         }
         print "\n";
     }
@@ -1741,7 +1785,7 @@ sub display_mail_info {
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
 
         # If v58+, get quota via doveadm command.
-        if ( $CPVersion <= 11.58.0.0 ) {
+        if ( $CPVersion => 11.58.0.0 ) {
             my $quotaline =
 qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE' ];
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
