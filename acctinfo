@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.60";
+my $VERSION = "2.4.61";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -1779,7 +1779,7 @@ sub display_mail_info {
         chomp($emailacctline);
         next
           if ( $emailacctline =~
-/\.|\.\.|new|cur|tmp|mailboxes|storage|maildirsize|maildirfolder|subscriptions|dovecot/
+/^\.|^\.\.|new|cur|tmp|mailboxes|storage|maildirsize|maildirfolder|subscriptions|dovecot/
           );
         $emailacctline =~ s/\///g;    ## Strip trailing /
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
