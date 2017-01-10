@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.61";
+my $VERSION = "2.4.62";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -52,6 +52,7 @@ my $listssls      = undef;
 my $listsubs      = undef;
 my $listaddons    = undef;
 my $listparked    = undef;
+my $listaliased   = undef;
 my $reselleraccts = undef;
 my $resellerperms = undef;
 my $clearscreen   = undef;
@@ -70,7 +71,8 @@ GetOptions(
     'listssls'      => \$listssls,
     'listsubs'      => \$listsubs,
     'listaddons'    => \$listaddons,
-    'listparked'    => \$listparked,
+    'listaliased'   => \$listaliased,
+    'listparked'    => \$listaliased,
     'reselleraccts' => \$reselleraccts,
     'resellerperms' => \$resellerperms,
     'all'           => \$all,
@@ -99,10 +101,8 @@ if ($helpME) {
     &Usage;
 }
 
-my $conf    = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
-my $HOMEDIR = $conf->{'HOMEDIR'};
-
-# NOTE: The above is the HOMEDIR variable in /etc/wwwacct.conf
+my $conf      = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
+my $HOMEDIR   = $conf->{'HOMEDIR'};
 my $SERVER_IP = $conf->{'ADDR'};
 my $cpconf    = Cpanel::Config::LoadCpConf::loadcpconf();
 my $DBPrefix  = $cpconf->{'database_prefix'};
@@ -167,6 +167,7 @@ my @ADDONDOMAINS              = "";
 my @PARKEDDOMAINS             = "";
 my $ACCT                      = "";
 my $MAILBOX_FORMAT            = "";
+my $MAXPOP                    = 0;
 my $MAX_EMAIL_PER_HOUR        = 0;
 my $MAX_DEFER_FAIL_PERCENTAGE = 0;
 open( USERDATAFILE, "/etc/userdatadomains" );
@@ -203,7 +204,7 @@ foreach $ACCT (@USERDATADOMAINS) {
     }
 }
 
-# Get all parked domains (if any)
+# Get all aliased domains (if any)
 foreach $ACCT (@USERDATADOMAINS) {
     chomp($ACCT);
     if ( $ACCT =~ m/ $username/ ) {
@@ -212,7 +213,8 @@ foreach $ACCT (@USERDATADOMAINS) {
             chop($parked_domain);
             push( @PARKEDDOMAINS, $parked_domain );
             if ( $parked_domain eq $DOMAIN ) {
-                $IS_PARKED = "$DOMAIN is a parked domain of $MAINDOMAIN\n";
+                $IS_PARKED =
+                  "$DOMAIN is an alias (parked) domain of $MAINDOMAIN\n";
             }
         }
     }
@@ -230,12 +232,30 @@ if ($cruft) {
 }
 
 # We already have the $user_conf hash variable.
-my $PACKAGE   = $user_conf->{'PLAN'};
-my $THEME     = $user_conf->{'RS'};
-my $IPADDR    = $user_conf->{'IP'};
-my $STARTDATE = scalar localtime( $user_conf->{'STARTDATE'} );
+my $PACKAGE       = $user_conf->{'PLAN'};
+my $THEME         = $user_conf->{'RS'};
+my $IPADDR        = $user_conf->{'IP'};
+my $HAS_AUTOSSL   = $user_conf->{'FEATURE-AUTOSSL'};
+my $BACKUPENABLED = $user_conf->{'BACKUP'};
+my $LEGACYBACKUP  = $user_conf->{'LEGACY_BACKUP'};
+my $BWLIMIT       = $user_conf->{'BWLIMIT'};
+my $MAXADDON      = $user_conf->{'MAXADDON'};
+my $MAXPARK       = $user_conf->{'MAXPARK'};
+my $MAXSUB        = $user_conf->{'MAXSUB'};
+my $MAXFTP        = $user_conf->{'MAXFTP'};
+my $MAXSQL        = $user_conf->{'MAXSQL'};
+my $MAXLST        = $user_conf->{'MAXLST'};
+my $FEATURELIST   = $user_conf->{'FEATURELIST'};
+my $STARTDATE     = scalar localtime( $user_conf->{'STARTDATE'} );
 my @ResolvedIP;
 my $ResolvedIP;
+
+if ( $BWLIMIT ne "unlimited" ) {
+    $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
+}
+$HAS_AUTOSSL   = ($HAS_AUTOSSL)   ? "Yes" : "No";
+$BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
+$LEGACYBACKUP  = ($LEGACYBACKUP)  ? "Yes" : "No";
 if ($IS_USERNAME) {
 
  # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
@@ -378,7 +398,7 @@ if ( -e ("$RealHome/.lastlogin") ) {
 }
 
 print GREEN ON_BLACK "The main domain is "
-  . BLUE $MAINDOMAIN
+  . YELLOW $MAINDOMAIN
   . GREEN ON_BLACK $RO_TEXT . "\n";
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
 
@@ -503,13 +523,34 @@ if ( -e ("$custom_style_path") ) {
     $custom_style       = $custom_style_array[-1];
 }
 
-print WHITE "Hosting Package: " . CYAN $PACKAGE . "\n";
+print WHITE "Hosting Package: "
+  . CYAN $PACKAGE
+  . WHITE " ("
+  . "Feature List: "
+  . GREEN $FEATURELIST
+  . WHITE ")\n";
 if ($custom_style) {
     print WHITE "Theme: " . CYAN $THEME . " (Style: $custom_style)\n";
 }
 else {
     print WHITE "Theme: " . CYAN $THEME . "\n";
 }
+print WHITE "Max Addon/Alias/Sub Domains: "
+  . CYAN $MAXADDON
+  . WHITE " / "
+  . CYAN $MAXPARK
+  . WHITE " / "
+  . CYAN $MAXSUB . "\n";
+print WHITE "Max SQL Databases: " . CYAN $MAXSQL . "\n";
+print WHITE "Max Mailman Lists: " . CYAN $MAXLST . "\n";
+print WHITE "Max FTP Accounts: " . CYAN $MAXFTP . "\n";
+print WHITE "Max Bandwidth Allowed: " . CYAN $BWLIMIT . " MB\n";
+print WHITE "AutoSSL Enabled: " . CYAN $HAS_AUTOSSL . "\n";
+print WHITE "Backup Enabled: "
+  . CYAN $BACKUPENABLED
+  . GREEN " / "
+  . WHITE "LEGACY: "
+  . CYAN $LEGACYBACKUP . "\n";
 
 my $PHPDefaultVersion;
 my $PHPversion;
@@ -700,7 +741,7 @@ print WHITE "Count of other domains: ["
   . YELLOW "SUB: "
   . GREEN $subcnt
   . WHITE "] - ["
-  . YELLOW "PARKED: "
+  . YELLOW "ALIASES "
   . GREEN $parkcnt
   . WHITE "] - ["
   . YELLOW "ADDONS: "
@@ -711,12 +752,12 @@ print WHITE "Count of other domains: ["
 # END OF BASIC INFORMATION (no switches were added)
 # ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
 
-# DOMAIN INFO (PARKED, ADDON, SUB)
+# DOMAIN INFO (ALIASES, ADDON, SUB)
 my $SUB   = "";
 my $PARK  = "";
 my $ADDON = "";
 if ( $subcnt + $addoncnt + $parkcnt > 1
-    and ( $all or $listsubs or $listaddons or $listparked ) )
+    and ( $all or $listsubs or $listaddons or $listparked or $listaliased ) )
 {
     print WHITE "The following are associated with "
       . CYAN $MAINDOMAIN
@@ -763,9 +804,9 @@ if ( $all or $listaddons ) {
     &smborder;
 }
 
-if ( $all or $listparked ) {
-    print YELLOW "Parked Domains: ";
-    if ( $parkcnt > 0 and ( $all or $listparked ) ) {
+if ( $all or $listparked or $listaliased ) {
+    print YELLOW "Aliased Domains: ";
+    if ( $parkcnt > 0 and ( $all or $listparked or $listaliased ) ) {
         print "\n";
         foreach $PARK (@PARKEDDOMAINS) {
             chomp($PARK);
@@ -773,7 +814,7 @@ if ( $all or $listparked ) {
         }
     }
     else {
-        print MAGENTA "No Parked Domains found for "
+        print MAGENTA "No Aliased Domains found for "
           . CYAN $MAINDOMAIN
           . WHITE " ("
           . GREEN $username
@@ -1028,9 +1069,9 @@ sub Usage {
     print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net\n";
     print GREEN
       "\t Lists all addon domains under the cptestdomain.net domain name.\n\n";
-    print CYAN "acctinfo" . WHITE " --listparked cptestdomain.net\n";
+    print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net\n";
     print GREEN
-      "\t Lists all parked domains under the cptestdomain.net domain name.\n\n";
+"\t Lists all alias (parked) domains under the cptestdomain.net domain name.\n\n";
     print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo\n";
     print GREEN
 "\t Lists reseller information and domains under the cptestdo user name.\n\n";
@@ -1252,7 +1293,7 @@ sub cruft_check {
             print "It has $addoncnt Sub domains\n";
         }
         if ( $parkcnt > 0 ) {
-            print "It has $addoncnt Parked domains\n";
+            print "It has $addoncnt Aliased domains\n";
         }
 
         # Add up the total number of additional domains
@@ -1309,7 +1350,7 @@ sub cruft_check {
             ($username) = ( split( /==/,  $username ) );
             ($isParked) = ( split( /:/,   $isParked ) );
             print
-"$QUERY has an entry in /etc/userdatadomains as a Parked Domain $isParked\n";
+"$QUERY has an entry in /etc/userdatadomains as a Aliased Domain $isParked\n";
         }
         if ( !$MAINDOMAIN and $username ) {
             ($MAINDOMAIN) =
@@ -2167,6 +2208,8 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
     $MAILBOX_FORMAT            = $user_conf->{'MAILBOX_FORMAT'};
     $MAX_EMAIL_PER_HOUR        = $user_conf->{'MAX_EMAIL_PER_HOUR'};
     $MAX_DEFER_FAIL_PERCENTAGE = $user_conf->{'MAX_DEFER_FAIL_PERCENTAGE'};
+    $MAXPOP                    = $user_conf->{'MAXPOP'};
+    print WHITE "Max Mail Accounts " . CYAN $MAXPOP . "\n";
     print WHITE "Mailbox Format: " . CYAN ucfirst($MAILBOX_FORMAT) . "\n";
     print WHITE "Max Emails Per Hour: "
       . CYAN ucfirst($MAX_EMAIL_PER_HOUR) . "\n";
@@ -2227,7 +2270,7 @@ sub scan {
         &spin;
         chomp($SEARCHSTRING);
         my $SCAN =
-qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp "$SEARCHSTRING" $HOMEDIR/$username/* ];
+qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
         if ($SCAN) {
             $SOMETHING_FOUND = 1;
