@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.62";
+my $VERSION = "2.4.63";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -462,7 +462,14 @@ print GREEN "$IS_PARKED\n" unless ( $IS_PARKED eq "" );
 print GREEN "$IS_ADDON\n"  unless ( $IS_ADDON eq "" );
 print GREEN "$IS_SUB\n"    unless ( $IS_SUB eq "" );
 print WHITE "Shell: " . CYAN $RealShell . "\n";
-
+# check if user is in /etc/ftpusers
+my $ftpblock = "";
+if (-e("/etc/ftpusers")) {
+	$ftpblock = qx[ grep $username /etc/ftpusers ];
+	if ($ftpblock) {
+		print RED "[WARN] - $username found in /etc/ftpusers file (FTP authentication will fail!\n";
+	}
+}
 print WHITE "UID/GID: " . CYAN $UID . "/" . $GID;
 if ( version_compare( $os_release, qw( > 6.9 ) ) ) {
     ;
@@ -566,48 +573,59 @@ else {
 }
 
 # Check for php-selector (CloudLinux)
+my $clPHPVer=0;
 if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" )
 {
     my $clPHP = qx[ egrep '^php' $RealHome/.cl.selector/defaults.cfg ];
-    my $clPHPVer =~ s/\s+//g;
+    $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
+	$clPHPVer=alltrim($clPHPVer);
     if ($clPHPVer) {
         print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n";
 
-        # BELOW IS UNTESTED
-        #		my $PHPiniFile=qx[ php -i | grep '^Configuration File' ];
-        #		my $PHPiniLoad=qx[ php -i | grep '^Loaded Configuration File' ];
-        #		my $PHPiniScan=qx[ php -i | grep '^Scan this dir' ];
-        #		chomp($PHPiniFile);
-        #		chomp($PHPiniLoad);
-        #		chomp($PHPiniScan);
-        #		print YELLOW "\t \\_ $PHPiniFile\n";
-        #		print YELLOW "\t \\_ $PHPiniLoad\n";
-        #		print YELLOW "\t \\_ $PHPiniScan\n";
+        		my $PHPiniFile=qx[ su -s /bin/bash $username -c "php -i | grep '^Configuration File'" ];
+        		my $PHPiniLoad=qx[ su -s /bin/bash $username -c "php -i | grep '^Loaded Configuration File'" ];
+        		my $PHPiniScan=qx[ su -s /bin/bash $username -c "php -i | grep '^Scan this dir'" ];
+        		chomp($PHPiniFile);
+        		chomp($PHPiniLoad);
+        		chomp($PHPiniScan);
+				if ($cageFSStats and $cageFSStats eq "Enabled") { 
+        			print YELLOW "\t \\_ $PHPiniFile\n";
+        			print YELLOW "\t \\_ $PHPiniLoad\n";
+        			print YELLOW "\t \\_ $PHPiniScan\n";
+				}
     }
 }
 
 $isEA4 = &isEA4;
+my $clPHPActive=0;
 if ($isEA4) {
     $PHPDefaultVersion = &get_system_php_version();
     $PHPversion        = &get_php_version();
     if ( $PHPversion eq "" ) {
         $PHPversion = "inherit";
     }
-    print WHITE "[EA4] PHP Version : "
+	if ($PHPversion eq "inherit") { $clPHPActive = 1; }
+    print WHITE "[EA4] PHP Version: "
       . CYAN $PHPversion
-      . " (System Default: $PHPDefaultVersion)\n";
+      . " (System Default: $PHPDefaultVersion) " ;
+	if ($clPHPActive and $cageFSStats eq "Enabled") { 
+		print MAGENTA "CloudLinux PHP Version has precedence\n";
+	}
+	else { 
+		print MAGENTA "cPanel EA4 PHP Version has precedence\n";
+	}
     if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
         print YELLOW "PHP-FPM pool detected\n";
     }
 
     # Get php.ini config info
-    if ( $PHPversion eq "inherit" ) {
-        $PHPversion = $PHPDefaultVersion;
-    }
-    if ( -e ("/etc/scl/conf/$PHPversion")
-        or ( -e ("/etc/scl/prefixes/$PHPversion") ) )
+    if ($PHPversion eq "inherit" and $cageFSStats ne "Enabled") { 
+		$PHPversion = $PHPDefaultVersion;
+	}
+	if ( -e ("/etc/scl/conf/$PHPversion")
+		or ( -e ("/etc/scl/prefixes/$PHPversion") ) )
     {
         my $PHPiniFile =
 qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Configuration File' ];
@@ -1740,7 +1758,7 @@ sub get_php_version() {
 
     # NOTE: If $IS_USERNAME, then use $MAINDOMAIN, otherwise use $QUERY.
     my $tcDomain = "";
-    if ($IS_USERNAME) {
+    if ($IS_USERNAME or $QUERY eq $MAINDOMAIN) {
         $tcDomain = $MAINDOMAIN;
     }
     else {
@@ -1886,7 +1904,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
         # Check for suspended from incoming email
         if ( -e ("$RealHome/etc/.$emailacctline\@$DOMAIN.suspended_incoming") )
         {
-            print RED "\n\t \t \\_ incoming email suspended\n";
+            print RED "\t \t \\_ incoming email suspended\n";
         }
 
         # Shadow file
@@ -1899,7 +1917,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
                 chomp($ushadowline);
                 if ( $ushadowline =~ m/^$emailacctline/ ) {
                     if ( $ushadowline =~ m/^$shadowstring/ ) {
-                        print RED "\n\t \t \\_ email login suspended\n";
+                        print RED "\t \t \\_ email login suspended\n";
                     }
                     $ushadowOK = 1;
                     last;

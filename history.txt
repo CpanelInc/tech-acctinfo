@@ -1,3 +1,4 @@
+V2.4.63- Add PHP info for CloudLinux - list which has precedence.
 V2.4.62- Add more data to output (max ftp/sql/maillist/pop/addon/sub/parked/backups/autossl)
 V2.4.61- Bug Fix - Email addresses containing a period would not display.  
 V2.4.60- Add reseller shared IP and IP Delegation info (if applicable).
