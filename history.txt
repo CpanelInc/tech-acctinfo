@@ -1,3 +1,7 @@
+V2.4.64- Add check for theme being x3 and warn if found - can cause UI to not load.
+V2.4.64- Use a curl command to grab CloudFlare IP's.  No longer maintained in array
+V2.4.64- Add more info to reverse DNS updates.  Show what it's reversing to (MX, HOSTNAME).
+
 V2.4.63- Add PHP info for CloudLinux - list which has precedence.
 V2.4.62- Add more data to output (max ftp/sql/maillist/pop/addon/sub/parked/backups/autossl)
 V2.4.61- Bug Fix - Email addresses containing a period would not display.  
