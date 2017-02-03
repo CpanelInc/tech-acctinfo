@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.64";
+my $VERSION = "2.4.65";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -1462,8 +1462,8 @@ sub cruft_check {
         &print_output( "/var/cpanel/databases/grants_$username.yaml",
             $dirstatus );
 
-        #        my $CPVersion = `cat /usr/local/cpanel/version`;
-        my $yaml_json = ( $CPVersion < 11.50.0.0 ) ? "yaml" : "json";
+        # my $CPVersion = `cat /usr/local/cpanel/version`;
+        my $yaml_json = ( $CPVersion lt "11.50.0.0" ) ? "yaml" : "json";
         my $dirstatus =
           &check_dir("/var/cpanel/databases/$username.$yaml_json");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -1471,7 +1471,7 @@ sub cruft_check {
         &print_output( "/var/cpanel/databases/$username.$yaml_json",
             $dirstatus );
         my $dbindex =
-          ( $CPVersion < 11.50.0.0 )
+          ( $CPVersion lt "11.50.0.0" )
           ? "/var/cpanel/databases/dbindex.db"
           : "/var/cpanel/databases/dbindex.db.json";
         my $dirstatus = &check_file_existance( $dbindex, $username );
@@ -1847,7 +1847,7 @@ sub display_mail_info {
         print CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " ";
 
         # If v58+, get quota via doveadm command.
-        if ( $CPVersion => 11.58.0.0 ) {
+        if ( $CPVersion gt "11.58.0.0" ) {
             my $quotaline =
 qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE' ];
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
@@ -2083,11 +2083,10 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
     &smborder;
-    my $IsInRemoteDomains;
-    my $IsInLocalDomains;
+    my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+    my $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
     print "Checking email routing (based on MX check above)...\n";
     if ($IsRemote) {
-        $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
         if ($IsInRemoteDomains) {
             print GREEN
               "\t \\_ [OK] - $DOMAIN is listed in /etc/remotedomains\n";
@@ -2102,19 +2101,19 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
               "\t \\_ [WARN] - $DOMAIN is missing from /etc/remotedomains\n";
         }
     }
-    $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
-    if ($IsInLocalDomains) {
-        print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
-        $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
-        if ($IsInRemoteDomains) {
-            print RED
-              "\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
-        }
-    }
-    else {
-        print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
-    }
-
+	else {    ## is local
+	    if ($IsInLocalDomains) {
+        	print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
+        	$IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+        	if ($IsInRemoteDomains) {
+            	print RED
+              	"\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
+        	}
+    	}
+    	else {
+        	print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
+    	}
+	}
     # Now list aliases (if any)
     my $emailfwd;
     my $fwdtype;

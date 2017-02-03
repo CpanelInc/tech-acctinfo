@@ -1,3 +1,6 @@
+V2.4.65- Fix CPVersion check (again)
+V2.4.65- Remove redundant /etc/localdomains and /etc/remotedomains checks if listed in both files.
+
 V2.4.64- Add check for theme being x3 and warn if found - can cause UI to not load.
 V2.4.64- Use a curl command to grab CloudFlare IP's.  No longer maintained in array
 V2.4.64- Add more info to reverse DNS updates.  Show what it's reversing to (MX, HOSTNAME).
