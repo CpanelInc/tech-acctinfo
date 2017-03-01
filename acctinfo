@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.65";
+my $VERSION = "2.4.66";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -140,11 +140,6 @@ if ( !($MAINDOMAIN) ) {
     $MAINDOMAIN = &FindMainDomain($username);
 }
 
-if ($scan) {
-    &scan;
-    exit;
-}
-
 # If both variables are still empty, neither the username nor the domain name were found!
 if ( $MAINDOMAIN eq "" and $username eq "" ) {
     if ($cruft) {
@@ -153,6 +148,11 @@ if ( $MAINDOMAIN eq "" and $username eq "" ) {
     print
 "Error - $QUERY not found on $HOSTNAME (or missing from /etc/userdomains file)\n";
     print "Try using the --cruft switch (acctinfo $QUERY --cruft)\n";
+    exit;
+}
+
+if ($scan) {
+   	&scan;
     exit;
 }
 
@@ -183,7 +183,9 @@ foreach $ACCT (@USERDATADOMAINS) {
             chop($sub_domain);
             push( @SUBDOMAINS, $sub_domain );
             if ( $sub_domain eq $DOMAIN ) {
-                $IS_SUB = "$DOMAIN is a sub domain of $MAINDOMAIN\n";
+				# Get documentroot for $DOMAIN from /etc/userdatadomains
+				my ($docroot) = (split(/==/,qx[ grep $sub_domain /etc/userdatadomains ]))[4]; 
+                $IS_SUB = "$DOMAIN is a sub domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
             }
         }
     }
@@ -198,7 +200,9 @@ foreach $ACCT (@USERDATADOMAINS) {
             chop($addon_domain);
             push( @ADDONDOMAINS, $addon_domain );
             if ( $addon_domain eq $DOMAIN ) {
-                $IS_ADDON = "$DOMAIN is an addon domain of $MAINDOMAIN\n";
+				# Get documentroot for $DOMAIN from /etc/userdatadomains
+				my ($docroot) = (split(/==/,qx[ grep $addon_domain /etc/userdatadomains ]))[4]; 
+                $IS_ADDON = "$DOMAIN is an addon domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
             }
         }
     }
@@ -213,8 +217,10 @@ foreach $ACCT (@USERDATADOMAINS) {
             chop($parked_domain);
             push( @PARKEDDOMAINS, $parked_domain );
             if ( $parked_domain eq $DOMAIN ) {
+				# Get documentroot for $DOMAIN from /etc/userdatadomains
+				my ($docroot) = (split(/==/,qx[ grep $parked_domain /etc/userdatadomains ]))[4]; 
                 $IS_PARKED =
-                  "$DOMAIN is an alias (parked) domain of $MAINDOMAIN\n";
+                  "$DOMAIN is an alias (parked) domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
             }
         }
     }
@@ -920,7 +926,9 @@ if ( $listdbs or $all ) {
     }
     else {
         @USERDBS =
-          qx[ echo "SHOW DATABASES WHERE User = '$username%'" | mysql -BN ];
+          # THIS BELOW FAILS IF DB PREFIX IS OFF!!!
+          #qx[ echo "SHOW DATABASES WHERE User = '$username%'" | mysql -BN ];
+          qx[ echo "SHOW DATABASES like = '$username%'" | mysql -BN ];
     }
     my $DBCNT = @USERDBS;
     if ( $DBCNT == 0 ) {
@@ -1072,6 +1080,26 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
           . GREEN $username
           . WHITE ")\n";
     }
+    # Check for pending AutoSSL orders here
+    print "\nChecking for pending AutoSSL orders: \n";
+	my $subdomain;
+	my $addondomain;
+	my $SSL_PENDING;
+    foreach $subdomain(@SUBDOMAINS) { 
+		chomp($subdomain);
+		$SSL_PENDING=qx[ whmapi1 get_autossl_pending_queue | grep -A3 'domain: $subdomain' ];
+   	}
+    foreach $addondomain(@ADDONDOMAINS) { 
+		chomp($addondomain);
+		$SSL_PENDING=qx[ whmapi1 get_autossl_pending_queue | grep -A3 'domain: $addondomain' ];
+   	}
+	if ($SSL_PENDING) { 
+		print GREEN "\t \\_ $SSL_PENDING"
+	}
+	else { 
+		print GREEN "\t \\_ None"
+	}
+	print "\n";
     &border;
 }
 
@@ -1538,7 +1566,7 @@ sub cruft_check {
                 }
                 else {
                     print YELLOW
-                      "\t \\_ $MAINDOMAIN not found in $dnscluster\n";
+                      "\t \\_ $MAINDOMAIN NOT found in $dnscluster\n";
                 }
             }
             else {
@@ -1547,7 +1575,7 @@ sub cruft_check {
                     print YELLOW "\t \\_ $QUERY found in $dnscluster\n";
                 }
                 else {
-                    print YELLOW "\t \\_ $QUERY not found in $dnscluster\n";
+                    print YELLOW "\t \\_ $QUERY NOT found in $dnscluster\n";
                 }
             }
         }

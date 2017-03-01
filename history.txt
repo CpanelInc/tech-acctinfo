@@ -1,3 +1,8 @@
+V2.4.66- Fix --scan option to check for existence of username before moving forward, otherwise
+         it was scanning all of /home  
+V2.4.66- Add DocumentRoot to addon/sub/aliased domains
+V2.4.66- Add pending AutoSSL orders to --listssl
+
 V2.4.65- Fix CPVersion check (again)
 V2.4.65- Remove redundant /etc/localdomains and /etc/remotedomains checks if listed in both files.
 
