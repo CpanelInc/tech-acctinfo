@@ -1,3 +1,6 @@
+V2.4.67- Add bandwidth used calculation via uapi if account is over bandwidth limit.
+V2.4.67- Change pending autossl check to use username instead of domain name.
+
 V2.4.66- Fix --scan option to check for existence of username before moving forward, otherwise
          it was scanning all of /home  
 V2.4.66- Add DocumentRoot to addon/sub/aliased domains

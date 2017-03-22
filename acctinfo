@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.66";
+my $VERSION = "2.4.67";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -185,7 +185,7 @@ foreach $ACCT (@USERDATADOMAINS) {
             if ( $sub_domain eq $DOMAIN ) {
 				# Get documentroot for $DOMAIN from /etc/userdatadomains
 				my ($docroot) = (split(/==/,qx[ grep $sub_domain /etc/userdatadomains ]))[4]; 
-                $IS_SUB = "$DOMAIN is a sub domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
+                $IS_SUB = "$DOMAIN is a sub domain of $MAINDOMAIN \n\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $docroot . ")\n";
             }
         }
     }
@@ -202,7 +202,7 @@ foreach $ACCT (@USERDATADOMAINS) {
             if ( $addon_domain eq $DOMAIN ) {
 				# Get documentroot for $DOMAIN from /etc/userdatadomains
 				my ($docroot) = (split(/==/,qx[ grep $addon_domain /etc/userdatadomains ]))[4]; 
-                $IS_ADDON = "$DOMAIN is an addon domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
+                $IS_ADDON = "$DOMAIN is an addon domain of $MAINDOMAIN \n\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $docroot . ")\n";
             }
         }
     }
@@ -220,7 +220,7 @@ foreach $ACCT (@USERDATADOMAINS) {
 				# Get documentroot for $DOMAIN from /etc/userdatadomains
 				my ($docroot) = (split(/==/,qx[ grep $parked_domain /etc/userdatadomains ]))[4]; 
                 $IS_PARKED =
-                  "$DOMAIN is an alias (parked) domain of $MAINDOMAIN (DocumentRoot: " . WHITE $docroot . "\n";
+                  "$DOMAIN is an alias (parked) domain of $MAINDOMAIN \n\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $docroot . ")\n";
             }
         }
     }
@@ -433,6 +433,15 @@ if (   -e ("/var/cpanel/bwlimited/$username")
 {
     print RED
 "[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
+	my ($bwused)=qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+	chomp($bwused);
+	my ($bwmax)=qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+	chomp($bwmax);
+	$bwused =~ s/count://g;
+	$bwmax =~ s/max://g;
+	$bwused=alltrim($bwused);
+	$bwmax=alltrim($bwmax);
+	print "\t \\_ $bwused / $bwmax\n";
 }
 if ($Is_Reseller) {
     print GREEN ON_BLACK "This account is also a reseller!\n";
@@ -497,7 +506,7 @@ else {
 
 # Check if account is over quota, warn if so, unless --skipquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
-# check if the account is over quota (slq does this, if nothing return it's not over quota.
+# check if the account is over quota (slq does this, if nothing returned, it's not over quota.
 if ( $skipquota == 0 ) {
     open( QUOTACHK, "/usr/bin/quota -slq $username 2> /dev/null |" );
     my @quotachk = <QUOTACHK>;
@@ -612,6 +621,9 @@ $isEA4 = &isEA4;
 my $clPHPActive=0;
 if ($isEA4) {
     $PHPDefaultVersion = &get_system_php_version();
+    if ( $PHPDefaultVersion eq "" ) {
+		$PHPDefaultVersion = "UNKNOWN";
+	}
     $PHPversion        = &get_php_version();
     if ( $PHPversion eq "" ) {
         $PHPversion = "inherit";
@@ -1080,26 +1092,22 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
           . GREEN $username
           . WHITE ")\n";
     }
-    # Check for pending AutoSSL orders here
-    print "\nChecking for pending AutoSSL orders: \n";
-	my $subdomain;
-	my $addondomain;
-	my $SSL_PENDING;
-    foreach $subdomain(@SUBDOMAINS) { 
-		chomp($subdomain);
-		$SSL_PENDING=qx[ whmapi1 get_autossl_pending_queue | grep -A3 'domain: $subdomain' ];
-   	}
-    foreach $addondomain(@ADDONDOMAINS) { 
-		chomp($addondomain);
-		$SSL_PENDING=qx[ whmapi1 get_autossl_pending_queue | grep -A3 'domain: $addondomain' ];
-   	}
-	if ($SSL_PENDING) { 
-		print GREEN "\t \\_ $SSL_PENDING"
-	}
-	else { 
-		print GREEN "\t \\_ None"
-	}
-	print "\n";
+    # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
+    if ( $CPVersion gt "11.60.0.26" ) {
+        print "\nChecking for pending AutoSSL orders: \n";
+	    my $SSL_PENDING=qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+	    if ($SSL_PENDING) { 
+            my $NEW_SSL_PENDING;
+            ($NEW_SSL_PENDING = $SSL_PENDING) =~ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=/g;
+            $SSL_PENDING = $NEW_SSL_PENDING;
+		    print GREEN "\t \\_ \n";
+            print GREEN "$SSL_PENDING";
+	    }
+	    else { 
+		    print GREEN "\t \\_ None";
+	    }
+	    print "\n";
+    }
     &border;
 }
 
@@ -1244,7 +1252,7 @@ sub check_resolved_ip {
     my $IP2CHK = $_[0];
     my $RetVal = "";
     if ( $IP2CHK eq $IPADDR ) {
-        $RetVal = " [SAME]";
+        $RetVal = GREEN . " [SAME]";
     }
     else {
         $defaultsite = 1;
@@ -1263,7 +1271,7 @@ sub check_resolved_ip {
     if ($IS_NAT) {
         $RetVal = " NAT detected ($IS_NAT => $IP2CHK)";
         if ( $IS_NAT eq $IPADDR ) {
-            $RetVal = $RetVal .= " [SAME]";
+            $RetVal = $RetVal .= GREEN . " [SAME]";
             $defaultsite = 0;
         }
     }
@@ -1490,7 +1498,6 @@ sub cruft_check {
         &print_output( "/var/cpanel/databases/grants_$username.yaml",
             $dirstatus );
 
-        # my $CPVersion = `cat /usr/local/cpanel/version`;
         my $yaml_json = ( $CPVersion lt "11.50.0.0" ) ? "yaml" : "json";
         my $dirstatus =
           &check_dir("/var/cpanel/databases/$username.$yaml_json");
