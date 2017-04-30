@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.67";
+my $VERSION = "2.4.68";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -226,6 +226,7 @@ foreach $ACCT (@USERDATADOMAINS) {
     }
 }
 
+
 shift @SUBDOMAINS;
 shift @ADDONDOMAINS;
 shift @PARKEDDOMAINS;
@@ -259,7 +260,7 @@ my $ResolvedIP;
 if ( $BWLIMIT ne "unlimited" ) {
     $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
 }
-$HAS_AUTOSSL   = ($HAS_AUTOSSL)   ? "Yes" : "No";
+$HAS_AUTOSSL   = ($HAS_AUTOSSL)   ? "Yes" : "No (might be enabled at package level)";
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 $LEGACYBACKUP  = ($LEGACYBACKUP)  ? "Yes" : "No";
 if ($IS_USERNAME) {
@@ -406,6 +407,11 @@ if ( -e ("$RealHome/.lastlogin") ) {
 print GREEN ON_BLACK "The main domain is "
   . YELLOW $MAINDOMAIN
   . GREEN ON_BLACK $RO_TEXT . "\n";
+
+# Get docroot for MAINDOMAIN too.
+my ($maindocroot) = (split(/==/,qx[ grep '$MAINDOMAIN' /etc/userdatadomains ]))[4];
+print "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n";
+
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
 
 # Perm check - make sure $RealHome is 711 - Warn if not!
@@ -504,6 +510,18 @@ else {
     }
 }
 
+# New get quota info from uapi
+my ($quotaused)=qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'count:' | grep -v '_count' ];
+chomp($quotaused);
+my ($maxquota)=qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'max:' | grep -v '_max' ];
+chomp($maxquota);
+$quotaused =~ s/count://g;
+$maxquota =~ s/max://g;
+$quotaused=alltrim($quotaused);
+$maxquota=alltrim($maxquota);
+#print "\t \\_ $quotaused / $maxquota\n";
+print "Disk Quota; $quotaused used of $maxquota allowed\n";
+
 # Check if account is over quota, warn if so, unless --skipquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
 # check if the account is over quota (slq does this, if nothing returned, it's not over quota.
@@ -532,6 +550,16 @@ qx[ /usr/bin/quota -sl $username | egrep -v 'Filesystem|quotas' | tail -1 ]
         }
     }
 }
+
+my ($bwused)=qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+chomp($bwused);
+my ($bwmax)=qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+chomp($bwmax);
+$bwused =~ s/count://g;
+$bwmax =~ s/max://g;
+$bwused=alltrim($bwused);
+$bwmax=alltrim($bwmax);
+print "Bandwidth: $bwused used of $bwmax allowed\n";
 
 # Check for custom style (Paper Lantern Theme)
 my $custom_style_path = "$RealHome/var/cpanel/styled/current_style";
@@ -632,6 +660,10 @@ if ($isEA4) {
     print WHITE "[EA4] PHP Version: "
       . CYAN $PHPversion
       . " (System Default: $PHPDefaultVersion) " ;
+    # Check for ^suPHP_ConfigPath variable in .htaccess files
+    my $suPHPConfPathFound =
+qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+
 	if ($clPHPActive and $cageFSStats eq "Enabled") { 
 		print MAGENTA "CloudLinux PHP Version has precedence\n";
 	}
@@ -655,6 +687,14 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Configuration File' ];
 qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Loaded Configuration File' ];
         my $PHPiniScan =
 qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
+
+		if ($suPHPConfPathFound) { 
+			my ($UsersuPHPConfPath) = (split(/\s+/,qx[ grep 'suPHP_ConfigPath' $suPHPConfPathFound ]))[1];
+			$PHPiniFile = "Configuration File (php.ini) Path => $UsersuPHPConfPath";
+			$PHPiniLoad = "Loaded Configuration File => $UsersuPHPConfPath";
+			$PHPiniScan = "Scan this dir for additional .ini files => None";
+		}
+
         chomp($PHPiniFile);
         chomp($PHPiniLoad);
         chomp($PHPiniScan);
@@ -663,6 +703,9 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
         print YELLOW "\t \\_ $PHPiniScan\n";
     }
 
+	if (!(-e("$RealHome/public_html"))) { 
+		$skipfind =0;
+	}
 # Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
     if ( $skipfind == 0 ) {
         my @customPHPINI =
@@ -686,13 +729,10 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
             }
         }
 
-        # Check for ^suPHP_ConfigPath variable in .htaccess files
-        my $suPHPConfPathFound =
-qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
         if ($suPHPConfPathFound) {
-            print RED "[WARN]"
+            print YELLOW "\n[NOTE]"
               . WHITE
-              . " - suPHPConfigPath found in "
+              . " - suPHP_ConfigPath found in "
               . CYAN
               . $suPHPConfPathFound;
         }
@@ -1259,7 +1299,7 @@ sub check_resolved_ip {
     }
     my $Is_IP_OnServer = qx[ ip addr | grep '$IP2CHK' ];
     if ( !($Is_IP_OnServer) ) {
-        $RetVal = $RetVal .= " [Not on this server]";
+        $RetVal = $RetVal .= RED . " [Not on this server]";
         $defaultsite = 1;
     }
     my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
@@ -1277,7 +1317,7 @@ sub check_resolved_ip {
     }
     my $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
     if ( !($Is_IP_OnServer) ) {
-        $RetVal = $RetVal .= " [Not on this server]";
+        $RetVal = $RetVal .= RED . " [Not on this server]";
         $defaultsite = 1;
     }
     return $RetVal;
@@ -1441,7 +1481,8 @@ sub cruft_check {
       /etc/nameserverips
       /etc/demoids
       /etc/demodomains
-      /usr/local/apache/conf/httpd.conf
+	  /etc/apache2/conf/httpd.conf
+	  /usr/local/apache/conf/httpd.conf
       /var/cpanel/databases/users.db
     );
 
@@ -2118,8 +2159,10 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
     &smborder;
-    my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
-    my $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+    #my $IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+    #my $IsInLocalDomains = qx[ grep '$DOMAIN' /etc/localdomains ];
+    my $IsInRemoteDomains = qx[ egrep '\b^$DOMAIN\b' /etc/remotedomains ];
+    my $IsInLocalDomains = qx[ egrep '\b^$DOMAIN\b' /etc/localdomains ];
     print "Checking email routing (based on MX check above)...\n";
     if ($IsRemote) {
         if ($IsInRemoteDomains) {
@@ -2136,19 +2179,19 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
               "\t \\_ [WARN] - $DOMAIN is missing from /etc/remotedomains\n";
         }
     }
-	else {    ## is local
-	    if ($IsInLocalDomains) {
-        	print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
-        	$IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
-        	if ($IsInRemoteDomains) {
-            	print RED
-              	"\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
-        	}
-    	}
-    	else {
-        	print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
-    	}
-	}
+#	else {    ## is local
+    if ($IsInLocalDomains) {
+       	print GREEN "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n";
+       	$IsInRemoteDomains = qx[ grep '$DOMAIN' /etc/remotedomains ];
+       	if ($IsInRemoteDomains) {
+           	print RED
+             	"\t \\_ [WARN] - $DOMAIN was also found in /etc/remotedomains\n";
+       	}
+   	}
+   	else {
+       	print RED "\t \\_ [WARN] - $DOMAIN is missing from /etc/localdomains\n";
+   	}
+#	}
     # Now list aliases (if any)
     my $emailfwd;
     my $fwdtype;
