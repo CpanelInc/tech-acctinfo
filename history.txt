@@ -1,3 +1,6 @@
+V2.4.69- Fix Mail Routing check (again)
+V2.4.69- Add check for multiple homrdirs in cruft check - Thanks Ausaf!
+
 V2.4.68- Fix grep for Mail Routing (added word boundary) 
 V2.4.68- Fix loaded configuration file (php.ini) if suPHP_ConfigPath is defined
 V2.4.68- Add Disk Quota and Bandwidth Used
