@@ -1,3 +1,5 @@
+V2.4.70- A couple of small bug fixes that were really bugging me!
+
 V2.4.69- Fix Mail Routing check (again)
 V2.4.69- Add check for multiple homrdirs in cruft check - Thanks Ausaf!
 

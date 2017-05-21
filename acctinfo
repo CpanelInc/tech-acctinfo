@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.69";
+my $VERSION = "2.4.70";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -702,8 +702,11 @@ if ($isEA4) {
       . " (System Default: $PHPDefaultVersion) ";
 
     # Check for ^suPHP_ConfigPath variable in .htaccess files
-    my $suPHPConfPathFound =
+    my $suPHPConfPathFound;
+    if ( $skipfind == 0 ) {
+        $suPHPConfPathFound =
 qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+    }
 
     if ( $clPHPActive and $cageFSStats eq "Enabled" ) {
         print MAGENTA "CloudLinux PHP Version has precedence\n";
@@ -2244,6 +2247,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
             if ($IsInLocalDomains) {
                 print RED
                   "\t \\_ [WARN] - $DOMAIN was found in /etc/localdomains\n";
+                  print YELLOW "\t \\_ [NOTE] - OK if MX record is pointing to an external anti-spam service/gateway\n";
             }
         }
     }
@@ -2447,6 +2451,7 @@ qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCH
         chomp($SCAN);
         if ($SCAN) {
             $SOMETHING_FOUND = 1;
+            $SEARCHSTRING =~ s/\\//g;
             print YELLOW "\n\n\bThe phrase "
               . CYAN
               . $SEARCHSTRING
