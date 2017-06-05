@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.70";
+my $VERSION = "2.4.71";
 
 our $CPVersion = `cat /usr/local/cpanel/version`;
 chomp($CPVersion);
@@ -703,9 +703,9 @@ if ($isEA4) {
 
     # Check for ^suPHP_ConfigPath variable in .htaccess files
     my $suPHPConfPathFound;
-    if ( $skipfind == 0 ) {
+    if ( -e ("$RealHome/public_html/.htaccess") ) {
         $suPHPConfPathFound =
-qx[ find $RealHome/public_html -maxdepth 1 -name '.htaccess' | xargs egrep -srl '^suPHP_ConfigPath' $1 ];
+          qx[ egrep '^suPHP_ConfigPath' "$RealHome/public_html/.htaccess" ];
     }
 
     if ( $clPHPActive and $cageFSStats eq "Enabled" ) {
@@ -733,17 +733,18 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Loaded Configuration File'
 qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
         if ($suPHPConfPathFound) {
-            my ($UsersuPHPConfPath) = (
-                split(
-                    /\s+/, qx[ grep 'suPHP_ConfigPath' $suPHPConfPathFound ]
-                )
-            )[1];
+            print YELLOW "[NOTE]"
+              . WHITE
+              . " - suPHP_ConfigPath found in "
+              . CYAN
+              . $suPHPConfPathFound;
+            my ($UsersuPHPConfPath) =
+              ( split( /\s+/, $suPHPConfPathFound ) )[1];
             $PHPiniFile =
               "Configuration File (php.ini) Path => $UsersuPHPConfPath";
             $PHPiniLoad = "Loaded Configuration File => $UsersuPHPConfPath";
             $PHPiniScan = "Scan this dir for additional .ini files => None";
         }
-
         chomp($PHPiniFile);
         chomp($PHPiniLoad);
         chomp($PHPiniScan);
@@ -777,14 +778,6 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
                 chomp($customuserINIfile);
                 print YELLOW "\t \\_ $customuserINIfile\n";
             }
-        }
-
-        if ($suPHPConfPathFound) {
-            print YELLOW "\n[NOTE]"
-              . WHITE
-              . " - suPHP_ConfigPath found in "
-              . CYAN
-              . $suPHPConfPathFound;
         }
         print "\n";
     }
@@ -1030,7 +1023,6 @@ if ( $listdbs or $all ) {
         @USERDBS =
 
           # THIS BELOW FAILS IF DB PREFIX IS OFF!!!
-          #qx[ echo "SHOW DATABASES WHERE User = '$username%'" | mysql -BN ];
           qx[ echo "SHOW DATABASES like = '$username%'" | mysql -BN ];
     }
     my $DBCNT = @USERDBS;
@@ -1565,19 +1557,21 @@ sub cruft_check {
 
         # Check for home directory and others to see if they exist
         my $hmCnt;
-        my $dirstatus = &check_dir("/$HOMEMATCH/$username");
+        my $dirstatus = &check_dir("/$HOMEDIR/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "$HOMEDIR/$username", $dirstatus );
         if ( $dirstatus =~ m/MISSING/ ) {
-            print "Checking other possible home directory locations...\n";
+            if ($HOMEMATCH) {
+                print "Checking other possible home directory locations...\n";
 
-            # Now check HOMEMATCH and 1 through 9.
-            for ( $hmCnt = 1 ; $hmCnt < 10 ; $hmCnt = $hmCnt + 1 ) {
-                my $dirstatus = &check_dir("/$HOMEMATCH$hmCnt/$username");
-                if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-                else              { $dirstatus = RED "[MISSING]"; }
-                &print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
+                # Now check HOMEMATCH 1 through 9.
+                for ( $hmCnt = 1 ; $hmCnt < 10 ; $hmCnt = $hmCnt + 1 ) {
+                    my $dirstatus = &check_dir("/$HOMEMATCH$hmCnt/$username");
+                    if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                    else              { $dirstatus = RED "[MISSING]"; }
+                    &print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
+                }
             }
         }
 
@@ -2247,7 +2241,8 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
             if ($IsInLocalDomains) {
                 print RED
                   "\t \\_ [WARN] - $DOMAIN was found in /etc/localdomains\n";
-                  print YELLOW "\t \\_ [NOTE] - OK if MX record is pointing to an external anti-spam service/gateway\n";
+                print YELLOW
+"\t \\_ [NOTE] - OK if MX record is pointing to an external anti-spam service/gateway\n";
             }
         }
     }

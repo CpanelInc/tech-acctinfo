@@ -1,3 +1,6 @@
+V2.4.71- Fix grep that was taking too long to complete searching for suPHP_ConfigPath in .htaccess
+V2.4.71- Fix HOMEMATCH search in cruft check if HOMEMATCH is not defined it should skip.
+
 V2.4.70- A couple of small bug fixes that were really bugging me!
 
 V2.4.69- Fix Mail Routing check (again)
