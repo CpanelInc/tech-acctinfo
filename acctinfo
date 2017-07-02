@@ -12,9 +12,10 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.71";
+my $VERSION = "2.4.72";
 
-our $CPVersion = `cat /usr/local/cpanel/version`;
+our $CPVersion   = `cat /usr/local/cpanel/version`;
+our $SSLProvider = getSSLprovider();
 chomp($CPVersion);
 
 use Getopt::Long;
@@ -96,6 +97,7 @@ if ($skipfind) {
 if ($clearscreen) {
     system("clear");
 }
+print "<c>\n";
 print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
     &Usage;
@@ -284,8 +286,21 @@ my $ResolvedIP;
 if ( $BWLIMIT ne "unlimited" ) {
     $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
 }
-$HAS_AUTOSSL =
-  ($HAS_AUTOSSL) ? "Yes" : "No (might be enabled at package level)";
+$HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No (But see featurelist above)";
+my $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in $FEATURELIST)";
+
+# Check disabled feature list to see if autossl=0 exists
+my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/disabled ];
+if ($AutoSSL_Disabled) {
+    $HAS_AUTOSSL_TEXT = "(AutoSSL in disabled feature list)";
+}
+
+# Check $FEATURELIST feature list to see if autossl=0 exists
+my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/$FEATURELIST ];
+if ($AutoSSL_Disabled) {
+    $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in $FEATURELIST)";
+}
+
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 $LEGACYBACKUP  = ($LEGACYBACKUP)  ? "Yes" : "No";
 if ($IS_USERNAME) {
@@ -402,7 +417,8 @@ else {
 
 # Get home directory from /etc/passwd
 my @PASSWDS = undef;
-our $RealHome = "";
+our $RealHome    = "";
+our $SSLProvider = getSSLprovider();
 my $RealShell = "";
 my $UID       = "";
 my $GID       = "";
@@ -611,7 +627,8 @@ print WHITE "Hosting Package: "
   . WHITE " ("
   . "Feature List: "
   . GREEN $FEATURELIST
-  . WHITE ")\n";
+  . WHITE ") "
+  . $HAS_AUTOSSL_TEXT . "\n";
 my $X3WARN = "";
 if ( $THEME eq "x3" ) {
     $X3WARN = RED
@@ -1166,6 +1183,17 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
                 print GREEN "\t \\_ [CA SIGNED] "
                   . WHITE "Issued by: $SSLIssuer\n";
             }
+
+            # List SAN's
+            print WHITE
+"This certificate is protecting the following Subject Alternative Names:\n";
+            my $SAN;
+            my @getSANS =
+qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+            foreach $SAN (@getSANS) {
+                chomp($SAN);
+                print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+            }
         }
     }
     else {
@@ -1178,25 +1206,28 @@ qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
     if ( $CPVersion gt "11.60.0.26" ) {
-        print "\nChecking for pending AutoSSL orders: \n";
-        my $SSL_PENDING =
-          qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
-        if ($SSL_PENDING) {
-            my $NEW_SSL_PENDING;
-            ( $NEW_SSL_PENDING = $SSL_PENDING ) =~
+        if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
+            print "\nChecking for pending AutoSSL orders: \n";
+            my $SSL_PENDING =
+qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+            if ($SSL_PENDING) {
+                my $NEW_SSL_PENDING;
+                ( $NEW_SSL_PENDING = $SSL_PENDING ) =~
 s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=/g;
-            $SSL_PENDING = $NEW_SSL_PENDING;
-            print GREEN "\t \\_ \n";
-            print GREEN "$SSL_PENDING";
+                $SSL_PENDING = $NEW_SSL_PENDING;
+                print GREEN "\t \\_ \n";
+                print GREEN "$SSL_PENDING";
+            }
+            else {
+                print GREEN "\t \\_ None";
+            }
+            print "\n";
         }
-        else {
-            print GREEN "\t \\_ None";
-        }
-        print "\n";
+        &border;
     }
-    &border;
 }
 
+print "</c>\n";
 exit;
 
 sub Usage {
@@ -1757,7 +1788,7 @@ qx[ /usr/bin/psql -t -h localhost --username=postgres -c 'select usename from pg
           . MAGENTA $HOSTNAME . "\n";
     }
     &border;
-    print "\n";
+    print "</c>\n";
     exit;
 }
 
@@ -2465,11 +2496,29 @@ qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCH
     print "Scan completed on $scanendtime\n";
     my $scantimediff = ( $scanendtime - $scanstarttime );
     print "Elapsed Time: ", $scantimediff->pretty, "\n";
+    print "</c>\n";
 }
 
 sub spin {
     my %spinner = ( '|' => '/', '/' => '-', '-' => '\\', '\\' => '|' );
     $spincounter = ( !defined $spincounter ) ? '|' : $spinner{$spincounter};
     print STDERR "\b$spincounter";
+}
+
+sub getSSLprovider {
+    my $RetVal = "";
+    if ( !( -e ("/var/cpanel/autossl.json") ) ) {
+        $RetVal = "Disabled";
+        return $RetVal;
+    }
+    my $CurrentProvider =
+      qx[ grep '"provider":"cPanel"' /var/cpanel/autossl.json ];
+    if ($CurrentProvider) { $RetVal = "cPanel (Powered by Comodo)"; }
+    my $CurrentProvider =
+      qx[ grep '"provider":"LetsEncrypt"' /var/cpanel/autossl.json ];
+    if ($CurrentProvider) { $RetVal = "Let's Encrypt"; }
+    my $CurrentProvider = qx[ grep '"provider":null' /var/cpanel/autossl.json ];
+    if ($CurrentProvider) { $RetVal = "Disabled"; }
+    return $RetVal;
 }
 

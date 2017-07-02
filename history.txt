@@ -1,3 +1,8 @@
+V2.4.72- Add code tags to output (for easier ticket pasting)
+V2.4.72- Add SANs to certificates
+V2.4.72- Add check on feature list to make sure AutoSSL is enabled at feature list.
+V2.4.72- Add AutoSSL provider check.  
+
 V2.4.71- Fix grep that was taking too long to complete searching for suPHP_ConfigPath in .htaccess
 V2.4.71- Fix HOMEMATCH search in cruft check if HOMEMATCH is not defined it should skip.
 
