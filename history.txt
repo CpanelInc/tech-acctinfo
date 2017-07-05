@@ -1,3 +1,6 @@
+
+V2.4.73- Add a --nocode option to skip displaying <c> and </c> code blocks for ticket notes.
+
 V2.4.72- Add code tags to output (for easier ticket pasting)
 V2.4.72- Add SANs to certificates
 V2.4.72- Add check on feature list to make sure AutoSSL is enabled at feature list.

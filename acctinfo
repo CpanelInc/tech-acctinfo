@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.72";
+my $VERSION = "2.4.73";
 
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
@@ -63,6 +63,7 @@ my $useDig        = undef;
 my $cruft         = undef;
 my $mail          = undef;
 my $scan          = undef;
+my $nocodeblock   = undef;
 my $skipquota     = 0;
 my $skipfind      = 0;
 our $spincounter;
@@ -85,6 +86,7 @@ GetOptions(
     'skipquota'     => \$skipquota,
     'skipfind'      => \$skipfind,
     'q'             => \$clearscreen,
+    'nocode'        => \$nocodeblock,
 );
 
 if ($skipquota) {
@@ -97,7 +99,7 @@ if ($skipfind) {
 if ($clearscreen) {
     system("clear");
 }
-print "<c>\n";
+print "<c>\n" unless($nocodeblock);
 print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
     &Usage;
@@ -1227,7 +1229,7 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
     }
 }
 
-print "</c>\n";
+print "</c>\n" unless($nocodeblock);
 exit;
 
 sub Usage {
@@ -1788,7 +1790,7 @@ qx[ /usr/bin/psql -t -h localhost --username=postgres -c 'select usename from pg
           . MAGENTA $HOSTNAME . "\n";
     }
     &border;
-    print "</c>\n";
+    print "</c>\n" unless($nocodeblock);
     exit;
 }
 
@@ -2496,7 +2498,7 @@ qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCH
     print "Scan completed on $scanendtime\n";
     my $scantimediff = ( $scanendtime - $scanstarttime );
     print "Elapsed Time: ", $scantimediff->pretty, "\n";
-    print "</c>\n";
+    print "</c>\n" unless($nocodeblock);
 }
 
 sub spin {
