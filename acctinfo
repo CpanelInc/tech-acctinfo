@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.73";
+my $VERSION = "2.4.74";
 
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
@@ -99,7 +99,7 @@ if ($skipfind) {
 if ($clearscreen) {
     system("clear");
 }
-print "<c>\n" unless($nocodeblock);
+print "<c>\n" unless ($nocodeblock);
 print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
     &Usage;
@@ -153,6 +153,7 @@ if ( $MAINDOMAIN eq "" and $username eq "" ) {
     print
 "Error - $QUERY not found on $HOSTNAME (or missing from /etc/userdomains file)\n";
     print "Try using the --cruft switch (acctinfo $QUERY --cruft)\n";
+    print "</c>\n" unless ($nocodeblock);
     exit;
 }
 
@@ -440,6 +441,12 @@ foreach $passline (@PASSWDS) {
     }
 }
 
+# Check for missing hash in /etc/shadow
+my ($PWHash) = ( split( /:/, qx[ grep $username /etc/shadow ] ) )[1];
+if ( $PWHash eq "" ) {
+    print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
+}
+
 # Get IP address from .lastlogin file (if it exists)
 my $LastLoginIP = "";
 if ( -e ("$RealHome/.lastlogin") ) {
@@ -453,7 +460,7 @@ print GREEN ON_BLACK "The main domain is "
 
 # Get docroot for MAINDOMAIN too.
 my ($maindocroot) =
-  ( split( /==/, qx[ grep '$MAINDOMAIN' /etc/userdatadomains ] ) )[4];
+  ( split( /==/, qx[ grep '^$MAINDOMAIN' /etc/userdatadomains ] ) )[4];
 print "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n";
 
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
@@ -529,6 +536,7 @@ print GREEN "$IS_PARKED\n" unless ( $IS_PARKED eq "" );
 print GREEN "$IS_ADDON\n"  unless ( $IS_ADDON eq "" );
 print GREEN "$IS_SUB\n"    unless ( $IS_SUB eq "" );
 print WHITE "Shell: " . CYAN $RealShell . "\n";
+&ChkForIntegration;
 
 # check if user is in /etc/ftpusers
 my $ftpblock = "";
@@ -540,23 +548,30 @@ if ( -e ("/etc/ftpusers") ) {
     }
 }
 print WHITE "UID/GID: " . CYAN $UID . "/" . $GID;
-if ( version_compare( $os_release, qw( > 6.9 ) ) ) {
-    ;
-    if ( $UID < 1000 or $GID < 1000 ) {
-        print RED " - [WARN] - UID/GID is less than 1000!\n";
-    }
-    else {
-        print "\n";
-    }
+my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
+my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
+($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
+($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
+$UID_MIN = alltrim($UID_MIN);
+$GID_MIN = alltrim($GID_MIN);
+
+#if ( version_compare( $os_release, qw( > 6.9 ) ) ) {
+if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
+    print RED " - [WARN] - UID/GID is less than $UID_MIN/$GID_MIN\n";
 }
 else {
-    if ( $UID < 500 or $GID < 500 ) {
-        print RED " - [WARN] - UID/GID is less than 500!\n";
-    }
-    else {
-        print "\n";
-    }
+    print "\n";
 }
+
+#}
+#else {
+#    if ( $UID < 500 or $GID < 500 ) {
+#        print RED " - [WARN] - UID/GID is less than 500!\n";
+#    }
+#    else {
+#        print "\n";
+#    }
+#}
 
 # New get quota info from uapi
 my ($quotaused) =
@@ -773,7 +788,7 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
     }
 
     if ( !( -e ("$RealHome/public_html") ) ) {
-        $skipfind = 0;
+        $skipfind = 1;
     }
 
 # Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
@@ -1227,9 +1242,22 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
         }
         &border;
     }
+
+    # Check for CAA records here.
+    my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+    my $CAARecord;
+    if (@HasCAA) {
+        print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
+        print GREEN
+          "SSL Certificates can only be issued from the following CA's:\n";
+        foreach $CAARecord (@HasCAA) {
+            chomp($CAARecord);
+            print CYAN "\t \\_ $CAARecord\n";
+        }
+    }
 }
 
-print "</c>\n" unless($nocodeblock);
+print "</c>\n" unless ($nocodeblock);
 exit;
 
 sub Usage {
@@ -1502,7 +1530,7 @@ sub cruft_check {
         my $isAddon;
         my $isSub;
         my $isParked;
-        $isAddon = qx[ grep '$QUERY' /etc/userdatadomains | grep '==addon==' ];
+        $isAddon = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
         if ($isAddon) {
             ($username) = ( split( /\s+/, $isAddon ) )[1];
             ($username) = ( split( /==/,  $username ) );
@@ -1510,7 +1538,7 @@ sub cruft_check {
             print
 "$QUERY has an entry in /etc/userdatadomains as an Addon Domain $isAddon\n";
         }
-        $isSub = qx[ grep '$QUERY' /etc/userdatadomains | grep '==sub==' ];
+        $isSub = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==sub==' ];
         if ($isSub) {
             ($username) = ( split( /\s+/, $isSub ) )[1];
             ($username) = ( split( /==/,  $username ) );
@@ -1520,7 +1548,7 @@ sub cruft_check {
               unless ($isAddon);
         }
         $isParked =
-          qx[ grep '$QUERY' /etc/userdatadomains | grep '==parked==' ];
+          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' ];
         if ($isParked) {
             ($username) = ( split( /\s+/, $isParked ) )[1];
             ($username) = ( split( /==/,  $username ) );
@@ -1790,7 +1818,7 @@ qx[ /usr/bin/psql -t -h localhost --username=postgres -c 'select usename from pg
           . MAGENTA $HOSTNAME . "\n";
     }
     &border;
-    print "</c>\n" unless($nocodeblock);
+    print "</c>\n" unless ($nocodeblock);
     exit;
 }
 
@@ -2118,6 +2146,16 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
             print YELLOW "\t \t \\_ Spam Boxtrapper Enabled\n";
         }
 
+        # Check for mailbox_format.cpanel file. Display contents if it exists
+        if (
+            -e ("$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel") )
+        {
+            my $mbformat =
+qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
+            chomp($mbformat);
+            print YELLOW "\t \t \\_ Account is using the $mbformat format.\n";
+        }
+
    # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
    # Count the number of filters and display that here.
    # As \_ User Level Filters: nn
@@ -2200,6 +2238,9 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
 "\t\t \\_ [OK] - $ARecordForMX reverses back to: mail.$MXRecord\n";
                             }
                             else {
+                                if ( $ReverseOfMX eq "" ) {
+                                    $ReverseOfMX = "[NXDOMAIN]";
+                                }
                                 print RED
 "\t\t \\_ [WARN] - $ARecordForMX reverses back to: $ReverseOfMX\n";
                             }
@@ -2231,6 +2272,9 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
 "\t\t \\_ [OK] - $ARecordForMX reverses back to mail.$MXRecord\n";
                             }
                             else {
+                                if ( $ReverseOfMX eq "" ) {
+                                    $ReverseOfMX = "[NXDOMAIN]";
+                                }
                                 print RED
 "\t\t \\_ [WARN] - $ARecordForMX reverses back to $ReverseOfMX\n";
                             }
@@ -2377,6 +2421,7 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
     # Here we add the spf record and dkim record (if they exist).
     my $spf  = qx[ dig \@208.67.222.222 $DOMAIN TXT +short | grep 'spf1' ];
     my $dkim = qx[ dig \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
+    my $dmarc = qx[ dig \@208.67.222.222 _dmarc.$DOMAIN TXT +short ];
     print "Checking SPF Record For $DOMAIN\n";
     if ($spf) {
         print YELLOW "\t \\_ " . $spf;
@@ -2404,6 +2449,13 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
     print "Checking DKIM Record For default._domainkey.$DOMAIN\n";
     if ($dkim) {
         print YELLOW "\t \\_ " . $dkim . "\n";
+    }
+    else {
+        print YELLOW "\t \\_ None\n";
+    }
+    print "Checking DMARC Record For _dmarc.$DOMAIN\n";
+    if ($dmarc) {
+        print YELLOW "\t \\_ " . $dmarc . "\n";
     }
     else {
         print YELLOW "\t \\_ None\n";
@@ -2498,7 +2550,7 @@ qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCH
     print "Scan completed on $scanendtime\n";
     my $scantimediff = ( $scanendtime - $scanstarttime );
     print "Elapsed Time: ", $scantimediff->pretty, "\n";
-    print "</c>\n" unless($nocodeblock);
+    print "</c>\n" unless ($nocodeblock);
 }
 
 sub spin {
@@ -2524,3 +2576,8 @@ sub getSSLprovider {
     return $RetVal;
 }
 
+sub ChkForIntegration {
+    return unless ( -e "/var/cpanel/integration/dynamicui/$username" );
+    print YELLOW "[NOTE] * Integration links found in " . GREEN
+      . "/var/cpanel/integration/dynamicui/$username\n";
+}

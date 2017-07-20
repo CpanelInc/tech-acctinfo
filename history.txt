@@ -1,3 +1,8 @@
+V2.4.74- Add CAA record check to --listssl
+V2.4.74- Add DMARC record check to --mail
+V2.4.74- Add check for missing password hash in /etc/shadow 
+V2.4.74- Fix grep for cruft check and parked/addon/sub domains which might return invalid data.
+V2.4.74- Fix UID_MIN/GID_MIN setting to use values from /etc/login.defs (they were hard coded)
 
 V2.4.73- Add a --nocode option to skip displaying <c> and </c> code blocks for ticket notes.
 
