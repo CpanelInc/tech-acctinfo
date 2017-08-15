@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.74";
+my $VERSION = "2.4.75";
 
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
@@ -458,6 +458,13 @@ print GREEN ON_BLACK "The main domain is "
   . YELLOW $MAINDOMAIN
   . GREEN ON_BLACK $RO_TEXT . "\n";
 
+if ( $MAINDOMAIN eq $HOSTNAME ) {
+    print RED "[WARN] - $MAINDOMAIN is the same as hostname $HOSTNAME!\n";
+}
+if ( $QUERY eq $HOSTNAME ) {
+    print RED "[WARN] - $QUERY is the same as hostname $HOSTNAME!\n";
+}
+
 # Get docroot for MAINDOMAIN too.
 my ($maindocroot) =
   ( split( /==/, qx[ grep '^$MAINDOMAIN' /etc/userdatadomains ] ) )[4];
@@ -563,28 +570,25 @@ else {
     print "\n";
 }
 
-#}
-#else {
-#    if ( $UID < 500 or $GID < 500 ) {
-#        print RED " - [WARN] - UID/GID is less than 500!\n";
-#    }
-#    else {
-#        print "\n";
-#    }
-#}
-
 # New get quota info from uapi
-my ($quotaused) =
-qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'count:' | grep -v '_count' ];
-chomp($quotaused);
-my ($maxquota) =
-qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'max:' | grep -v '_max' ];
-chomp($maxquota);
-$quotaused =~ s/count://g;
-$maxquota =~ s/max://g;
-$quotaused = alltrim($quotaused);
-$maxquota  = alltrim($maxquota);
-print "Disk Quota; $quotaused used of $maxquota allowed\n";
+#my ($quotaused) =
+#qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'count:' | grep -v '_count' ];
+#chomp($quotaused);
+#my ($maxquota) =
+#qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'max:' | grep -v '_max' ];
+#chomp($maxquota);
+#$quotaused =~ s/count://g;
+#$maxquota =~ s/max://g;
+#$quotaused = alltrim($quotaused);
+#$maxquota  = alltrim($maxquota);
+# Even newer, use whmapi1 (seems to be faster)
+my $quotaused =
+  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
+($quotaused) = ( split( /\s+/, $quotaused ) )[1];
+my $maxquota =
+  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'disklimit' ]);
+($maxquota) = ( split( /\s+/, $maxquota ) )[1];
+print "Disk Quota: $quotaused used of $maxquota allowed\n";
 
 # Check if account is over quota, warn if so, unless --skipquota is passed.
 # -s human-readable, -l local only (ignore NFS), -q quiet
@@ -1530,7 +1534,8 @@ sub cruft_check {
         my $isAddon;
         my $isSub;
         my $isParked;
-        $isAddon = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
+        $isAddon =
+          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
         if ($isAddon) {
             ($username) = ( split( /\s+/, $isAddon ) )[1];
             ($username) = ( split( /==/,  $username ) );
@@ -2030,6 +2035,10 @@ sub display_mail_info {
     my $SMTPUserHold = qx[ grep $username /etc/outgoing_mail_hold_users ];
     if ($SMTPUserHold) {
         print RED "[WARN] - $username is on hold from sending email\n";
+    }
+
+    if ( -e ("/etc/vdomainaliases/$DOMAIN") ) {
+        print RED "[WARN] - $DOMAIN is listed in /etc/vdomainaliases file!\n";
     }
 
     print "Email accounts for $DOMAIN: \n";

@@ -1,3 +1,6 @@
+V2.4.75- Add check for integration links Note if they are found.
+V2.4.75- Check to see if /etc/vdomainaliases/domain.tld exists when running --mail check.
+
 V2.4.74- Add CAA record check to --listssl
 V2.4.74- Add DMARC record check to --mail
 V2.4.74- Add check for missing password hash in /etc/shadow 
