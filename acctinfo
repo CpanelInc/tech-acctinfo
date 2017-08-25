@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.75";
+my $VERSION = "2.4.76";
 
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
@@ -1584,15 +1584,17 @@ sub cruft_check {
       /etc/userdomains
       /etc/trueuserdomains
       /etc/userdatadomains
-      /etc/named.conf
+      /etc/userdatadomains.json
       /etc/domainusers
       /etc/trueuserowners
       /etc/localdomains
       /etc/remotedomains
       /etc/demousers
+	  /etc/email_send_limits
       /etc/nameserverips
       /etc/demoids
       /etc/demodomains
+      /etc/ssldomains
       /etc/apache2/conf/httpd.conf
       /usr/local/apache/conf/httpd.conf
       /var/cpanel/databases/users.db
@@ -1697,6 +1699,18 @@ sub cruft_check {
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/vfilters/$QUERY", $dirstatus );
+
+	    # Check /var/named/$QUERY.db file
+    	my $dirstatus = &check_dir("/var/named/$QUERY.db");
+    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+    	else              { $dirstatus = RED "[MISSING]"; }
+    	&print_output( "/var/named/$QUERY.db", $dirstatus );
+
+	    # Check /etc/named.conf file
+    	my $dirstatus = &check_file_existance( "/etc/named.conf", $QUERY ); 
+    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+    	else              { $dirstatus = RED "[MISSING]"; }
+    	&print_output( "/etc/named.conf", $dirstatus );
     }
     else {
         my $dirstatus = &check_dir("/etc/valiases/$MAINDOMAIN");
@@ -1709,13 +1723,19 @@ sub cruft_check {
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/vfilters/$MAINDOMAIN", $dirstatus );
-    }
 
-    # Check /var/named/$MAINDOMAIN.db file
-    my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
-    if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-    else              { $dirstatus = RED "[MISSING]"; }
-    &print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
+	    # Check /var/named/$MAINDOMAIN.db file
+    	my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
+    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+    	else              { $dirstatus = RED "[MISSING]"; }
+    	&print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
+
+	    # Check /etc/named.conf file
+    	my $dirstatus = &check_file_existance( "/etc/named.conf", $MAINDOMAIN ); 
+    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+    	else              { $dirstatus = RED "[MISSING]"; }
+    	&print_output( "/etc/named.conf", $dirstatus );
+    }
 
     # Check for DNS Clustering
     if ( -e "/var/cpanel/useclusteringdns" ) {
@@ -2037,8 +2057,8 @@ sub display_mail_info {
         print RED "[WARN] - $username is on hold from sending email\n";
     }
 
-    if ( -e ("/etc/vdomainaliases/$DOMAIN") ) {
-        print RED "[WARN] - $DOMAIN is listed in /etc/vdomainaliases file!\n";
+    if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
+        print YELLOW "[INFO] - " . $DOMAIN . CYAN " is listed in /etc/vdomainaliases directory and is not empty!\n";
     }
 
     print "Email accounts for $DOMAIN: \n";
