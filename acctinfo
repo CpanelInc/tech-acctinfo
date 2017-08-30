@@ -2058,7 +2058,7 @@ sub display_mail_info {
     }
 
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
-        print YELLOW "[INFO] - " . $DOMAIN . CYAN " is listed in /etc/vdomainaliases directory and is not empty!\n";
+        print YELLOW "[INFO] - " . $DOMAIN . CYAN " listed in the /etc/vdomainaliases directory. Existing accounts/autoresponders will NOT forward!\n";
     }
 
     print "Email accounts for $DOMAIN: \n";
