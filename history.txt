@@ -1,3 +1,9 @@
+V2.4.77- Update --listssl to accommodate new location for SSL's in 68.
+V2.4.77- Add /etc/mailips and /etc/mailhelo to --mail section
+V2.4.77- Add /etc/ssldomains to --cruft check
+V2.4.77- Add pending SSL's for purchased orders (not just AutoSSL)
+V2.4.77- Updated readme.txt file
+
 V2.4.76- Fix check for /etc/vdomainaliases 
 V2.4.76- Fix cruft check for /etc/named.conf file.
 V2.4.76- Add /etc/email_send_limits and /etc/ssldomains to cruft check

@@ -12,8 +12,15 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.76";
+my $VERSION = "2.4.77";
 
+our $sslsyscertdir;
+our @certs;
+our $cert;
+our $sslsubject;
+our $startdate;
+our $expiredate;
+our $isSelfSigned;
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
 chomp($CPVersion);
@@ -162,6 +169,16 @@ if ($scan) {
     exit;
 }
 
+if ( $username eq "nobody" ) {
+    print RED "[WARN] - "
+      . YELLOW $QUERY
+      . " has an owner of "
+      . WHITE
+      . "\"nobody\""
+      . YELLOW " in /etc/userdomains!\n";
+    exit;
+}
+
 # Load /var/cpanel/users/$username into config hash variable
 my $user_conf                 = Cpanel::Config::LoadCpUserFile::load($username);
 my $DOMAIN                    = $QUERY;
@@ -289,8 +306,16 @@ my $ResolvedIP;
 if ( $BWLIMIT ne "unlimited" ) {
     $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
 }
-$HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No (But see featurelist above)";
-my $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in $FEATURELIST)";
+
+if (qx[ grep 'FEATURE-AUTOSSL=0' /var/cpanel/users/$username ]) {
+    $HAS_AUTOSSL = "Explicitly Disabled";
+}
+else {
+    $HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No (But see featurelist above)";
+}
+my $HAS_AUTOSSL_TEXT;
+
+#my $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in \"$FEATURELIST\" feature list)";
 
 # Check disabled feature list to see if autossl=0 exists
 my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/disabled ];
@@ -299,9 +324,20 @@ if ($AutoSSL_Disabled) {
 }
 
 # Check $FEATURELIST feature list to see if autossl=0 exists
-my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/$FEATURELIST ];
-if ($AutoSSL_Disabled) {
-    $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in $FEATURELIST)";
+my $AutoSSL_Disabled;
+if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
+    $AutoSSL_Disabled = "$FEATURELIST not found in /var/cpanel/features!";
+    $HAS_AUTOSSL_TEXT = RED "[WARN] - Missing from /var/cpanel/features/";
+}
+else {
+    $AutoSSL_Disabled =
+      qx[ grep 'autossl=0' /var/cpanel/features/$FEATURELIST ];
+    if ($AutoSSL_Disabled) {
+        $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in $FEATURELIST)";
+    }
+}
+if ( $HAS_AUTOSSL_TEXT eq "" ) {
+    $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in \"$FEATURELIST\" feature list)";
 }
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
@@ -422,10 +458,10 @@ else {
 my @PASSWDS = undef;
 our $RealHome    = "";
 our $SSLProvider = getSSLprovider();
+our $passline    = "";
 my $RealShell = "";
 my $UID       = "";
 my $GID       = "";
-my $passline  = "";
 open( PASSWD, "/etc/passwd" );
 @PASSWDS = <PASSWD>;
 close(PASSWD);
@@ -619,17 +655,23 @@ qx[ /usr/bin/quota -sl $username | egrep -v 'Filesystem|quotas' | tail -1 ]
     }
 }
 
-my ($bwused) =
+if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
+    print YELLOW
+"[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
+}
+else {
+    my ($bwused) =
 qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
-chomp($bwused);
-my ($bwmax) =
+    chomp($bwused);
+    my ($bwmax) =
 qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
-chomp($bwmax);
-$bwused =~ s/count://g;
-$bwmax =~ s/max://g;
-$bwused = alltrim($bwused);
-$bwmax  = alltrim($bwmax);
-print "Bandwidth: $bwused used of $bwmax allowed\n";
+    chomp($bwmax);
+    $bwused =~ s/count://g;
+    $bwmax =~ s/max://g;
+    $bwused = alltrim($bwused);
+    $bwmax  = alltrim($bwmax);
+    print "Bandwidth: $bwused used of $bwmax allowed\n";
+}
 
 # Check for custom style (Paper Lantern Theme)
 my $custom_style_path = "$RealHome/var/cpanel/styled/current_style";
@@ -723,9 +765,14 @@ qx[ su -s /bin/bash $username -c "php -i | grep '^Loaded Configuration File'" ];
     }
 }
 
+my $skipEA4 = 1;
+if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
+    $skipEA4 = 1;
+}
+
 $isEA4 = &isEA4;
 my $clPHPActive = 0;
-if ($isEA4) {
+if ( $isEA4 and !$skipEA4 ) {
     $PHPDefaultVersion = &get_system_php_version();
     if ( $PHPDefaultVersion eq "" ) {
         $PHPDefaultVersion = "UNKNOWN";
@@ -1122,107 +1169,65 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
 }
 
 if ( $listssls or $all ) {
-    my $sslcertdir    = "$RealHome/ssl/certs";
-    my $sslsyscertdir = "/var/cpanel/ssl/installed/certs";
-    my @certs;
-    my $cert;
-    my $sslsubject;
-    my $startdate;
-    my $expiredate;
-
-    if ( -e ("$sslcertdir") ) {
-        print WHITE "SSL Certificates installed under "
-          . CYAN $MAINDOMAIN
-          . WHITE " ("
-          . GREEN $username
-          . WHITE ")\n";
-        opendir( ssldir, "$sslcertdir" );
-        my @certs = readdir(ssldir);
-        closedir(ssldir);
-        foreach $cert (@certs) {
-            my $SSLNotInstalled = 0;
-            chomp($cert);
-            if (   $cert eq "."
-                or $cert eq ".."
-                or ( substr( $cert, -4 ) ne '.crt' ) )
-            {
-                next;
-            }
-            if ( !( -e ("$sslsyscertdir/$cert") ) ) {
-                next;
-            }
-            $sslsubject =
-              qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
-            my $CNloc = index( $sslsubject, "CN=" );
-            my $CN = substr( $sslsubject, $CNloc );
-            my ( $domain, $crap ) = ( split( /\//, $CN ) )[0];
-            $domain = substr( $domain, 3 );
-            chomp($domain);
-            $startdate =
-              qx[ openssl x509 -in "$sslcertdir/$cert" -startdate -noout ];
-            $expiredate =
-              qx[ openssl x509 -in "$sslcertdir/$cert" -enddate -noout ];
-            chomp($startdate);
-            chomp($expiredate);
-            ($startdate)  = ( split( /=/, $startdate ) )[1];
-            ($expiredate) = ( split( /=/, $expiredate ) )[1];
-            my $isExpired;
-
-            if ( $noDateManip == 0 ) {
-                my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
-                my $time_now = qx[ date -u ];
-                chomp($time_now);
-                my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
-                $isExpired = GREEN "[VALID]";
-                if ( $unix_time_now > $unix_time ) {
-                    $isExpired = RED "[EXPIRED]";
-                }
-            }
-            print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
-            print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
-            print WHITE "\t \\_ Not After : "
-              . GREEN
-              . $expiredate . " "
-              . $isExpired . "\n";
-
-            # Check if self-signed
-            my $isSelfSigned =
-qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
-            if ($isSelfSigned) {
-                print RED "\t \\_ [WARN] "
-                  . WHITE "- Self-Signed Certificate\n";
-            }
-            else {
-                # Get Issuer and display it.
-                my $SSLIssuer =
-                  qx[ openssl x509 -in "$sslcertdir/$cert" -issuer -noout ];
-                my $Oloc = index( $SSLIssuer, "O=" );
-                my $O = substr( $SSLIssuer, $Oloc );
-                my ( $SSLIssuer, $crap ) = ( split( /\//, $O ) )[0];
-                $SSLIssuer = substr( $SSLIssuer, 2 );
-                chomp($SSLIssuer);
-                print GREEN "\t \\_ [CA SIGNED] "
-                  . WHITE "Issued by: $SSLIssuer\n";
-            }
-
-            # List SAN's
-            print WHITE
-"This certificate is protecting the following Subject Alternative Names:\n";
-            my $SAN;
-            my @getSANS =
-qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
-            foreach $SAN (@getSANS) {
-                chomp($SAN);
-                print YELLOW "\t \\_ " . CYAN $SAN . "\n";
-            }
-        }
+    if ( $CPVersion lt "11.68.0.0" ) {
+        $sslsyscertdir = "/var/cpanel/ssl/installed/certs/";
+        $sslsubject =
+          qx[ openssl x509 -in "$sslsyscertdir/$cert" -subject -noout ];
+        $startdate =
+          qx[ openssl x509 -in "$sslsyscertdir/$cert" -startdate -noout ];
+        $expiredate =
+          qx[ openssl x509 -in "$sslsyscertdir/$cert" -enddate -noout ];
+        $isSelfSigned =
+qx[ openssl verify "$sslsyscertdir/$cert" | grep 'self signed certificate' ];
     }
     else {
-        print WHITE "No SSL Certificates found for "
-          . CYAN $MAINDOMAIN
-          . WHITE " ("
-          . GREEN $username
-          . WHITE ")\n";
+        $sslsyscertdir = "/var/cpanel/ssl/apache_tls/";
+        $sslsubject =
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -subject -noout ];
+        $startdate =
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -startdate -noout ];
+        $expiredate =
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -enddate -noout ];
+        $isSelfSigned =
+qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed certificate' ];
+    }
+
+    print WHITE "SSL Certificates installed under "
+      . CYAN $MAINDOMAIN
+      . WHITE " ("
+      . GREEN $username
+      . WHITE ")\n";
+    &dispSSLdata($MAINDOMAIN);
+    print WHITE "Protecting the following Subject Alternative Names:\n";
+    my $SAN;
+    my @getSANS =
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+    foreach $SAN (@getSANS) {
+        chomp($SAN);
+        print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+    }
+
+    # HERE ADD A CHECK FOR ALL SUBDOMAINS
+    foreach $SUB (@SUBDOMAINS) {
+        chomp($SUB);
+        $sslsubject =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -subject -noout ];
+        $startdate =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -startdate -noout ];
+        $expiredate =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
+        $isSelfSigned =
+qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
+        &dispSSLdata($SUB);
+        print WHITE "Protecting the following Subject Alternative Names:\n";
+        my $SAN;
+        my @getSANS =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+
+        foreach $SAN (@getSANS) {
+            chomp($SAN);
+            print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+        }
     }
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
@@ -1244,21 +1249,62 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
             }
             print "\n";
         }
-        &border;
+
+        # Check for purchased SSL's
+        print "Checking for pending SSL Orders (non-autossl): \n";
+        if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
+            my ($PendingSSLOrder) = (
+                split(
+                    /\s+/,
+qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]
+                )
+            )[3];
+
+            #			print "DEBUG: $PendingSSLOrder\n";
+            $PendingSSLOrder =~ s/\"//g;
+            $PendingSSLOrder =~ s/,//g;
+            $PendingSSLOrder =~ s/://g;
+            print CYAN "\t \\_ Pending order number: " . GREEN
+              . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n";
+        }
+        else {
+            print GREEN "\t \\_ None\n";
+        }
     }
 
     # Check for CAA records here.
-    my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+    my @HasCAA;
+    print "Checking for CAA records: \n";
+
+    #my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+    if ($IS_USERNAME) {
+        @HasCAA = qx[ dig +noall +answer $MAINDOMAIN CAA | grep -v CNAME ];
+    }
+    else {
+        @HasCAA = qx[ dig +noall +answer $QUERY CAA | grep -v CNAME ];
+    }
     my $CAARecord;
     if (@HasCAA) {
-        print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
+        if ($IS_USERNAME) {
+            print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
+        }
+        else {
+            print YELLOW "[NOTE] * CAA records were found for $QUERY\n";
+        }
         print GREEN
           "SSL Certificates can only be issued from the following CA's:\n";
+        my ( $CAARecord1, $CAARecord2, $CAARecord3 );
         foreach $CAARecord (@HasCAA) {
             chomp($CAARecord);
-            print CYAN "\t \\_ $CAARecord\n";
+            ( $CAARecord1, $CAARecord2, $CAARecord3 ) =
+              ( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
+            print CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n";
         }
     }
+    else {
+        print GREEN "\t \\_ None\n";
+    }
+    &border;
 }
 
 print "</c>\n" unless ($nocodeblock);
@@ -1527,8 +1573,9 @@ sub cruft_check {
         print
 "No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
         print "Continuing search for $QUERY...\n";
-        $username   = $QUERY;
-        $MAINDOMAIN = $QUERY;
+
+        #        $username   = $QUERY;
+        #        $MAINDOMAIN = $QUERY;
     }
     if ( !$isActive ) {
         my $isAddon;
@@ -1590,8 +1637,7 @@ sub cruft_check {
       /etc/localdomains
       /etc/remotedomains
       /etc/demousers
-	  /etc/email_send_limits
-      /etc/nameserverips
+      /etc/email_send_limits
       /etc/demoids
       /etc/demodomains
       /etc/ssldomains
@@ -1623,6 +1669,8 @@ sub cruft_check {
     }
     if ($username) {
 
+        #		print "DEBUG: username = $username\n";
+
         # Check for home directory and others to see if they exist
         my $hmCnt;
         my $dirstatus = &check_dir("/$HOMEDIR/$username");
@@ -1648,6 +1696,12 @@ sub cruft_check {
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/var/cpanel/userdata/$username", $dirstatus );
+
+        # Check main file in /var/cpanel/userdata/$username directory
+        my $dirstatus = &check_dir("/var/cpanel/userdata/$username/main");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/var/cpanel/userdata/$username/main", $dirstatus );
 
         # Check /var/cpanel/users/$username
         my $dirstatus = &check_dir("/var/cpanel/users/$username");
@@ -1682,6 +1736,10 @@ sub cruft_check {
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( $dbindex, $dirstatus );
+        my $dirstatus = &check_dir("/etc/proftpd/$username");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/proftpd/$username", $dirstatus );
     }
     else {
         print "Could not determine username so skipping all username checks!\n";
@@ -1700,17 +1758,17 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/vfilters/$QUERY", $dirstatus );
 
-	    # Check /var/named/$QUERY.db file
-    	my $dirstatus = &check_dir("/var/named/$QUERY.db");
-    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-    	else              { $dirstatus = RED "[MISSING]"; }
-    	&print_output( "/var/named/$QUERY.db", $dirstatus );
+        # Check /var/named/$QUERY.db file
+        my $dirstatus = &check_dir("/var/named/$QUERY.db");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/var/named/$QUERY.db", $dirstatus );
 
-	    # Check /etc/named.conf file
-    	my $dirstatus = &check_file_existance( "/etc/named.conf", $QUERY ); 
-    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-    	else              { $dirstatus = RED "[MISSING]"; }
-    	&print_output( "/etc/named.conf", $dirstatus );
+        # Check /etc/named.conf file
+        my $dirstatus = &check_file_existance( "/etc/named.conf", $QUERY );
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/named.conf", $dirstatus );
     }
     else {
         my $dirstatus = &check_dir("/etc/valiases/$MAINDOMAIN");
@@ -1724,17 +1782,17 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/vfilters/$MAINDOMAIN", $dirstatus );
 
-	    # Check /var/named/$MAINDOMAIN.db file
-    	my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
-    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-    	else              { $dirstatus = RED "[MISSING]"; }
-    	&print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
+        # Check /var/named/$MAINDOMAIN.db file
+        my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
 
-	    # Check /etc/named.conf file
-    	my $dirstatus = &check_file_existance( "/etc/named.conf", $MAINDOMAIN ); 
-    	if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-    	else              { $dirstatus = RED "[MISSING]"; }
-    	&print_output( "/etc/named.conf", $dirstatus );
+        # Check /etc/named.conf file
+        my $dirstatus = &check_file_existance( "/etc/named.conf", $MAINDOMAIN );
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/named.conf", $dirstatus );
     }
 
     # Check for DNS Clustering
@@ -1784,13 +1842,9 @@ sub cruft_check {
     if ($DBPrefix) {
         if ( length($username) > 8 ) {
             $first8 = substr( $username, 0, 8 );
-
-            #			$first8="^".$first8;
         }
         else {
             $first8 = $username;
-
-            #			$first8="^".$first8."\$";
         }
     }
     else {
@@ -1810,15 +1864,20 @@ sub cruft_check {
     }
 
     # Check for database users
-    my @MySQLUsers =
+    if ( $first8 eq "" ) {
+        print "Skipping MySQL User check - no username found!\n";
+    }
+    else {
+        my @MySQLUsers =
 qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -BN ];
-    my @MySQLUsersUnique = uniq(@MySQLUsers);
-    my $num              = @MySQLUsersUnique;
-    if ( $num > 0 ) {
-        print YELLOW "MySQL Users Found in MySQL.user table\n";
-        foreach $MySQLUser (@MySQLUsersUnique) {
-            chomp($MySQLUser);
-            print WHITE "\t \\_ " . $MySQLUser . "\n";
+        my @MySQLUsersUnique = uniq(@MySQLUsers);
+        my $num              = @MySQLUsersUnique;
+        if ( $num > 0 ) {
+            print YELLOW "MySQL Users Found in MySQL.user table\n";
+            foreach $MySQLUser (@MySQLUsersUnique) {
+                chomp($MySQLUser);
+                print WHITE "\t \\_ " . $MySQLUser . "\n";
+            }
         }
     }
 
@@ -1861,7 +1920,9 @@ sub check_file_existance {
         close(TheFile);
         foreach $DataLine (@TheFileData) {
             chomp($DataLine);
-            if ( $DataLine =~ m/\b$TheSearchString\b/ ) {
+
+            #if ( $DataLine =~ m/\b$TheSearchString\b/ ) {
+            if ( $DataLine =~ m/^$TheSearchString/ ) {
                 $FoundLine = 1;
                 last;
             }
@@ -2058,7 +2119,10 @@ sub display_mail_info {
     }
 
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
-        print YELLOW "[INFO] - " . $DOMAIN . CYAN " listed in the /etc/vdomainaliases directory. Existing accounts/autoresponders will NOT forward!\n";
+        print YELLOW "[INFO] - "
+          . $DOMAIN
+          . CYAN
+" listed in the /etc/vdomainaliases directory. Existing accounts/autoresponders will NOT forward!\n";
     }
 
     print "Email accounts for $DOMAIN: \n";
@@ -2502,6 +2566,34 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
     print WHITE "Max Defer Fail %: "
       . CYAN ucfirst($MAX_DEFER_FAIL_PERCENTAGE) . "\n";
 
+# Check here if send mail from dedicated IP is set and if /etc/mailips or /etc/mailhelo is
+# referenced.
+# RIGHT HERE
+    my $SendFromDedicated =
+      qx[ grep 'per_domain_mailips=1' /etc/exim.conf.localopts ];
+    $SendFromDedicated = ($SendFromDedicated) ? "Yes" : "No";
+    my $CustomHelo = qx[ grep 'custom_mailhelo=1' /etc/exim.conf.localopts ];
+    $CustomHelo = ($CustomHelo) ? "Yes" : "No";
+    my $CustomMailIP = qx[ grep 'custom_mailips=1' /etc/exim.conf.localopts ];
+    $CustomMailIP = ($CustomMailIP) ? "Yes" : "No";
+    my $CustomMailIPText = "";
+
+    if ( $CustomMailIP eq "Yes" ) {
+        $CustomMailIPText = qx[ egrep '^$MAINDOMAIN' /etc/mailips ];
+        chomp($CustomMailIPText);
+    }
+    my $CustomHeloText = "";
+    if ( $CustomHelo eq "Yes" ) {
+        $CustomHeloText = qx[ egrep '^$MAINDOMAIN' /etc/mailhelo ];
+        chomp($CustomHeloText);
+    }
+    print WHITE "Send from dedicated IP: " . CYAN $SendFromDedicated . "\n";
+    print WHITE "Using Custom HELO (/etc/mailhelo): "
+      . CYAN $CustomHelo . " "
+      . YELLOW $CustomHeloText . "\n";
+    print WHITE "Using Custom IP (/etc/mailips): "
+      . CYAN $CustomMailIP . " "
+      . YELLOW $CustomMailIPText . "\n";
     &border;
 }
 
@@ -2542,7 +2634,24 @@ sub scan {
 "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
     my @DEFINITIONS = qx[ curl -s $URL ];
     my $StringCnt   = @DEFINITIONS;
-    print "Scanning $HOMEDIR/$username for ($StringCnt) known infections:\n";
+
+    # Need to define and use $RealHome if $HOMEDIR doesn't exist!!!
+    open( PASSWD, "/etc/passwd" );
+    @PASSWDS = <PASSWD>;
+    close(PASSWD);
+    foreach $passline (@PASSWDS) {
+        chomp($passline);
+        if ( $passline =~ m/\b$username\b/ ) {
+            ($UID)       = ( split( /:/, $passline ) )[2];
+            ($GID)       = ( split( /:/, $passline ) )[3];
+            ($RealHome)  = ( split( /:/, $passline ) )[5];
+            ($RealShell) = ( split( /:/, $passline ) )[6];
+            last;
+        }
+    }
+
+    #print "Scanning $HOMEDIR/$username for ($StringCnt) known infections:\n";
+    print "Scanning $RealHome/$username for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
     my @FOUND           = undef;
     my $SOMETHING_FOUND = 0;
@@ -2556,7 +2665,9 @@ sub scan {
         &spin;
         chomp($SEARCHSTRING);
         my $SCAN =
-qx[ grep -rIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp -w "$SEARCHSTRING" $HOMEDIR/$username/* ];
+qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude=access-logs -w "$SEARCHSTRING" $RealHome/$username/* ];
+
+#qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg -w "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
         if ($SCAN) {
             $SOMETHING_FOUND = 1;
@@ -2609,4 +2720,49 @@ sub ChkForIntegration {
     return unless ( -e "/var/cpanel/integration/dynamicui/$username" );
     print YELLOW "[NOTE] * Integration links found in " . GREEN
       . "/var/cpanel/integration/dynamicui/$username\n";
+}
+
+sub dispSSLdata {
+    my $tcDomain = $_[0];
+    my $CNloc    = index( $sslsubject, "CN=" );
+    my $CN       = substr( $sslsubject, $CNloc );
+    my ( $domain, $crap ) = ( split( /\//, $CN ) )[0];
+    $domain = substr( $domain, 3 );
+    chomp($domain);
+    chomp($startdate);
+    chomp($expiredate);
+    ($startdate)  = ( split( /=/, $startdate ) )[1];
+    ($expiredate) = ( split( /=/, $expiredate ) )[1];
+    my $isExpired;
+
+    if ( $noDateManip == 0 ) {
+        my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
+        my $time_now = qx[ date -u ];
+        chomp($time_now);
+        my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
+        $isExpired = GREEN "[VALID]";
+        if ( $unix_time_now > $unix_time ) {
+            $isExpired = RED "[EXPIRED]";
+        }
+    }
+    print YELLOW . $domain . "\n";
+    print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
+    print WHITE "\t \\_ Not After : "
+      . GREEN
+      . $expiredate . " "
+      . $isExpired . "\n";
+    if ($isSelfSigned) {
+        print RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate\n";
+    }
+    else {
+        # Get Issuer and display it.
+        my $SSLIssuer =
+qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
+        my $Oloc = index( $SSLIssuer, "O=" );
+        my $O = substr( $SSLIssuer, $Oloc );
+        my ( $SSLIssuer, $crap ) = ( split( /\//, $O ) )[0];
+        $SSLIssuer = substr( $SSLIssuer, 2 );
+        chomp($SSLIssuer);
+        print GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n";
+    }
 }
