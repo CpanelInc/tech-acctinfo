@@ -1260,7 +1260,6 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
                 )
             )[3];
 
-            #			print "DEBUG: $PendingSSLOrder\n";
             $PendingSSLOrder =~ s/\"//g;
             $PendingSSLOrder =~ s/,//g;
             $PendingSSLOrder =~ s/://g;
@@ -1668,9 +1667,6 @@ sub cruft_check {
         &print_output( $file2search, $filestatus );
     }
     if ($username) {
-
-        #		print "DEBUG: username = $username\n";
-
         # Check for home directory and others to see if they exist
         my $hmCnt;
         my $dirstatus = &check_dir("/$HOMEDIR/$username");
@@ -2568,7 +2564,6 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
 
 # Check here if send mail from dedicated IP is set and if /etc/mailips or /etc/mailhelo is
 # referenced.
-# RIGHT HERE
     my $SendFromDedicated =
       qx[ grep 'per_domain_mailips=1' /etc/exim.conf.localopts ];
     $SendFromDedicated = ($SendFromDedicated) ? "Yes" : "No";
