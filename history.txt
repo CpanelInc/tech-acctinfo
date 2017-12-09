@@ -1,3 +1,5 @@
+V2.4.78- Fix big bug in new listssl section if SSL's are missing.
+
 V2.4.77- Update --listssl to accommodate new location for SSL's in 68.
 V2.4.77- Add /etc/mailips and /etc/mailhelo to --mail section
 V2.4.77- Add /etc/ssldomains to --cruft check
