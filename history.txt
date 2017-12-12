@@ -1,3 +1,6 @@
+V2.4.79- Fix regexp bug in --listaddons, --listsubs --listaliased that might cause account bleed.
+(reported by H. Borresen)
+
 V2.4.78- Fix big bug in new listssl section if SSL's are missing.
 
 V2.4.77- Update --listssl to accommodate new location for SSL's in 68.

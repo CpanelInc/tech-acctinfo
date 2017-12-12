@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.78";
+my $VERSION = "2.4.79";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -198,10 +198,13 @@ close(USERDATAFILE);
 # Get all sub domains (if any)
 foreach $ACCT (@USERDATADOMAINS) {
     chomp($ACCT);
-    if ( $ACCT =~ m/ $username/ ) {
+    if ( $ACCT =~ m/ $username=/ ) {
         if ( $ACCT =~ m/==sub==/ ) {
+			#print "DEBUG: ACCT = $ACCT\n";
             my ($sub_domain) = ( split( /\s+/, $ACCT ) )[0];
             chop($sub_domain);
+			#print "DEBUG: sub_domain = $sub_domain\n";
+			#print "DEBUG: DOMAIN = $DOMAIN\n";
             push( @SUBDOMAINS, $sub_domain );
             if ( $sub_domain eq $DOMAIN ) {
 
@@ -222,7 +225,7 @@ foreach $ACCT (@USERDATADOMAINS) {
 # Get all addon domains (if any)
 foreach $ACCT (@USERDATADOMAINS) {
     chomp($ACCT);
-    if ( $ACCT =~ m/ $username/ ) {
+    if ( $ACCT =~ m/ $username=/ ) {
         if ( $ACCT =~ m/==addon==/ ) {
             my ($addon_domain) = ( split( /\s+/, $ACCT ) )[0];
             chop($addon_domain);
@@ -248,7 +251,7 @@ foreach $ACCT (@USERDATADOMAINS) {
 # Get all aliased domains (if any)
 foreach $ACCT (@USERDATADOMAINS) {
     chomp($ACCT);
-    if ( $ACCT =~ m/ $username/ ) {
+    if ( $ACCT =~ m/ $username=/ ) {
         if ( $ACCT =~ m/==parked==/ ) {
             my ($parked_domain) = ( split( /\s+/, $ACCT ) )[0];
             chop($parked_domain);
@@ -1167,131 +1170,135 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
 }
 
 if ( $listssls or $all ) {
-    $sslsyscertdir = "/var/cpanel/ssl/apache_tls/";
-    if (-e("$sslsyscertdir/$MAINDOMAIN/certificates")) { 
-        $sslsubject =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -subject -noout ];
-        $startdate =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -startdate -noout ];
-        $expiredate =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -enddate -noout ];
-        $isSelfSigned =
-qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed certificate' ];
-
-    	print WHITE "SSL Certificates installed under "
-      	. CYAN $MAINDOMAIN
-      	. WHITE " ("
-      	. GREEN $username
-      	. WHITE ")\n";
-    	&dispSSLdata($MAINDOMAIN);
-    	print WHITE "Protecting the following Subject Alternative Names:\n";
-    	my $SAN;
-    	my @getSANS =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
-    	foreach $SAN (@getSANS) {
-        	chomp($SAN);
-        	print YELLOW "\t \\_ " . CYAN $SAN . "\n";
-    	}
+    if ($CPVersion lt "11.68.0.0") { 
+        &oldlistssls;
     }
 	else { 
-		print YELLOW $MAINDOMAIN . "\n";
-       	print WHITE "\t \\_ " . CYAN . "No SSL found.\n";
-	}	
-
-    foreach $SUB (@SUBDOMAINS) {
-        chomp($SUB);
-    	if (-e("$sslsyscertdir/$SUB/certificates")) { 
+    	$sslsyscertdir = "/var/cpanel/ssl/apache_tls/";
+    	if (-e("$sslsyscertdir/$MAINDOMAIN/certificates")) { 
         	$sslsubject =
-qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -subject -noout ];
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -subject -noout ];
         	$startdate =
-qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -startdate -noout ];
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -startdate -noout ];
         	$expiredate =
-qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -enddate -noout ];
         	$isSelfSigned =
-qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
-        	&dispSSLdata($SUB);
-        	print WHITE "Protecting the following Subject Alternative Names:\n";
-        	my $SAN;
-        	my @getSANS =
-qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed certificate' ];
 
-        	foreach $SAN (@getSANS) {
-            	chomp($SAN);
-            	print YELLOW "\t \\_ " . CYAN $SAN . "\n";
-        	}
+    		print WHITE "SSL Certificates installed under "
+      		. CYAN $MAINDOMAIN
+      		. WHITE " ("
+      		. GREEN $username
+      		. WHITE ")\n";
+    		&dispSSLdata($MAINDOMAIN);
+    		print WHITE "Protecting the following Subject Alternative Names:\n";
+    		my $SAN;
+    		my @getSANS =
+qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+    		foreach $SAN (@getSANS) {
+        		chomp($SAN);
+        		print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+    		}
     	}
 		else { 
-			print YELLOW $SUB . "\n";
-          	print WHITE "\t \\_ " . CYAN . "No SSL found.\n";
+			print YELLOW $MAINDOMAIN . "\n";
+       		print WHITE "\t \\_ " . CYAN . "No SSL found.\n";
+		}	
+
+    	foreach $SUB (@SUBDOMAINS) {
+        	chomp($SUB);
+    		if (-e("$sslsyscertdir/$SUB/certificates")) { 
+        		$sslsubject =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -subject -noout ];
+        		$startdate =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -startdate -noout ];
+        		$expiredate =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
+        		$isSelfSigned =
+qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
+        		&dispSSLdata($SUB);
+        		print WHITE "Protecting the following Subject Alternative Names:\n";
+        		my $SAN;
+        		my @getSANS =
+qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+	
+        		foreach $SAN (@getSANS) {
+            		chomp($SAN);
+            		print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+        		}
+    		}
+			else { 
+				print YELLOW $SUB . "\n";
+          		print WHITE "\t \\_ " . CYAN . "No SSL found.\n";
+			}
 		}
-	}
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
-   	if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
-       	print "\nChecking for pending AutoSSL orders: \n";
-       	my $SSL_PENDING =
+   		if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
+       		print "\nChecking for pending AutoSSL orders: \n";
+       		my $SSL_PENDING =
 qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
-       	if ($SSL_PENDING) {
-           	my $NEW_SSL_PENDING;
-           	( $NEW_SSL_PENDING = $SSL_PENDING ) =~
+       		if ($SSL_PENDING) {
+           		my $NEW_SSL_PENDING;
+           		( $NEW_SSL_PENDING = $SSL_PENDING ) =~
 s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=/g;
-           	$SSL_PENDING = $NEW_SSL_PENDING;
-            print GREEN "\t \\_ \n";
-           	print GREEN "$SSL_PENDING";
-       	}
-       	else {
-           	print GREEN "\t \\_ None";
-       	}
-       	print "\n";
-   	}
+           		$SSL_PENDING = $NEW_SSL_PENDING;
+            	print GREEN "\t \\_ \n";
+           		print GREEN "$SSL_PENDING";
+       		}
+       		else {
+           		print GREEN "\t \\_ None";
+       		}
+       		print "\n";
+   		}
 
-   	# Check for purchased SSL's
-   	print "Checking for pending SSL Orders (non-autossl): \n";
-   	if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
-       	my ($PendingSSLOrder) = (
-       	split( /\s+/,
-qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]
-        ))[3];
-       	$PendingSSLOrder =~ s/\"//g;
-       	$PendingSSLOrder =~ s/,//g;
-       	$PendingSSLOrder =~ s/://g;
-       	print CYAN "\t \\_ Pending order number: " . GREEN . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n";
-   	}
-   	else {
-       	print GREEN "\t \\_ None\n";
-   	}
+	   	# Check for purchased SSL's
+   		print "Checking for pending SSL Orders (non-autossl): \n";
+   		if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
+       		my ($PendingSSLOrder) = (
+       		split( /\s+/,
+qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]))[3];
+       		$PendingSSLOrder =~ s/\"//g;
+       		$PendingSSLOrder =~ s/,//g;
+       		$PendingSSLOrder =~ s/://g;
+       		print CYAN "\t \\_ Pending order number: " . GREEN . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n";
+   		}
+   		else {
+       		print GREEN "\t \\_ None\n";
+   		}
 
-    # Check for CAA records here.
-   	my @HasCAA;
-   	print "Checking for CAA records: \n";
-
-   	#my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
-   	if ($IS_USERNAME) {
-       	@HasCAA = qx[ dig +noall +answer $MAINDOMAIN CAA | grep -v CNAME ];
-   	}
-   	else {
-       	@HasCAA = qx[ dig +noall +answer $QUERY CAA | grep -v CNAME ];
-   	}
-   	my $CAARecord;
-   	if (@HasCAA) {
-       	if ($IS_USERNAME) {
-           	print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
-       	}
-       	else {
-           	print YELLOW "[NOTE] * CAA records were found for $QUERY\n";
-       	}
-       	print GREEN "SSL Certificates can only be issued from the following CA's:\n";
-       	my ( $CAARecord1, $CAARecord2, $CAARecord3 );
-       	foreach $CAARecord (@HasCAA) {
-           	chomp($CAARecord);
-           	( $CAARecord1, $CAARecord2, $CAARecord3 ) =
-           	( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
-          	print CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n";
-       	}
-   	}
-   	else {
-       	print GREEN "\t \\_ None\n";
-   	}
-   	&border;
+    	# Check for CAA records here.
+   		my @HasCAA;
+   		print "Checking for CAA records: \n";
+	
+   		#my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+   		if ($IS_USERNAME) {
+       		@HasCAA = qx[ dig +noall +answer $MAINDOMAIN CAA | grep -v CNAME ];
+   		}
+   		else {
+       		@HasCAA = qx[ dig +noall +answer $QUERY CAA | grep -v CNAME ];
+   		}
+   		my $CAARecord;
+   		if (@HasCAA) {
+       		if ($IS_USERNAME) {
+           		print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
+       		}
+       		else {
+           		print YELLOW "[NOTE] * CAA records were found for $QUERY\n";
+       		}
+       		print GREEN "SSL Certificates can only be issued from the following CA's:\n";
+       		my ( $CAARecord1, $CAARecord2, $CAARecord3 );
+       		foreach $CAARecord (@HasCAA) {
+           		chomp($CAARecord);
+           		( $CAARecord1, $CAARecord2, $CAARecord3 ) =
+           		( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
+          		print CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n";
+       		}
+   		}
+   		else {
+       		print GREEN "\t \\_ None\n";
+   		}
+   		&border;
+	}
 }
 
 print "</c>\n" unless ($nocodeblock);
@@ -2748,4 +2755,120 @@ qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
         chomp($SSLIssuer);
         print GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n";
     }
+}
+
+sub oldlistssls { 
+    my $sslcertdir    = "$RealHome/ssl/certs";
+    my $sslsyscertdir = "/var/cpanel/ssl/installed/certs";
+    my @certs;
+    my $cert;
+    my $sslsubject;
+    my $startdate;
+    my $expiredate;
+    if ( -e ("$sslcertdir") ) {
+        print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+        opendir( ssldir, "$sslcertdir" );
+        my @certs = readdir(ssldir);
+        closedir(ssldir);
+        foreach $cert (@certs) {
+            my $SSLNotInstalled = 0;
+            chomp($cert);
+            if (   $cert eq "." or $cert eq ".." or ( substr( $cert, -4 ) ne '.crt' ) ) {
+                next;
+            }
+            if ( !( -e ("$sslsyscertdir/$cert") ) ) {
+                next;
+            }
+            $sslsubject = qx[ openssl x509 -in "$sslcertdir/$cert" -subject -noout ];
+            my $CNloc = index( $sslsubject, "CN=" );
+            my $CN = substr( $sslsubject, $CNloc );
+            my ( $domain, $crap ) = ( split( /\//, $CN ) )[0];
+            $domain = substr( $domain, 3 );
+            chomp($domain);
+            $startdate = qx[ openssl x509 -in "$sslcertdir/$cert" -startdate -noout ];
+            $expiredate = qx[ openssl x509 -in "$sslcertdir/$cert" -enddate -noout ];
+            chomp($startdate);
+            chomp($expiredate);
+            ($startdate)  = ( split( /=/, $startdate ) )[1];
+            ($expiredate) = ( split( /=/, $expiredate ) )[1];
+            my $isExpired;
+
+            if ( $noDateManip == 0 ) {
+                my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
+                my $time_now = qx[ date -u ];
+                chomp($time_now);
+                my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
+                $isExpired = GREEN "[VALID]";
+                if ( $unix_time_now > $unix_time ) {
+                    $isExpired = RED "[EXPIRED]";
+                }
+            }
+            print YELLOW . $domain . MAGENTA " (" . $cert . ")\n";
+            print WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n";
+            print WHITE "\t \\_ Not After : " . GREEN . $expiredate . " " . $isExpired . "\n";
+            # Check if self-signed
+            my $isSelfSigned = qx[ openssl verify "$sslcertdir/$cert" | grep 'self signed certificate' ];
+            if ($isSelfSigned) {
+                print RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate\n";
+            }
+            else {
+                # Get Issuer and display it.
+                my $SSLIssuer = qx[ openssl x509 -in "$sslcertdir/$cert" -issuer -noout ];
+                my $Oloc = index( $SSLIssuer, "O=" );
+                my $O = substr( $SSLIssuer, $Oloc );
+                my ( $SSLIssuer, $crap ) = ( split( /\//, $O ) )[0];
+                $SSLIssuer = substr( $SSLIssuer, 2 );
+                chomp($SSLIssuer);
+                print GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n";
+            }
+            # List SAN's
+            print WHITE
+"This certificate is protecting the following Subject Alternative Names:\n";
+            my $SAN;
+            my @getSANS =
+qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+            foreach $SAN (@getSANS) {
+                chomp($SAN);
+                print YELLOW "\t \\_ " . CYAN $SAN . "\n";
+            }
+        }
+    }
+    else {
+        print WHITE "No SSL Certificates found for " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
+    }
+# Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
+    if ( $CPVersion gt "11.60.0.26" ) {
+        if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
+            print "\nChecking for pending AutoSSL orders: \n";
+            my $SSL_PENDING = qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+            if ($SSL_PENDING) {
+                my $NEW_SSL_PENDING;
+                ( $NEW_SSL_PENDING = $SSL_PENDING ) =~ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=/g;
+                $SSL_PENDING = $NEW_SSL_PENDING;
+                print GREEN "\t \\_ \n";
+                print GREEN "$SSL_PENDING";
+            }
+            else {
+                print GREEN "\t \\_ None";
+            }
+            print "\n";
+        }
+    }
+    # Check for CAA records here.
+    print "Checking for CAA records: \n";
+    my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+    my $CAARecord;
+    if (@HasCAA) {
+        print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";
+        print GREEN
+          "SSL Certificates can only be issued from the following CA's:\n";
+        foreach $CAARecord (@HasCAA) {
+            chomp($CAARecord);
+            print CYAN "\t \\_ $CAARecord\n";
+        }
+    }
+    else {
+        print GREEN "\t \\_ None\n";
+    }
+    &border;
 }
