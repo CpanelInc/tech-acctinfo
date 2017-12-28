@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.80";
+my $VERSION = "2.4.81";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -766,7 +766,7 @@ qx[ su -s /bin/bash $username -c "php -i | grep '^Loaded Configuration File'" ];
     }
 }
 
-my $skipEA4 = 1;
+my $skipEA4 = 0;
 if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
     $skipEA4 = 1;
 }
@@ -2640,8 +2640,6 @@ sub scan {
         }
     }
 
-    #print "Scanning $HOMEDIR/$username for ($StringCnt) known infections:\n";
-    #print "Scanning $RealHome/$username for ($StringCnt) known infections:\n";
     print "Scanning $RealHome for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
     my @FOUND           = undef;
@@ -2656,9 +2654,8 @@ sub scan {
         &spin;
         chomp($SEARCHSTRING);
         my $SCAN =
-qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude=access-logs -w "$SEARCHSTRING" $RealHome/* ];
+qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude-dir=access-logs -w "$SEARCHSTRING" $RealHome/* ];
 
-#qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg -w "$SEARCHSTRING" $HOMEDIR/$username/* ];
         chomp($SCAN);
         if ($SCAN) {
             $SOMETHING_FOUND = 1;
