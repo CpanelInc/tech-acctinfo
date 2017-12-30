@@ -1,3 +1,8 @@
+V2.4.82- Fix cruft check. Was not finding domains in /etc/named.conf and httpd.conf files
+    - Thanks Rex
+V2.4.82- Add check for reserved usernames
+V2.4.82- Add default reseller privileges (now marked with [DEFAULT])
+
 V2.4.81- Fix logic bug in skipEA4 check - caused php information to not display if no CageFS.
 
 V2.4.80- Fix bug in --scan.  Scanned wrong directory path. 
