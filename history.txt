@@ -1,3 +1,8 @@
+V2.4.83- Add pragma quick_check to Roundcube database during --mail check
+V2.4.83- Add check for custom userdata directory under conf.d/userdata.
+V2.4.83- Changed check for custom .user.ini and php.ini to any ini file.
+V2.4.83- Add suspend time to Suspended: Yes! line. 
+
 V2.4.82- Fix cruft check. Was not finding domains in /etc/named.conf and httpd.conf files
     - Thanks Rex
 V2.4.82- Add check for reserved usernames

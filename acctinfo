@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.82";
+my $VERSION = "2.4.83";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -21,6 +21,7 @@ our $expiredate;
 our $isSelfSigned;
 our $CPVersion   = `cat /usr/local/cpanel/version`;
 our $SSLProvider = getSSLprovider();
+our $result;
 chomp($CPVersion);
 
 use Getopt::Long;
@@ -37,6 +38,7 @@ use Time::Piece;
 use Time::Seconds;
 use Net::DNS;
 use Socket;
+use DBI;
 use integer;
 
 # Just found out that Date::Manip is only available in 11.58+
@@ -190,6 +192,7 @@ my @ADDONDOMAINS              = "";
 my @PARKEDDOMAINS             = "";
 my $ACCT                      = "";
 my $MAILBOX_FORMAT            = "";
+my $SUSPEND_TIME              = "";
 my $MAXPOP                    = 0;
 my $MAX_EMAIL_PER_HOUR        = 0;
 my $MAX_DEFER_FAIL_PERCENTAGE = 0;
@@ -298,6 +301,7 @@ my $MAXSUB        = $user_conf->{'MAXSUB'};
 my $MAXFTP        = $user_conf->{'MAXFTP'};
 my $MAXSQL        = $user_conf->{'MAXSQL'};
 my $MAXLST        = $user_conf->{'MAXLST'};
+my $SUSPEND_TIME  = $user_conf->{'SUSPENDTIME'};
 my $FEATURELIST   = $user_conf->{'FEATURELIST'};
 my $STARTDATE     = scalar localtime( $user_conf->{'STARTDATE'} );
 my @ResolvedIP;
@@ -598,7 +602,6 @@ my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
 $UID_MIN = alltrim($UID_MIN);
 $GID_MIN = alltrim($GID_MIN);
 
-#if ( version_compare( $os_release, qw( > 6.9 ) ) ) {
 if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
     print RED " - [WARN] - UID/GID is less than $UID_MIN/$GID_MIN\n";
 }
@@ -606,18 +609,7 @@ else {
     print "\n";
 }
 
-# New get quota info from uapi
-#my ($quotaused) =
-#qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'count:' | grep -v '_count' ];
-#chomp($quotaused);
-#my ($maxquota) =
-#qx[ uapi --user=$username StatsBar get_stats display=diskusage | grep 'max:' | grep -v '_max' ];
-#chomp($maxquota);
-#$quotaused =~ s/count://g;
-#$maxquota =~ s/max://g;
-#$quotaused = alltrim($quotaused);
-#$maxquota  = alltrim($maxquota);
-# Even newer, use whmapi1 (seems to be faster)
+# get quota info using whmapi1
 my $quotaused =
   alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
 ($quotaused) = ( split( /\s+/, $quotaused ) )[1];
@@ -729,8 +721,6 @@ my $isEA4       = 0;
 my $cageFSStats = &check_for_cagefs();
 if ($cageFSStats) {
     print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
-
-# See if /home/$username/.cl.selector/defaults.cfg is present. If so grab PHP Version from it.
 }
 else {
     print WHITE "CageFS: " . CYAN . "Not installed!\n";
@@ -842,30 +832,29 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
         $skipfind = 1;
     }
 
-# Search /home/username for any php.ini files and/or .user.ini files (unless --skipfind)
+    # Search /home/username for any php.ini files (unless --skipfind)
     if ( $skipfind == 0 ) {
-        my @customPHPINI =
-          qx[ find $RealHome/public_html -maxdepth 1 -name 'php.ini' ];
-        my @customuserINI =
-          qx[ find $RealHome/public_html -maxdepth 1 -name '.user.ini' ];
-        my $customPHPINIfile;
-        my $customuserINIfile;
-        if (@customPHPINI) {
-            print GREEN "Custom php.ini file found in: \n";
-            foreach $customPHPINIfile (@customPHPINI) {
-                chomp($customPHPINIfile);
-                print YELLOW "\t \\_ $customPHPINIfile\n";
-            }
-        }
-        if (@customuserINI) {
-            print GREEN "Custom .user.ini file found in: \n";
-            foreach $customuserINIfile (@customuserINI) {
-                chomp($customuserINIfile);
-                print YELLOW "\t \\_ $customuserINIfile\n";
+        my @anyINI = qx [ find $RealHome -name '*.ini' ];
+        my $anyINIfile;
+        if (@anyINI) {
+            print GREEN "Custom *.ini files found in: \n";
+            foreach $anyINIfile (@anyINI) {
+                chomp($anyINIfile);
+                print YELLOW "\t \\_ $anyINIfile\n";
             }
         }
         print "\n";
     }
+}
+
+# Check for custom (user) httpd.conf files
+if ( -e ("/etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN/") ) {
+    print YELLOW
+"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN\n";
+}
+if ( -e ("/etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN/") ) {
+    print YELLOW
+"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN\n";
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
@@ -936,9 +925,10 @@ if ( -e ("/var/cpanel/suspended/$username") ) {
     chomp($REASON);
     $SUSP = 1;
 }
+
 print WHITE "Suspended: ";
 if ($SUSP) {
-    print RED "YES!";
+    print RED "YES! (Since: " . scalar localtime($SUSPEND_TIME) . ")";
     print WHITE " - Reason: " . CYAN $REASON unless ( $REASON eq "" );
 }
 else {
@@ -958,7 +948,7 @@ print WHITE "Count of other domains: ["
 &border;
 
 # END OF BASIC INFORMATION (no switches were added)
-# ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were added)
+# ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were passed/added)
 
 # DOMAIN INFO (ALIASES, ADDON, SUB)
 my $SUB   = "";
@@ -1669,8 +1659,6 @@ sub cruft_check {
       /etc/demoids
       /etc/demodomains
       /etc/ssldomains
-      /etc/apache2/conf/httpd.conf
-      /usr/local/apache/conf/httpd.conf
       /var/cpanel/databases/users.db
     );
 
@@ -1803,11 +1791,36 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/var/named/$QUERY.db", $dirstatus );
 
+        # Check /etc/apache2/logs/domlogs/$QUERY
+        my $dirstatus = &check_dir("/etc/apache2/logs/domlogs/$QUERY");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
+
         # Check /etc/named.conf file
         my $dirstatus = &check_file_existance( "/etc/named.conf", $QUERY );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/named.conf", $dirstatus );
+
+        my $isEA4 = &isEA4;
+        if ($isEA4) {
+            my $dirstatus =
+              &check_file_existance( "/etc/apache2/conf/httpd.conf",
+                $MAINDOMAIN );
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            &print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+        }
+        else {
+            my $dirstatus =
+              &check_file_existance( "/usr/local/apache/conf/httpd.conf",
+                $MAINDOMAIN );
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            &print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
+        }
+
     }
     else {
         my $dirstatus = &check_dir("/etc/valiases/$MAINDOMAIN");
@@ -1827,20 +1840,35 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
 
+        # Check /etc/apache2/logs/domlogs/$MAINDOMAIN
+        my $dirstatus = &check_dir("/etc/apache2/logs/domlogs/$MAINDOMAIN");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN", $dirstatus );
+
         # Check /etc/named.conf file
         my $dirstatus = &check_file_existance( "/etc/named.conf", $MAINDOMAIN );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/named.conf", $dirstatus );
 
-        # Check for php-fpm conf files
-        my $dirstatus =
-          &check_dir("/opt/cpanel/ea-php*/root/etc/php-fpm.d/$MAINDOMAIN.conf");
-        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-        else              { $dirstatus = RED "[MISSING]"; }
-        &print_output(
-            "/opt/cpanel/ea-php*/root/etc/php-fpm.d/$MAINDOMAIN.conf",
-            $dirstatus );
+        my $isEA4 = &isEA4;
+        if ($isEA4) {
+            my $dirstatus =
+              &check_file_existance( "/etc/apache2/conf/httpd.conf",
+                $MAINDOMAIN );
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            &print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+        }
+        else {
+            my $dirstatus =
+              &check_file_existance( "/usr/local/apache/conf/httpd.conf",
+                $MAINDOMAIN );
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            &print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
+        }
     }
 
     # Check for DNS Clustering
@@ -1975,20 +2003,7 @@ sub check_file_existance {
     my $FoundLine = "";
     if ( -e ($TheFile) ) {
 
-        # File exists, open it and read into array
-        #        open( TheFile, "$TheFile" );
-        #        @TheFileData = <TheFile>;
-        #        close(TheFile);
-        #        foreach $DataLine (@TheFileData) {
-        #            chomp($DataLine);
-
-        #if ( $DataLine =~ m/\b$TheSearchString\b/ ) {
-        #            if ( $DataLine =~ m/^$TheSearchString/ ) {
-        #                $FoundLine = 1;
-        #                last;
-        #            }
-        #        }
-        $FoundLine = qx[ grep '$TheSearchString' $TheFile ];
+        $FoundLine = qx[ grep -w '$TheSearchString' $TheFile ];
         if   ($FoundLine) { return 1; }
         else              { return 0; }
     }
@@ -2309,6 +2324,17 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
 qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
             chomp($mbformat);
             print YELLOW "\t \t \\_ Account is using the $mbformat format.\n";
+        }
+
+        # Check rcube.db for corruption
+        if ( -e ("$RealHome/etc/$DOMAIN/$emailacctline.rcube.db") ) {
+            print CYAN
+"\t\t \\_ Checking $RealHome/etc/$DOMAIN/$emailacctline.rcube.db for corruption: ";
+            my $rcubechk =
+              SQLiteDBChk("$RealHome/etc/$DOMAIN/$emailacctline.rcube.db");
+            if ( $rcubechk =~ m/ok/ ) {
+                print GREEN "OK\n";
+            }
         }
 
    # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
@@ -2981,3 +3007,31 @@ qx[ /usr/local/cpanel/3rdparty/bin/perl -MCpanel::Validate::Username -MData::Dum
         }
     }
 }
+
+sub SQLiteDBChk {
+    my $lcDB = $_[0];
+    my $dbh =
+      DBI->connect( "dbi:SQLite:dbname=$lcDB", "", "",
+        { RaiseError => 1, HandleError => \&handle_error },
+      ) or die $DBI::errstr;
+    my $sth = $dbh->prepare("pragma quick_check");
+    if ($result) {
+        print RED $result . "\n";
+        return;
+    }
+    $sth->execute() or die $DBI::errstr;
+    my @row;
+    while ( @row = $sth->fetchrow_array() ) {
+        $result = "@row";
+    }
+    $sth->finish();
+    $dbh->disconnect();
+    return $result;
+}
+
+sub handle_error {
+    my $error = shift;
+    $result = "Corrupted!";
+    return $result;
+}
+
