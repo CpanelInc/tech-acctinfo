@@ -36,6 +36,7 @@ use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
 use Time::Piece;
 use Time::Seconds;
+use String::Random;
 use Net::DNS;
 use Socket;
 use DBI;
@@ -834,7 +835,7 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
     # Search /home/username for any php.ini files (unless --skipfind)
     if ( $skipfind == 0 ) {
-        my @anyINI = qx [ find $RealHome -name '*.ini' ];
+        my @anyINI = qx [ find $RealHome -maxdepth 3 -name '*.ini' ];
         my $anyINIfile;
         if (@anyINI) {
             print GREEN "Custom *.ini files found in: \n";
@@ -899,6 +900,39 @@ else {    ##  ONLY 1 A RECORED RETURNED.
         print CYAN $ResolvedIP . " " . RED $ResolvesToDetail;
     }
     print "\n";
+}
+
+# Check to see if domain name is in httpd.conf
+my $FoundInHTTPDconf;
+if ($isEA4) {
+    if ($IS_USERNAME) {
+        $FoundInHTTPDconf = qx[ grep -w '$QUERY' /etc/apache2/conf/httpd.conf ];
+    }
+    else {
+        $FoundInHTTPDconf =
+          qx[ grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf ];
+    }
+}
+else {
+    if ($IS_USERNAME) {
+        $FoundInHTTPDconf =
+          qx[ grep -w '$QUERY' /usr/local/apache/conf/httpd.conf ];
+    }
+    else {
+        $FoundInHTTPDconf =
+          qx[ grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf ];
+    }
+}
+if ( !($FoundInHTTPDconf) ) {
+    if ($IS_USERNAME) {
+        print RED "[WARN] "
+          . YELLOW "- $QUERY is missing from httpd.conf file!\n";
+    }
+    else {
+        print RED "[WARN] "
+          . YELLOW "- $MAINDOMAIN is missing from httpd.conf file!\n";
+    }
+    $defaultsite = 1;
 }
 
 if ($defaultsite) {
@@ -1391,6 +1425,13 @@ sub FindUser() {
         print RED "[WARNING] - "
           . $SearchFor
           . WHITE " is a reserved username!\n";
+        my $RandomString  = new String::Random;
+        my $SuggestedUser = $RandomString->randpattern("cccccc");
+        print YELLOW
+"You can use the following API call to change $SearchFor to for example: $SearchFor$SuggestedUser\n";
+        print BOLD MAGENTA
+"/usr/sbin/whmapi1 modifyacct user=$SearchFor newuser=$SearchFor$SuggestedUser\n";
+        exit;
     }
     my $UserLine  = "";
     my $TheDOMAIN = "";
@@ -1834,6 +1875,11 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         &print_output( "/etc/vfilters/$MAINDOMAIN", $dirstatus );
 
+        my $dirstatus = &check_dir("/etc/vdomainaliases/$MAINDOMAIN");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        &print_output( "/etc/vdomainaliases/$MAINDOMAIN", $dirstatus );
+
         # Check /var/named/$MAINDOMAIN.db file
         my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -2198,8 +2244,8 @@ sub display_mail_info {
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
         print YELLOW "[INFO] - "
           . $DOMAIN
-          . CYAN
-" listed in the /etc/vdomainaliases directory. Existing accounts/autoresponders will NOT forward!\n";
+          . BOLD CYAN " listed in the /etc/vdomainaliases directory. "
+          . YELLOW "Existing accounts/autoresponders\nwill NOT forward!\n";
     }
 
     print "Email accounts for $DOMAIN: \n";
