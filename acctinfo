@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.83";
+my $VERSION = "2.4.84";
 
 our $sslsyscertdir;
 our $sslsubject;
