@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.84";
+my $VERSION = "2.4.85";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -153,6 +153,27 @@ chomp($username);
 if ( !($MAINDOMAIN) ) {
     $username   = FindUser($QUERY);
     $MAINDOMAIN = FindMainDomain($username);
+}
+
+# Add reserved username check here
+my $UserIsReserved;
+if ($username) {
+    $UserIsReserved = isUserReserved($username);
+}
+else {
+    $UserIsReserved = isUserReserved($QUERY);
+}
+if ($UserIsReserved) {
+    print RED "[WARNING] - " . WHITE " Reserved username detected!\n";
+    if ($username) {
+        my $RandomString  = new String::Random;
+        my $SuggestedUser = $RandomString->randpattern("cccccc");
+        print YELLOW
+"You can use the following API call to change $username to for example: $username$SuggestedUser\n";
+        print BOLD MAGENTA
+"/usr/sbin/whmapi1 modifyacct user=$username newuser=$username$SuggestedUser\n";
+        exit;
+    }
 }
 
 # If both variables are still empty, neither the username nor the domain name were found!
@@ -1419,20 +1440,7 @@ sub FindMainDomain() {
 }
 
 sub FindUser() {
-    my $SearchFor      = $_[0];
-    my $UserIsReserved = isUserReserved($SearchFor);
-    if ($UserIsReserved) {
-        print RED "[WARNING] - "
-          . $SearchFor
-          . WHITE " is a reserved username!\n";
-        my $RandomString  = new String::Random;
-        my $SuggestedUser = $RandomString->randpattern("cccccc");
-        print YELLOW
-"You can use the following API call to change $SearchFor to for example: $SearchFor$SuggestedUser\n";
-        print BOLD MAGENTA
-"/usr/sbin/whmapi1 modifyacct user=$SearchFor newuser=$SearchFor$SuggestedUser\n";
-        exit;
-    }
+    my $SearchFor = $_[0];
     my $UserLine  = "";
     my $TheDOMAIN = "";
     my $TheUSER   = "";
@@ -2381,6 +2389,9 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
             if ( $rcubechk =~ m/ok/ ) {
                 print GREEN "OK\n";
             }
+            else {
+                print RED $rcubechk . "\n";
+            }
         }
 
    # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
@@ -3056,28 +3067,30 @@ qx[ /usr/local/cpanel/3rdparty/bin/perl -MCpanel::Validate::Username -MData::Dum
 
 sub SQLiteDBChk {
     my $lcDB = $_[0];
+    $result = "";
     my $dbh =
       DBI->connect( "dbi:SQLite:dbname=$lcDB", "", "",
         { RaiseError => 1, HandleError => \&handle_error },
       ) or die $DBI::errstr;
     my $sth = $dbh->prepare("pragma quick_check");
     if ($result) {
-        print RED $result . "\n";
-        return;
+        $result = "Corrupted";
     }
-    $sth->execute() or die $DBI::errstr;
-    my @row;
-    while ( @row = $sth->fetchrow_array() ) {
-        $result = "@row";
+    else {
+        $sth->execute() or die $DBI::errstr;
+        my @row;
+        while ( @row = $sth->fetchrow_array() ) {
+            $result = "@row";
+        }
+        $sth->finish();
+        $dbh->disconnect();
     }
-    $sth->finish();
-    $dbh->disconnect();
     return $result;
 }
 
 sub handle_error {
     my $error = shift;
-    $result = "Corrupted!";
+    $result = 1;
     return $result;
 }
 
