@@ -12,15 +12,16 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.85";
+my $VERSION = "2.4.86";
 
 our $sslsyscertdir;
 our $sslsubject;
 our $startdate;
 our $expiredate;
 our $isSelfSigned;
-our $CPVersion   = `cat /usr/local/cpanel/version`;
-our $SSLProvider = getSSLprovider();
+our $CPVersion = `cat /usr/local/cpanel/version`;
+
+#our $SSLProvider = getSSLprovider();
 our $result;
 chomp($CPVersion);
 
@@ -155,7 +156,7 @@ if ( !($MAINDOMAIN) ) {
     $MAINDOMAIN = FindMainDomain($username);
 }
 
-# Add reserved username check here
+# Check for reserved username
 my $UserIsReserved;
 if ($username) {
     $UserIsReserved = isUserReserved($username);
@@ -172,7 +173,6 @@ if ($UserIsReserved) {
 "You can use the following API call to change $username to for example: $username$SuggestedUser\n";
         print BOLD MAGENTA
 "/usr/sbin/whmapi1 modifyacct user=$username newuser=$username$SuggestedUser\n";
-        exit;
     }
 }
 
@@ -1262,6 +1262,13 @@ qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | gr
         else {
             print YELLOW $MAINDOMAIN . "\n";
             print WHITE "\t \\_ " . CYAN . "No SSL found.\n";
+        }
+        if ( -e ("/var/cpanel/ssl/autossl/excludes/$username.json") ) {
+            my $isExcluded =
+qx[ python -mjson.tool /var/cpanel/ssl/autossl/excludes/$username.json|grep '"excluded_domains": \\[\\]' ];
+            if ( !($isExcluded) ) {
+                print BOLD MAGENTA "*** Some domains may be excluded ***\n";
+            }
         }
 
         foreach $SUB (@SUBDOMAINS) {

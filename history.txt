@@ -1,3 +1,6 @@
+V2.4.86- Fix reserved username check so it continues (does not exit) - Reported by Kaden P.
+V2.4.86- Add check for possible excluded domains in AutoSSL check
+
 V2.4.85- Fix Roundcube db check in --mail function.  
 V2.4.85- Fix reserved username check. 
 
