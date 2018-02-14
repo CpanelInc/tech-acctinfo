@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.86";
+my $VERSION = "2.4.87";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -20,8 +20,6 @@ our $startdate;
 our $expiredate;
 our $isSelfSigned;
 our $CPVersion = `cat /usr/local/cpanel/version`;
-
-#our $SSLProvider = getSSLprovider();
 our $result;
 chomp($CPVersion);
 
@@ -113,7 +111,7 @@ if ($clearscreen) {
 print "<c>\n" unless ($nocodeblock);
 print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
-    &Usage;
+    Usage();
 }
 
 my $conf      = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
@@ -130,7 +128,7 @@ my $IS_USERNAME = 1;
 my $QUERY = @ARGV[0];
 chomp($QUERY);
 if ( $QUERY eq "" ) {
-    &Usage;
+    Usage();
 }
 $QUERY = lc($QUERY);
 if ( index( $QUERY, '.' ) != -1 ) {
@@ -179,7 +177,7 @@ if ($UserIsReserved) {
 # If both variables are still empty, neither the username nor the domain name were found!
 if ( $MAINDOMAIN eq "" and $username eq "" ) {
     if ($cruft) {
-        &cruft_check;
+        cruft_check();
     }
     print
 "Error - $QUERY not found on $HOSTNAME (or missing from /etc/userdomains file)\n";
@@ -189,7 +187,7 @@ if ( $MAINDOMAIN eq "" and $username eq "" ) {
 }
 
 if ($scan) {
-    &scan;
+    scan();
     exit;
 }
 
@@ -306,7 +304,7 @@ my $addoncnt = @ADDONDOMAINS;
 my $parkcnt  = @PARKEDDOMAINS;
 
 if ($cruft) {
-    &cruft_check;
+    cruft_check();
 }
 
 # We already have the $user_conf hash variable.
@@ -483,11 +481,12 @@ else {
 # Get home directory from /etc/passwd
 my @PASSWDS = undef;
 our $RealHome    = "";
-our $SSLProvider = getSSLprovider();
+our $SSLProvider = getSSLProvider();
 our $passline    = "";
 my $RealShell = "";
 my $UID       = "";
 my $GID       = "";
+
 open( PASSWD, "/etc/passwd" );
 @PASSWDS = <PASSWD>;
 close(PASSWD);
@@ -533,17 +532,8 @@ my ($maindocroot) =
 print "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n";
 
 print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
-
-# Perm check - make sure $RealHome is 711 - Warn if not!
-if ( -e ("$RealHome") ) {
-    my $statmode = ( stat($RealHome) )[2] & 07777;
-    $statmode = sprintf "%lo", $statmode;
-    if ( $statmode != 711 ) {
-        print RED " - [WARN] - $RealHome permissions are not 711 [$statmode]\n";
-        print YELLOW
-"(Seeing require_files: permission denied errors in /var/log/exim_mainlog? - This may be why)\n";
-    }
-}
+print "\n";
+checkperms();
 print "\n";
 
 # Check if user is in demo mode
@@ -605,7 +595,7 @@ print GREEN "$IS_PARKED\n" unless ( $IS_PARKED eq "" );
 print GREEN "$IS_ADDON\n"  unless ( $IS_ADDON eq "" );
 print GREEN "$IS_SUB\n"    unless ( $IS_SUB eq "" );
 print WHITE "Shell: " . CYAN $RealShell . "\n";
-&ChkForIntegration;
+ChkForIntegration();
 
 # check if user is in /etc/ftpusers
 my $ftpblock = "";
@@ -740,7 +730,7 @@ print WHITE "Backup Enabled: "
 my $PHPDefaultVersion;
 my $PHPversion;
 my $isEA4       = 0;
-my $cageFSStats = &check_for_cagefs();
+my $cageFSStats = check_for_cagefs();
 if ($cageFSStats) {
     print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
 }
@@ -782,14 +772,14 @@ if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
     $skipEA4 = 1;
 }
 
-$isEA4 = &isEA4;
+$isEA4 = isEA4();
 my $clPHPActive = 0;
 if ( $isEA4 and !$skipEA4 ) {
-    $PHPDefaultVersion = &get_system_php_version();
+    $PHPDefaultVersion = get_system_php_version();
     if ( $PHPDefaultVersion eq "" ) {
         $PHPDefaultVersion = "UNKNOWN";
     }
-    $PHPversion = &get_php_version();
+    $PHPversion = get_php_version();
     if ( $PHPversion eq "" ) {
         $PHPversion = "inherit";
     }
@@ -902,7 +892,7 @@ if ( $TotalARecords > 1 ) {
     print "(multiple A records found) \n";
     foreach $ResolvedIP (@ResolvedIP) {
         chomp($ResolvedIP);
-        $ResolvesToDetail = &check_resolved_ip($ResolvedIP);
+        $ResolvesToDetail = check_resolved_ip($ResolvedIP);
         print CYAN "\t \\_" . $ResolvedIP . " " . RED $ResolvesToDetail . "\n";
     }
 }
@@ -917,7 +907,7 @@ else {    ##  ONLY 1 A RECORED RETURNED.
         $defaultsite = 1;
     }
     else {
-        $ResolvesToDetail = &check_resolved_ip($ResolvedIP);
+        $ResolvesToDetail = check_resolved_ip($ResolvedIP);
         print CYAN $ResolvedIP . " " . RED $ResolvesToDetail;
     }
     print "\n";
@@ -962,7 +952,7 @@ if ($defaultsite) {
 }
 
 if ( $all or $mail ) {
-    &display_mail_info;
+    display_mail_info();
 }
 
 # Last Login IP
@@ -1000,7 +990,7 @@ print WHITE "Count of other domains: ["
   . YELLOW "ADDONS: "
   . GREEN $addoncnt
   . WHITE "]\n";
-&border;
+border();
 
 # END OF BASIC INFORMATION (no switches were added)
 # ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were passed/added)
@@ -1017,7 +1007,7 @@ if ( $subcnt + $addoncnt + $parkcnt > 1
       . WHITE " ("
       . GREEN $username
       . WHITE ")\n";
-    &smborder;
+    smborder();
 }
 if ( $all or $listsubs ) {
     print YELLOW "Sub Domains: ";
@@ -1035,7 +1025,7 @@ if ( $all or $listsubs ) {
           . GREEN $username
           . WHITE ")\n";
     }
-    &smborder;
+    smborder();
 }
 
 if ( $all or $listaddons ) {
@@ -1054,7 +1044,7 @@ if ( $all or $listaddons ) {
           . GREEN $username
           . WHITE ")\n";
     }
-    &smborder;
+    smborder();
 }
 
 if ( $all or $listparked or $listaliased ) {
@@ -1073,12 +1063,12 @@ if ( $all or $listparked or $listaliased ) {
           . GREEN $username
           . WHITE ")\n";
     }
-    &smborder;
+    smborder();
 }
 
 # RESELLER INFO
 if ( $reselleraccts or $all ) {
-    if ($all) { &border; }
+    if ($all) { border(); }
     my $owned_by_reseller = "";
     if ( $Is_Reseller and $ResellerAcctsCnt > 0 ) {
         print CYAN $MAINDOMAIN
@@ -1090,7 +1080,7 @@ if ( $reselleraccts or $all ) {
             chomp($owned_by_reseller);
             print BOLD YELLOW ON_BLACK "\t \\_ $owned_by_reseller\n";
         }
-        &border;
+        border();
     }
     else {
         print WHITE "No Reseller accounts found for "
@@ -1098,12 +1088,12 @@ if ( $reselleraccts or $all ) {
           . WHITE " ("
           . GREEN $username
           . WHITE ")\n";
-        &border;
+        border();
     }
 }
 
 if ( $resellerperms or $all ) {
-    if ($all) { &border; }
+    if ($all) { border(); }
     my $DefaultPerm  = "";
     my $defaultRPerm = "";
     my @defaultperms =
@@ -1144,7 +1134,7 @@ if ( $resellerperms or $all ) {
                 }
             }
         }
-        &border;
+        border();
     }
 }
 
@@ -1187,7 +1177,7 @@ if ( $listdbs or $all ) {
             print YELLOW "\t \\_ " . $USERDB . "\n";
         }
     }
-    &smborder;
+    smborder();
 
     # PostGreSQL INFO
     my $psql_running = 0;
@@ -1224,12 +1214,12 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
         print RED "PostGreSQL server is not installed (or running) on "
           . MAGENTA $HOSTNAME . "\n";
     }
-    &border;
+    border();
 }
 
 if ( $listssls or $all ) {
     if ( $CPVersion lt "11.68.0.0" ) {
-        &oldlistssls;
+        oldlistssls();
     }
     else {
         $sslsyscertdir = "/var/cpanel/ssl/apache_tls/";
@@ -1248,7 +1238,7 @@ qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed
               . WHITE " ("
               . GREEN $username
               . WHITE ")\n";
-            &dispSSLdata($MAINDOMAIN);
+            dispSSLdata($MAINDOMAIN);
             print WHITE "Protecting the following Subject Alternative Names:\n";
             my $SAN;
             my @getSANS =
@@ -1282,7 +1272,7 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -startdate -noout ];
 qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
                 $isSelfSigned =
 qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
-                &dispSSLdata($SUB);
+                dispSSLdata($SUB);
                 print WHITE
                   "Protecting the following Subject Alternative Names:\n";
                 my $SAN;
@@ -1301,7 +1291,7 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
         }
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
-        if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
+        if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
             my $SSL_PENDING =
 qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
@@ -1371,7 +1361,7 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
         else {
             print GREEN "\t \\_ None\n";
         }
-        &border;
+        border();
     }
 }
 
@@ -1532,7 +1522,7 @@ sub check_resolved_ip {
         $RetVal      = " <-- CloudFlare DNS";
         $defaultsite = 1;
     }
-    my $IS_NAT = &check_for_nat($IP2CHK);
+    my $IS_NAT = check_for_nat($IP2CHK);
     if ($IS_NAT) {
         $RetVal = " NAT detected ($IS_NAT => $IP2CHK)";
         if ( $IS_NAT eq $IPADDR ) {
@@ -1549,9 +1539,9 @@ sub check_resolved_ip {
 }
 
 sub cruft_check {
-    &border;
+    border();
     print CYAN "CRUFT CHECK\n";
-    &border;
+    border();
     my $maxwidth       = 25;
     my $file2search    = "";
     my $TheStatus      = "";
@@ -1693,7 +1683,7 @@ sub cruft_check {
             $QUERY = $username;
         }
     }
-    &smborder;
+    smborder();
 
     my @FILES2SEARCH = qw(
       /etc/passwd
@@ -1723,7 +1713,7 @@ sub cruft_check {
         if ( !( -s ($file2search) ) ) {
             my $filestat = $file2search . " is either empty or missing";
             my $fileskip = CYAN "[SKIPPING]";
-            &print_output( $filestat, $fileskip );
+            print_output( $filestat, $fileskip );
             next;
         }
         if ( $username eq "" ) {
@@ -1733,57 +1723,57 @@ sub cruft_check {
             $MAINDOMAIN = $QUERY;
         }
         if ($useQuery) {
-            $filestatus = &check_file_existance( $file2search, $QUERY );
+            $filestatus = check_file_existance( $file2search, $QUERY );
         }
         else {
-            $filestatus = &check_file_existance( $file2search, $username );
+            $filestatus = check_file_existance( $file2search, $username );
         }
         if ( !($filestatus) and !$useQuery ) {
-            $filestatus = &check_file_existance( $file2search, $MAINDOMAIN );
+            $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
         }
         if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
         else               { $filestatus = RED "[MISSING]"; }
-        &print_output( $file2search, $filestatus );
+        print_output( $file2search, $filestatus );
     }
     if ($username) {
 
         # Check for home directory and others to see if they exist
         my $hmCnt;
-        my $dirstatus = &check_dir("/$HOMEDIR/$username");
+        my $dirstatus = check_dir("/$HOMEDIR/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "$HOMEDIR/$username", $dirstatus );
+        print_output( "$HOMEDIR/$username", $dirstatus );
         if ( $dirstatus =~ m/MISSING/ ) {
             if ($HOMEMATCH) {
                 print "Checking other possible home directory locations...\n";
 
                 # Now check HOMEMATCH 1 through 9.
                 for ( $hmCnt = 1 ; $hmCnt < 10 ; $hmCnt = $hmCnt + 1 ) {
-                    my $dirstatus = &check_dir("/$HOMEMATCH$hmCnt/$username");
+                    my $dirstatus = check_dir("/$HOMEMATCH$hmCnt/$username");
                     if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
                     else              { $dirstatus = RED "[MISSING]"; }
-                    &print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
+                    print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
                 }
             }
         }
 
         # Check /var/cpanel/userdata/$username
-        my $dirstatus = &check_dir("/var/cpanel/userdata/$username");
+        my $dirstatus = check_dir("/var/cpanel/userdata/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/userdata/$username", $dirstatus );
+        print_output( "/var/cpanel/userdata/$username", $dirstatus );
 
         # Check main file in /var/cpanel/userdata/$username directory
-        my $dirstatus = &check_dir("/var/cpanel/userdata/$username/main");
+        my $dirstatus = check_dir("/var/cpanel/userdata/$username/main");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/userdata/$username/main", $dirstatus );
+        print_output( "/var/cpanel/userdata/$username/main", $dirstatus );
 
         # Check /var/cpanel/users/$username
-        my $dirstatus = &check_dir("/var/cpanel/users/$username");
+        my $dirstatus = check_dir("/var/cpanel/users/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/users/$username", $dirstatus );
+        print_output( "/var/cpanel/users/$username", $dirstatus );
         if ( $DNSLineCnt != $TotalDomainCnt ) {
             print RED
 "\t \\_ [WARN]: One or more DNS lines may be missing from this file!\n";
@@ -1791,37 +1781,36 @@ sub cruft_check {
 
         # Check if /var/cpanel/databases/grants_$username.yaml exists!
         my $dirstatus =
-          &check_dir("/var/cpanel/databases/grants_$username.yaml");
+          check_dir("/var/cpanel/databases/grants_$username.yaml");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/databases/grants_$username.yaml",
+        print_output( "/var/cpanel/databases/grants_$username.yaml",
             $dirstatus );
 
         my $yaml_json = ( $CPVersion lt "11.50.0.0" ) ? "yaml" : "json";
-        my $dirstatus =
-          &check_dir("/var/cpanel/databases/$username.$yaml_json");
+        my $dirstatus = check_dir("/var/cpanel/databases/$username.$yaml_json");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/databases/$username.$yaml_json",
+        print_output( "/var/cpanel/databases/$username.$yaml_json",
             $dirstatus );
         my $dbindex =
           ( $CPVersion lt "11.50.0.0" )
           ? "/var/cpanel/databases/dbindex.db"
           : "/var/cpanel/databases/dbindex.db.json";
-        my $dirstatus = &check_file_existance( $dbindex, $username );
+        my $dirstatus = check_file_existance( $dbindex, $username );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( $dbindex, $dirstatus );
-        my $dirstatus = &check_dir("/etc/proftpd/$username");
+        print_output( $dbindex, $dirstatus );
+        my $dirstatus = check_dir("/etc/proftpd/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/proftpd/$username", $dirstatus );
+        print_output( "/etc/proftpd/$username", $dirstatus );
 
         # Check for /var/cpanel/bandwidth/username.sqlite file.
-        my $dirstatus = &check_dir("/var/cpanel/bandwidth/$username.sqlite");
+        my $dirstatus = check_dir("/var/cpanel/bandwidth/$username.sqlite");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/cpanel/bandwidth/$username.sqlite", $dirstatus );
+        print_output( "/var/cpanel/bandwidth/$username.sqlite", $dirstatus );
 
     }
     else {
@@ -1830,105 +1819,105 @@ sub cruft_check {
     if ( !$IS_USERNAME ) {
 
         # Check /etc/valiases/$QUERY
-        my $dirstatus = &check_dir("/etc/valiases/$QUERY");
+        my $dirstatus = check_dir("/etc/valiases/$QUERY");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/valiases/$QUERY", $dirstatus );
+        print_output( "/etc/valiases/$QUERY", $dirstatus );
 
         # Check /etc/vfilters/$QUERY
-        my $dirstatus = &check_dir("/etc/vfilters/$QUERY");
+        my $dirstatus = check_dir("/etc/vfilters/$QUERY");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/vfilters/$QUERY", $dirstatus );
+        print_output( "/etc/vfilters/$QUERY", $dirstatus );
 
         # Check /var/named/$QUERY.db file
-        my $dirstatus = &check_dir("/var/named/$QUERY.db");
+        my $dirstatus = check_dir("/var/named/$QUERY.db");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/named/$QUERY.db", $dirstatus );
+        print_output( "/var/named/$QUERY.db", $dirstatus );
 
         # Check /etc/apache2/logs/domlogs/$QUERY
-        my $dirstatus = &check_dir("/etc/apache2/logs/domlogs/$QUERY");
+        my $dirstatus = check_dir("/etc/apache2/logs/domlogs/$QUERY");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
+        print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
 
         # Check /etc/named.conf file
-        my $dirstatus = &check_file_existance( "/etc/named.conf", $QUERY );
+        my $dirstatus = check_file_existance( "/etc/named.conf", $QUERY );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/named.conf", $dirstatus );
+        print_output( "/etc/named.conf", $dirstatus );
 
-        my $isEA4 = &isEA4;
+        my $isEA4 = isEA4();
         if ($isEA4) {
             my $dirstatus =
-              &check_file_existance( "/etc/apache2/conf/httpd.conf",
+              check_file_existance( "/etc/apache2/conf/httpd.conf",
                 $MAINDOMAIN );
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
             else              { $dirstatus = RED "[MISSING]"; }
-            &print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+            print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
         }
         else {
             my $dirstatus =
-              &check_file_existance( "/usr/local/apache/conf/httpd.conf",
+              check_file_existance( "/usr/local/apache/conf/httpd.conf",
                 $MAINDOMAIN );
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
             else              { $dirstatus = RED "[MISSING]"; }
-            &print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
+            print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
         }
 
     }
     else {
-        my $dirstatus = &check_dir("/etc/valiases/$MAINDOMAIN");
+        my $dirstatus = check_dir("/etc/valiases/$MAINDOMAIN");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/valiases/$MAINDOMAIN", $dirstatus );
+        print_output( "/etc/valiases/$MAINDOMAIN", $dirstatus );
 
         # Check /etc/vfilters/$MAINDOMAIN
-        my $dirstatus = &check_dir("/etc/vfilters/$MAINDOMAIN");
+        my $dirstatus = check_dir("/etc/vfilters/$MAINDOMAIN");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/vfilters/$MAINDOMAIN", $dirstatus );
+        print_output( "/etc/vfilters/$MAINDOMAIN", $dirstatus );
 
-        my $dirstatus = &check_dir("/etc/vdomainaliases/$MAINDOMAIN");
+        my $dirstatus = check_dir("/etc/vdomainaliases/$MAINDOMAIN");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/vdomainaliases/$MAINDOMAIN", $dirstatus );
+        print_output( "/etc/vdomainaliases/$MAINDOMAIN", $dirstatus );
 
         # Check /var/named/$MAINDOMAIN.db file
-        my $dirstatus = &check_dir("/var/named/$MAINDOMAIN.db");
+        my $dirstatus = check_dir("/var/named/$MAINDOMAIN.db");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
+        print_output( "/var/named/$MAINDOMAIN.db", $dirstatus );
 
         # Check /etc/apache2/logs/domlogs/$MAINDOMAIN
-        my $dirstatus = &check_dir("/etc/apache2/logs/domlogs/$MAINDOMAIN");
+        my $dirstatus = check_dir("/etc/apache2/logs/domlogs/$MAINDOMAIN");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN", $dirstatus );
+        print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN", $dirstatus );
 
         # Check /etc/named.conf file
-        my $dirstatus = &check_file_existance( "/etc/named.conf", $MAINDOMAIN );
+        my $dirstatus = check_file_existance( "/etc/named.conf", $MAINDOMAIN );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
-        &print_output( "/etc/named.conf", $dirstatus );
+        print_output( "/etc/named.conf", $dirstatus );
 
-        my $isEA4 = &isEA4;
+        my $isEA4 = isEA4();
         if ($isEA4) {
             my $dirstatus =
-              &check_file_existance( "/etc/apache2/conf/httpd.conf",
+              check_file_existance( "/etc/apache2/conf/httpd.conf",
                 $MAINDOMAIN );
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
             else              { $dirstatus = RED "[MISSING]"; }
-            &print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+            print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
         }
         else {
             my $dirstatus =
-              &check_file_existance( "/usr/local/apache/conf/httpd.conf",
+              check_file_existance( "/usr/local/apache/conf/httpd.conf",
                 $MAINDOMAIN );
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
             else              { $dirstatus = RED "[MISSING]"; }
-            &print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
+            print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
         }
     }
 
@@ -2049,7 +2038,7 @@ qx[ /usr/bin/psql -t -h localhost --username=postgres -c 'select usename from pg
         print "\nPostGreSQL server is not installed (or running) on "
           . MAGENTA $HOSTNAME . "\n";
     }
-    &border;
+    border();
     print "</c>\n" unless ($nocodeblock);
     exit;
 }
@@ -2242,7 +2231,7 @@ sub display_mail_info {
     closedir(EMAILACCTS);
     my @SORTED2 = sort(@EMAILACCTS);
     @EMAILACCTS = @SORTED2;
-    &smborder;
+    smborder();
 
     # Check for suspended from outgoing email
     my $SMTPUserSusp = qx[ grep $username /etc/outgoing_mail_suspended_users ];
@@ -2436,7 +2425,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
             }
         }
     }
-    &smborder;
+    smborder();
 
 # Now let's get the MX record and make sure the A record for it points to this server.
     print "Checking MX records for $DOMAIN...\n";
@@ -2461,7 +2450,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
                 my @ARecordForMX = getArecords($MXRecord);
                 foreach $ARecordForMX (@ARecordForMX) {
                     chomp($ARecordForMX);
-                    my $IS_NAT = &check_for_nat($ARecordForMX);
+                    my $IS_NAT = check_for_nat($ARecordForMX);
                     if ($IS_NAT) {    ## NAT IP ADDRESS RETURNED!
                         $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
                         if ($Is_IP_OnServer) {
@@ -2540,7 +2529,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
 
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
-    &smborder;
+    smborder();
     my $IsInRemoteDomains = qx[ egrep -w '^$DOMAIN' /etc/remotedomains ];
     my $IsInLocalDomains  = qx[ egrep -w '^$DOMAIN' /etc/localdomains ];
     chomp($IsInRemoteDomains);
@@ -2592,7 +2581,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
     my $emailfwd;
     my $fwdtype;
     my $listfwd;
-    &smborder;
+    smborder();
     print "Aliases/Forwarders:\n";
     open( FORWARDERS, "/etc/valiases/$DOMAIN" );
     my @FWDS = <FORWARDERS>;
@@ -2629,7 +2618,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
 
     # get any system level filters (from /etc/vfilters/$DOMAIN file)
     my $gfilter;
-    &smborder;
+    smborder();
     print "Global Level (system) Filters:\n";
     open( GFILTFILE, "/etc/vfilters/$DOMAIN" );
     my @GFILTER    = <GFILTFILE>;
@@ -2745,7 +2734,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
     print WHITE "Using Custom IP (/etc/mailips): "
       . CYAN $CustomMailIP . " "
       . YELLOW $CustomMailIPText . "\n";
-    &border;
+    border();
 }
 
 sub getMXrecord {
@@ -2812,7 +2801,7 @@ sub scan {
     print "Scan started on $scanstarttime\n";
 
     foreach $SEARCHSTRING (@SEARCHSTRING) {
-        &spin;
+        spin();
         chomp($SEARCHSTRING);
         my $SCAN =
 qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude-dir=access-logs -w "$SEARCHSTRING" $RealHome/* ];
@@ -2848,27 +2837,24 @@ sub spin {
     print STDERR "\b$spincounter";
 }
 
-sub getSSLprovider {
+sub getSSLProvider {
     my $RetVal = "";
-    if ( !( -e ("/var/cpanel/autossl.json") ) ) {
-        $RetVal = "Disabled";
-        return $RetVal;
-    }
-    my $CurrentProvider =
-      qx[ grep '"provider":"cPanel"' /var/cpanel/autossl.json ];
-    if ($CurrentProvider) { $RetVal = "cPanel (Powered by Comodo)"; }
-    my $CurrentProvider =
-      qx[ grep '"provider":"LetsEncrypt"' /var/cpanel/autossl.json ];
-    if ($CurrentProvider) { $RetVal = "Let's Encrypt"; }
-    my $CurrentProvider = qx[ grep '"provider":null' /var/cpanel/autossl.json ];
-    if ($CurrentProvider) { $RetVal = "Disabled"; }
+    my $SSLmodule =
+qx[ whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' ];
+    ($RetVal) = ( split( /:/, $SSLmodule ) )[1];
+    chomp($RetVal);
+    if ( $RetVal eq "" ) { $RetVal = "Disabled"; }
     return $RetVal;
 }
 
 sub ChkForIntegration {
-    return unless ( -e "/var/cpanel/integration/dynamicui/$username" );
-    print YELLOW "[NOTE] * Integration links found in " . GREEN
-      . "/var/cpanel/integration/dynamicui/$username\n";
+    my @ILINKS =
+      qx[ whmapi1 list_integration_links user=$username | grep 'app:' ];
+    my $cnt = @ILINKS;
+    if ( $cnt > 0 ) {
+        print YELLOW "[NOTE] * Integration links found in " . GREEN
+          . "/var/cpanel/integration/dynamicui/$username\n";
+    }
 }
 
 sub dispSSLdata {
@@ -3021,7 +3007,7 @@ qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
     if ( $CPVersion gt "11.60.0.26" ) {
-        if ( $SSLProvider eq "cPanel (Powered by Comodo)" ) {
+        if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
             my $SSL_PENDING =
 qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
@@ -3056,7 +3042,7 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
     else {
         print GREEN "\t \\_ None\n";
     }
-    &border;
+    border();
 }
 
 sub isUserReserved {
@@ -3101,3 +3087,86 @@ sub handle_error {
     return $result;
 }
 
+sub checkperms {
+    if ( !-e ("$RealHome") ) {
+        print RED"[WARN] - $RealHome directory is missing!";
+    }
+    else {
+        my $statmode = ( stat($RealHome) )[2] & 07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 711 ) {
+            print RED
+              "[WARN] - $RealHome permissions are not 711 [$statmode]\n";
+        }
+    }
+    my $fuid       = ( stat "$RealHome" )[4];
+    my $fgid       = ( stat "$RealHome" )[5];
+    my $fileowner  = ( getpwuid $fuid )[0];
+    my $groupowner = ( getgrgid $fgid )[0];
+    if ( $fileowner ne $username or $groupowner ne $username ) {
+        print RED
+"[WARN] - Incorrect ownership/group for $RealHome [$fileowner:$groupowner]";
+    }
+
+    if ( !-e ("$RealHome/public_html") ) {
+        print RED"[WARN] - $RealHome/public_html directory is missing!";
+    }
+    else {
+        my $statmode = ( stat("$RealHome/public_html") )[2] & 07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 750 ) {
+            print RED
+"[WARN] - $RealHome/public_html permissions are not 750 [$statmode]";
+        }
+    }
+    my $fuid       = ( stat "$RealHome/public_html" )[4];
+    my $fgid       = ( stat "$RealHome/public_html" )[5];
+    my $fileowner  = ( getpwuid $fuid )[0];
+    my $groupowner = ( getgrgid $fgid )[0];
+    if ( $fileowner ne $username
+        or ( $groupowner ne $username ) and ( $groupowner ne "nobody" ) )
+    {
+        print RED
+"[WARN] - Incorrect ownership/group for $RealHome/public_html [$fileowner:$groupowner]";
+    }
+
+    if ( !-e ("$RealHome/etc") ) {
+        print RED"[WARN] - $RealHome/etc directory is missing!";
+    }
+    else {
+        my $statmode = ( stat("$RealHome/etc") )[2] & 07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 750 ) {
+            print RED
+              "[WARN] - $RealHome/etc permissions are not 750 [$statmode]";
+        }
+    }
+    my $fuid       = ( stat "$RealHome/etc" )[4];
+    my $fgid       = ( stat "$RealHome/etc" )[5];
+    my $fileowner  = ( getpwuid $fuid )[0];
+    my $groupowner = ( getgrgid $fgid )[0];
+    if ( $fileowner ne $username or $groupowner ne "mail" ) {
+        print RED
+"[WARN] - Incorrect ownership/group for $RealHome/etc [$fileowner:$groupowner] Default: user:mail";
+    }
+
+    if ( !-e ("$RealHome/mail") ) {
+        print RED"[WARN] - $RealHome/mail folder is missing!";
+    }
+    else {
+        my $statmode = ( stat("$RealHome/mail") )[2] & 07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 751 ) {
+            print RED
+              "[WARN] - $RealHome/mail permissions are not 751 [$statmode]";
+        }
+    }
+    my $fuid       = ( stat "$RealHome/mail" )[4];
+    my $fgid       = ( stat "$RealHome/mail" )[5];
+    my $fileowner  = ( getpwuid $fuid )[0];
+    my $groupowner = ( getgrgid $fgid )[0];
+    if ( $fileowner ne $username or $groupowner ne $username ) {
+        print RED
+"[WARN] - Incorrect ownership/group for $RealHome/mail [$fileowner:$groupowner]";
+    }
+}
