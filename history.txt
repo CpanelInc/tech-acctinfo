@@ -1,3 +1,5 @@
+V2.4.88- Reworked CAA check and included DNSSEC syntax check 
+
 V2.4.87- Add check for missing ~/public_html ~/etc and ~/mail directories. Also checks 
          permissions and ownership and warns if they are incorrect.
 V2.4.87- Redid ssl provider check - uses whmapi1 call now. 

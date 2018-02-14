@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.87";
+my $VERSION = "2.4.88";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -75,6 +75,7 @@ my $nocodeblock   = undef;
 my $skipquota     = 0;
 my $skipfind      = 0;
 our $spincounter;
+our $CAADOMAIN;
 
 GetOptions(
     'listdbs'       => \$listdbs,
@@ -1331,34 +1332,43 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
         # Check for CAA records here.
         my @HasCAA;
         print "Checking for CAA records: \n";
-
-        #my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
-        if ($IS_USERNAME) {
-            @HasCAA = qx[ dig +noall +answer $MAINDOMAIN CAA | grep -v CNAME ];
-        }
-        else {
-            @HasCAA = qx[ dig +noall +answer $QUERY CAA | grep -v CNAME ];
-        }
+        my $TLD;
         my $CAARecord;
-        if (@HasCAA) {
-            if ($IS_USERNAME) {
-                print YELLOW
-                  "[NOTE] * CAA records were found for $MAINDOMAIN\n";
-            }
-            else {
-                print YELLOW "[NOTE] * CAA records were found for $QUERY\n";
-            }
-            print GREEN
-              "SSL Certificates can only be issued from the following CA's:\n";
-            my ( $CAARecord1, $CAARecord2, $CAARecord3 );
-            foreach $CAARecord (@HasCAA) {
-                chomp($CAARecord);
-                ( $CAARecord1, $CAARecord2, $CAARecord3 ) =
-                  ( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
-                print CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n";
-            }
+        if ($IS_USERNAME) {
+            $TLD = substr( $MAINDOMAIN, rindex( $MAINDOMAIN, "." ) + 1 );
+            $CAADOMAIN = $MAINDOMAIN;
         }
         else {
+            $TLD = substr( $QUERY, rindex( $QUERY, "." ) + 1 );
+            $CAADOMAIN = $QUERY;
+        }
+        chomp($TLD);
+        my $CAAFound = 0;
+        while ( $CAADOMAIN ne $TLD ) {
+            my $DNSSEC_error =
+              qx[ dig \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
+            if ($DNSSEC_error) {
+                print "CAA record check failed with DNSSEC error!\n";
+                border();
+                return;
+            }
+            @HasCAA = qx[ dig \@208.67.220.220 +noall +answer $CAADOMAIN CAA ];
+            if (@HasCAA) {
+                print YELLOW "[NOTE] * CAA records were found for $CAADOMAIN\n";
+                print GREEN
+"SSL Certificates can only be issued from the following CA's:\n";
+                my ( $CAARecord1, $CAARecord2, $CAARecord3 );
+                foreach $CAARecord (@HasCAA) {
+                    chomp($CAARecord);
+                    ( $CAARecord1, $CAARecord2, $CAARecord3 ) =
+                      ( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
+                    print CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n";
+                }
+                $CAAFound = 1;
+            }
+            parsedomain($CAADOMAIN);
+        }
+        if ( $CAAFound == 0 ) {
             print GREEN "\t \\_ None\n";
         }
         border();
@@ -1418,6 +1428,11 @@ sub smborder {
     print MAGENTA
 "----------------------------------------------------------------------------------------------\n";
     return;
+}
+
+sub parsedomain {
+    my $strip = index( $CAADOMAIN, "." );
+    $CAADOMAIN = substr( $CAADOMAIN, $strip + 1 );
 }
 
 sub FindMainDomain() {
