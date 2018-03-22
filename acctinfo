@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.89";
+my $VERSION = "2.4.90";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -52,9 +52,6 @@ if ($@) {
 }
 
 $Term::ANSIColor::AUTORESET = 1;
-
-# Turn off buffering
-$| = 1;
 
 my $all           = undef;
 my $listdbs       = undef;
@@ -315,7 +312,6 @@ if ($cruft) {
 my $PACKAGE       = $user_conf->{'PLAN'};
 my $THEME         = $user_conf->{'RS'};
 my $IPADDR        = $user_conf->{'IP'};
-my $HAS_AUTOSSL   = $user_conf->{'FEATURE-AUTOSSL'};
 my $BACKUPENABLED = $user_conf->{'BACKUP'};
 my $LEGACYBACKUP  = $user_conf->{'LEGACY_BACKUP'};
 my $BWLIMIT       = $user_conf->{'BWLIMIT'};
@@ -335,20 +331,16 @@ if ( $BWLIMIT ne "unlimited" ) {
     $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
 }
 
-if (qx[ grep 'FEATURE-AUTOSSL=0' /var/cpanel/users/$username ]) {
-    $HAS_AUTOSSL = "Explicitly Disabled";
-}
-else {
-    $HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No (But see featurelist above)";
-}
-my $HAS_AUTOSSL_TEXT;
+my $HAS_AUTOSSL =
+qx[ whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1' ];
 
-#my $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in \"$FEATURELIST\" feature list)";
+$HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No";
+my $HAS_AUTOSSL_TEXT;
 
 # Check disabled feature list to see if autossl=0 exists
 my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/disabled ];
 if ($AutoSSL_Disabled) {
-    $HAS_AUTOSSL_TEXT = "(AutoSSL in disabled feature list)";
+    $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in feature list)";
 }
 
 # Check $FEATURELIST feature list to see if autossl=0 exists
@@ -374,7 +366,8 @@ if ($IS_USERNAME) {
 
  # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
     if ($useDig) {
-        @ResolvedIP = qx[ dig \@208.67.220.220 $MAINDOMAIN A +short ];
+        @ResolvedIP =
+          qx[ dig +tries=2 +time=5 \@208.67.220.220 $MAINDOMAIN A +short ];
     }
     else {
         @ResolvedIP = getArecords($MAINDOMAIN);
@@ -383,7 +376,8 @@ if ($IS_USERNAME) {
 else {
     # a domain name was entered so we should resolve the IP of that instead.
     if ($useDig) {
-        @ResolvedIP = qx[ dig \@208.67.222.222 $DOMAIN A +short ];
+        @ResolvedIP =
+          qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN A +short ];
     }
     else {
         @ResolvedIP = getArecords($DOMAIN);
@@ -513,11 +507,10 @@ if ( $PWHash eq "" ) {
 }
 
 # Get IP address from .lastlogin file (if it exists)
-my $LastLoginIP = "";
-if ( -e ("$RealHome/.lastlogin") ) {
-    $LastLoginIP = qx[ tail -1 $RealHome/.lastlogin ];
-    chomp($LastLoginIP);
-}
+my $LastLoginIP =
+qx[ uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' ];
+chomp($LastLoginIP);
+$LastLoginIP = substr( $LastLoginIP, 8 );
 
 print GREEN ON_BLACK "The main domain is "
   . YELLOW $MAINDOMAIN
@@ -809,6 +802,13 @@ if ( $isEA4 and !$skipEA4 ) {
     if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
         print YELLOW "PHP-FPM pool detected\n";
     }
+    my $old_fpm_flag =
+      qx[ whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1' ];
+    if ($old_fpm_flag) {
+        print RED "[WARN] Old PHP-FPM flags found!\n";
+        print
+"Look in /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/ for an fpm.conf file.\n";
+    }
 
     # Get php.ini config info
     if ( $PHPversion eq "inherit" and $cageFSStats ne "Enabled" ) {
@@ -998,12 +998,16 @@ print WHITE "Count of other domains: ["
   . YELLOW "ADDONS: "
   . GREEN $addoncnt
   . WHITE "]\n";
+
+my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
+my $DNSLinesCnt    = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
+if ( $DNSLinesCnt != $TotalDomainCnt ) {
+    print expand(
+            RED "\t \\_ [WARN]: One or more DNS lines may be missing from "
+          . BOLD CYAN "/var/cpanel/users/$username\n" );
+}
 border();
 
-# END OF BASIC INFORMATION (no switches were added)
-# ADDITIONAL INFORMATION STARTS HERE! (if all or any other switches were passed/added)
-
-# DOMAIN INFO (ALIASES, ADDON, SUB)
 my $SUB   = "";
 my $PARK  = "";
 my $ADDON = "";
@@ -1255,18 +1259,33 @@ qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | gr
 
             foreach $SAN (@getSANS) {
                 chomp($SAN);
-                print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                my $OCSPstatus =
+qx[ openssl s_client -connect $SAN:443 -servername $SAN -status <<<quit 2>&1 | egrep 'Cert Status:' ];
+                chomp($OCSPstatus);
+                print expand( YELLOW "\t \\_ " . CYAN $SAN);
+                if ($OCSPstatus) {
+                    print BOLD CYAN " - OCSP: "
+                      . BOLD MAGENTA substr( $OCSPstatus, 17 );
+                }
+                print "\n";
             }
         }
         else {
             print YELLOW $MAINDOMAIN . "\n";
             print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
         }
-        if ( -e ("/var/cpanel/ssl/autossl/excludes/$username.json") ) {
-            my $isExcluded =
-qx[ python -mjson.tool /var/cpanel/ssl/autossl/excludes/$username.json|grep '"excluded_domains": \\[\\]' ];
-            if ( !($isExcluded) ) {
-                print BOLD MAGENTA "*** Some domains may be excluded ***\n";
+
+        # Check for excluded domains for AutoSSL
+        my @isExcluded =
+qx[ uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' ];
+        if ( (@isExcluded) ) {
+            my $isExcluded;
+            print BOLD MAGENTA
+              "*** The following domains are excluded from AutoSSL ***\n";
+            for $isExcluded (@isExcluded) {
+                chomp($isExcluded);
+                print expand(
+                    YELLOW "\t \\_ " . CYAN substr( $isExcluded, 23 ) . "\n" );
             }
         }
 
@@ -1356,13 +1375,14 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
         my $CAAFound = 0;
         while ( $CAADOMAIN ne $TLD ) {
             my $DNSSEC_error =
-              qx[ dig \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
+qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
             if ($DNSSEC_error) {
-                print "CAA record check failed with DNSSEC error!\n";
+                print RED "[WARN] " . WHITE "CAA record check failed with DNSSEC error!\n";
                 border();
                 return;
             }
-            @HasCAA = qx[ dig \@208.67.220.220 +noall +answer $CAADOMAIN CAA ];
+            @HasCAA =
+qx[ dig +tries=2 +time=5 \@208.67.220.220 +noall +answer $CAADOMAIN CAA ];
             if (@HasCAA) {
                 print YELLOW "[NOTE] * CAA records were found for $CAADOMAIN\n";
                 print GREEN
@@ -1637,10 +1657,10 @@ sub cruft_check {
             print "It has $addoncnt Addon domains\n";
         }
         if ( $subcnt > 0 ) {
-            print "It has $addoncnt Sub domains\n";
+            print "It has $subcnt Sub domains\n";
         }
         if ( $parkcnt > 0 ) {
-            print "It has $addoncnt Aliased domains\n";
+            print "It has $parkcnt Aliased domains\n";
         }
 
         # Add up the total number of additional domains
@@ -1666,14 +1686,12 @@ sub cruft_check {
         print
 "No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
         print "Continuing search for $QUERY...\n";
-
-        #        $username   = $QUERY;
-        #        $MAINDOMAIN = $QUERY;
     }
+    my $isAddon;
+    my $isSub;
+    my $isParked;
+    my $SubDomain;
     if ( !$isActive ) {
-        my $isAddon;
-        my $isSub;
-        my $isParked;
         $isAddon =
           qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
         if ($isAddon) {
@@ -1683,7 +1701,7 @@ sub cruft_check {
             print
 "$QUERY has an entry in /etc/userdatadomains as an Addon Domain under the "
               . CYAN $username
-              . " user\n";
+              . WHITE " user\n";
         }
         $isSub = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==sub==' ];
         if ($isSub) {
@@ -1693,7 +1711,7 @@ sub cruft_check {
             print
 "$QUERY has an entry in /etc/userdatadomains as a Sub Domain under the "
               . CYAN $username
-              . " user\n"
+              . WHITE " user\n"
               unless ($isAddon);
         }
         $isParked =
@@ -1705,7 +1723,7 @@ sub cruft_check {
             print
 "$QUERY has an entry in /etc/userdatadomains as a Aliased Domain under the "
               . CYAN $username
-              . " user\n";
+              . WHITE " user\n";
         }
         if ( !$MAINDOMAIN and $username ) {
             ($MAINDOMAIN) =
@@ -1713,26 +1731,26 @@ sub cruft_check {
             chomp($MAINDOMAIN);
         }
         $useQuery = ($IS_USERNAME) ? 1 : 0;
-        if ( $useQuery and ( $isAddon or $isSub or $isParked ) ) {
-            print "Checking main domain $MAINDOMAIN ($username) instead...\n";
-            $QUERY = $username;
-        }
     }
     smborder();
 
-    my @FILES2SEARCH = qw(
+    my @FILES2SEARCHUSER = qw(
       /etc/passwd
       /etc/group
       /etc/shadow
       /etc/gshadow
       /etc/quota.conf
       /etc/dbowners
+      /etc/trueuserowners
+      /var/cpanel/databases/users.db
+      /etc/userdatadomains.json
+    );
+
+    my @FILES2SEARCH = qw(
       /etc/userdomains
       /etc/trueuserdomains
       /etc/userdatadomains
-      /etc/userdatadomains.json
       /etc/domainusers
-      /etc/trueuserowners
       /etc/localdomains
       /etc/remotedomains
       /etc/demousers
@@ -1740,9 +1758,32 @@ sub cruft_check {
       /etc/demoids
       /etc/demodomains
       /etc/ssldomains
-      /var/cpanel/databases/users.db
     );
 
+    #	print "DEBUG: IS_USERNAME = $IS_USERNAME\n";
+    #	print "DEBUG: MAINDOMAIN = $MAINDOMAIN\n";
+    #	print "DEBUG: username = $username\n";
+    #	print "DEBUG: QUERY = $QUERY\n";
+    #	print "DEBUG: useQuery = $useQuery\n";
+    my $file2searchu;
+    print "Searching the following files for $username:\n";
+    foreach $file2searchu (@FILES2SEARCHUSER) {
+        chomp($file2searchu);
+        if ( !( -s ($file2searchu) ) ) {
+            my $filestat = $file2searchu . " is either empty or missing";
+            my $fileskip = CYAN "[SKIPPING]";
+            print_output( $filestat, $fileskip );
+            next;
+        }
+        $filestatus = check_file_existance( $file2searchu, $username );
+        if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
+        else               { $filestatus = RED "[MISSING]"; }
+        print_output( $file2searchu, $filestatus );
+    }
+    if ($IS_USERNAME) {
+        $QUERY = $MAINDOMAIN;
+    }
+    print "Searching the following files for $QUERY\n";
     foreach $file2search (@FILES2SEARCH) {
         chomp($file2search);
         if ( !( -s ($file2search) ) ) {
@@ -1751,21 +1792,10 @@ sub cruft_check {
             print_output( $filestat, $fileskip );
             next;
         }
-        if ( $username eq "" ) {
-            $username = $QUERY;
-        }
         if ( $MAINDOMAIN eq "" ) {
             $MAINDOMAIN = $QUERY;
         }
-        if ($useQuery) {
-            $filestatus = check_file_existance( $file2search, $QUERY );
-        }
-        else {
-            $filestatus = check_file_existance( $file2search, $username );
-        }
-        if ( !($filestatus) and !$useQuery ) {
-            $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
-        }
+        $filestatus = check_file_existance( $file2search, $QUERY );
         if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
         else               { $filestatus = RED "[MISSING]"; }
         print_output( $file2search, $filestatus );
@@ -1784,10 +1814,17 @@ sub cruft_check {
 
                 # Now check HOMEMATCH 1 through 9.
                 for ( $hmCnt = 1 ; $hmCnt < 10 ; $hmCnt = $hmCnt + 1 ) {
-                    my $dirstatus = check_dir("/$HOMEMATCH$hmCnt/$username");
+
+                    #my $dirstatus = check_dir("/$HOMEMATCH$hmCnt/$username");
+                    my $dirstatus = check_dir("$HOMEDIR$hmCnt/$username");
                     if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
                     else              { $dirstatus = RED "[MISSING]"; }
-                    print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
+
+                    #print_output( "/$HOMEMATCH$hmCnt/$username", $dirstatus );
+                    print_output( "$HOMEDIR$hmCnt/$username", $dirstatus );
+                    if ( $dirstatus =~ m/EXISTS/ ) {
+                        last;
+                    }
                 }
             }
         }
@@ -1873,10 +1910,20 @@ sub cruft_check {
         print_output( "/var/named/$QUERY.db", $dirstatus );
 
         # Check /etc/apache2/logs/domlogs/$QUERY
-        my $dirstatus = check_dir("/etc/apache2/logs/domlogs/$QUERY");
-        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-        else              { $dirstatus = RED "[MISSING]"; }
-        print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
+        if ($isAddon) {
+            my $SubDomain = ( split( /\./, $QUERY ) )[0] . "." . $MAINDOMAIN;
+            chomp($SubDomain);
+            my $dirstatus = check_dir("/etc/apache2/logs/domlogs/$SubDomain");
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            print_output( "/etc/apache2/logs/domlogs/$SubDomain", $dirstatus );
+        }
+        else {
+            my $dirstatus = check_dir("/etc/apache2/logs/domlogs/$QUERY");
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
+        }
 
         # Check /etc/named.conf file
         my $dirstatus = check_file_existance( "/etc/named.conf", $QUERY );
@@ -1974,7 +2021,8 @@ sub cruft_check {
                 next;
             }
             if ($IS_USERNAME) {
-                $QueryCluster = qx[ dig \@$dnscluster $MAINDOMAIN +short ];
+                $QueryCluster =
+                  qx[ dig +tries=2 +time=5 \@$dnscluster $MAINDOMAIN +short ];
                 if ($QueryCluster) {
                     print expand( YELLOW "\t \\_ $MAINDOMAIN "
                           . GREEN ON_BLACK
@@ -1991,7 +2039,8 @@ sub cruft_check {
                 }
             }
             else {
-                $QueryCluster = qx[ dig \@$dnscluster $QUERY +short ];
+                $QueryCluster =
+                  qx[ dig +tries=2 +time=5 \@$dnscluster $QUERY +short ];
                 if ($QueryCluster) {
                     print expand( YELLOW "\t \\_ $QUERY "
                           . GREEN ON_BLACK
@@ -2434,9 +2483,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
             }
         }
 
-   # If a filter file exists in /$RealHome/etc/$DOMAIN/$emailacctline directory,
-   # Count the number of filters and display that here.
-   # As \_ User Level Filters: nn
+        # mail filters
         my $filtercnt = 0;
         my $ufilter;
         my @UFILTER;
@@ -2718,9 +2765,12 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
     }
 
     # Here we add the spf record and dkim record (if they exist).
-    my $spf  = qx[ dig \@208.67.222.222 $DOMAIN TXT +short | grep 'spf1' ];
-    my $dkim = qx[ dig \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
-    my $dmarc = qx[ dig \@208.67.222.222 _dmarc.$DOMAIN TXT +short ];
+    my $spf =
+qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN TXT +short | grep 'spf1' ];
+    my $dkim =
+qx[ dig +tries=2 +time=5 \@208.67.220.220 default._domainkey.$DOMAIN TXT +short ];
+    my $dmarc =
+      qx[ dig +tries=2 +time=5 \@208.67.222.222 _dmarc.$DOMAIN TXT +short ];
     print "Checking SPF Record For $DOMAIN\n";
     if ($spf) {
         print expand( YELLOW "\t \\_ " . $spf );
@@ -2972,6 +3022,13 @@ qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
         print expand(
             GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
     }
+    my $OCSPstatus =
+qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | egrep 'Cert Status:' ];
+    if ($OCSPstatus) {
+        print expand( BOLD CYAN "\t \\_ OCSP: "
+              . BOLD MAGENTA substr( $OCSPstatus, 17 )
+              . "\n" );
+    }
 }
 
 sub oldlistssls {
@@ -3102,7 +3159,7 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
 
     # Check for CAA records here.
     print "Checking for CAA records: \n";
-    my @HasCAA = qx[ dig $MAINDOMAIN caa +short ];
+    my @HasCAA = qx[ dig +tries=2 +time=5 $MAINDOMAIN caa +short ];
     my $CAARecord;
     if (@HasCAA) {
         print YELLOW "[NOTE] * CAA records were found for $MAINDOMAIN\n";

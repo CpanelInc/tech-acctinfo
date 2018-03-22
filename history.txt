@@ -1,3 +1,11 @@
+V2.4.90- Change LastLoginIP to a uapi call
+V2.4.90- Change AutoSSL excluded domain to a uapi call
+V2.4.90- Change AutoSSL feature enabled to a whmapi1 call
+V2.4.90- Add check for old php-fpm flags (pre 58). Warn if found
+V2.4.90- Rework some of the --cruft output.  Fix check for some files that showed existed when
+         not true.
+V2.4.90- Add OCSP check to --listssl (will now tell you the status of OCSP if possible).
+
 V2.4.89- Add Text::Tabs and set tabstop to 4. 
 
 V2.4.88- Reworked CAA check and included DNSSEC syntax check 
