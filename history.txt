@@ -1,3 +1,9 @@
+V2.4.91- cruft check will skip username checks if username could not be determined
+V2.4.91- permissions check cleaned up and added .well-known and pki-validation directories
+V2.4.91- Add check for suspended.page directory under ~/public_html (old reseller suspend method)
+V2.4.91- MySQL usernames and GRANTS now displayed next to databases when --listdb switch is used
+V2.4.91- Added check for duplicate INBOX.INBOX (CPANEL-19556) to --mail switch
+
 V2.4.90- Change LastLoginIP to a uapi call
 V2.4.90- Change AutoSSL excluded domain to a uapi call
 V2.4.90- Change AutoSSL feature enabled to a whmapi1 call

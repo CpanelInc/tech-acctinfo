@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.90";
+my $VERSION = "2.4.91";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -73,6 +73,7 @@ my $scan          = undef;
 my $nocodeblock   = undef;
 my $skipquota     = 0;
 my $skipfind      = 0;
+our $isInNamedConf = 0;
 our $spincounter;
 our $CAADOMAIN;
 
@@ -163,7 +164,9 @@ else {
     $UserIsReserved = isUserReserved($QUERY);
 }
 if ($UserIsReserved) {
-    print RED "[WARNING] - " . WHITE " Reserved username detected!\n";
+    print RED "[WARNING] - "
+      . WHITE " Reserved username detected! "
+      . BOLD CYAN "(info may be missing from some files)\n";
     if ($username) {
         my $RandomString  = new String::Random;
         my $SuggestedUser = $RandomString->randpattern("cccccc");
@@ -188,16 +191,6 @@ if ( $MAINDOMAIN eq "" and $username eq "" ) {
 
 if ($scan) {
     scan();
-    exit;
-}
-
-if ( $username eq "nobody" ) {
-    print RED "[WARN] - "
-      . YELLOW $QUERY
-      . " has an owner of "
-      . WHITE
-      . "\"nobody\""
-      . YELLOW " in /etc/userdomains!\n";
     exit;
 }
 
@@ -511,6 +504,9 @@ my $LastLoginIP =
 qx[ uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' ];
 chomp($LastLoginIP);
 $LastLoginIP = substr( $LastLoginIP, 8 );
+if ( $LastLoginIP eq "''" ) {
+    $LastLoginIP = "";
+}
 
 print GREEN ON_BLACK "The main domain is "
   . YELLOW $MAINDOMAIN
@@ -529,7 +525,9 @@ my ($maindocroot) =
 print expand(
     "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n" );
 
-print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome ;
+print WHITE "Real Home Directory (/etc/passwd): "
+  . CYAN $RealHome
+  . YELLOW " - Checking permissions...";
 print "\n";
 checkperms();
 print "\n";
@@ -987,6 +985,10 @@ if ($SUSP) {
 else {
     print GREEN "No";
 }
+if ( -d ("$RealHome/public_html/suspended.page") ) {
+    print RED
+      " suspended.page template found in $RealHome/public_html directory!";
+}
 print "\n";
 print WHITE "Count of other domains: ["
   . YELLOW "SUB: "
@@ -1001,7 +1003,13 @@ print WHITE "Count of other domains: ["
 
 my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
 my $DNSLinesCnt    = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
-if ( $DNSLinesCnt != $TotalDomainCnt ) {
+if ($IS_USERNAME) {
+    $isInNamedConf = 1;
+}
+else {
+    $isInNamedConf = qx[ grep $QUERY /etc/named.conf ];
+}
+if ( $DNSLinesCnt != $TotalDomainCnt and !($isInNamedConf) ) {
     print expand(
             RED "\t \\_ [WARN]: One or more DNS lines may be missing from "
           . BOLD CYAN "/var/cpanel/users/$username\n" );
@@ -1154,24 +1162,19 @@ if ( $resellerperms or $all ) {
 # MySQL INFO
 if ( $listdbs or $all ) {
     my @USERDBS  = undef;
-    my @DBSIZE   = undef;
-    my $USERDB   = "";
-    my $SIZEOFDB = "";
-    my $DBNAME   = "";
-    my $DBSIZE   = "";
-
-    # MySQL username can only be the first 8 characters of $usrename
-    my $first8;
-    if ($DBPrefix) {
-        $first8 = substr( $username, 0, 8 );
-        @USERDBS = qx[ echo "SHOW DATABASES like '$first8%'" | mysql -BN ];
+    my @USERDBS1 = undef;
+    my $USERDB;
+    my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+    my $USERDB1;
+    foreach $USERDB (@USERDBS) {
+        chomp($USERDB);
+        $USERDB = alltrim($USERDB);
+        ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
+        push( @USERDBS1, $USERDB1 );
     }
-    else {
-        @USERDBS =
-
-          # THIS BELOW FAILS IF DB PREFIX IS OFF!!!
-          qx[ echo "SHOW DATABASES like = '$username%'" | mysql -BN ];
-    }
+    @USERDBS = undef;
+    @USERDBS = uniq(@USERDBS1);
+    splice( @USERDBS, 0, 1 );
     my $DBCNT = @USERDBS;
     if ( $DBCNT == 0 ) {
         print WHITE "No MySQL databases found for "
@@ -1187,7 +1190,26 @@ if ( $listdbs or $all ) {
         foreach $USERDB (@USERDBS) {
             chomp($USERDB);
             $USERDB =~ s/\\//g;
-            print expand( YELLOW "\t \\_ " . $USERDB . "\n" );
+
+            #print expand($USERDB) . "\n";
+            print $USERDB . "\n";
+            my @DBusername =
+qx[ cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' ];
+            my $NewDBUser;
+            foreach $NewDBUser (@DBusername) {
+                chomp($NewDBUser);
+                $NewDBUser = alltrim($NewDBUser);
+                print expand( YELLOW "\t \\_ " . $NewDBUser . "\n" );
+                my ($DBUserOnly) = ( split( /\s+/, $NewDBUser ) )[1];
+                my @dbPrivs =
+qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - ' ];
+                my $dbPriv;
+                foreach $dbPriv (@dbPrivs) {
+                    chomp($dbPriv);
+                    $dbPriv =~ s/ - /\\_/;
+                    print expand( BOLD MAGENTA "\t\t" . $dbPriv . "\n" );
+                }
+            }
         }
     }
     smborder();
@@ -1198,10 +1220,18 @@ if ( $listdbs or $all ) {
     if ( -e ("/usr/bin/psql") and $psql_running )
     {    ## PostGreSQL is installed and running
         my @PSQLDBS = undef;
-        my $PgDb    = "";
-        @PSQLDBS =
-qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate='f' AND datname !='postgres'" | grep -v '\-' | grep -v 'datname' | grep -v ' row' ];
-        pop(@PSQLDBS);
+        my $PgDb;
+        @PSQLDBS = qx[ cpapi2 --user=$username Postgres listdbs | grep 'db: ' ];
+        my $USERDB1;
+        my @USERDBS1;
+        foreach $USERDB (@PSQLDBS) {
+            chomp($USERDB);
+            $USERDB = alltrim($USERDB);
+            ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
+            push( @USERDBS1, $USERDB1 );
+        }
+        @PSQLDBS = undef;
+        @PSQLDBS = uniq(@USERDBS1);
         my $PgDbCount = @PSQLDBS;
         if ( $PgDbCount == 0 ) {
             print WHITE "No PostGreSQL databases found for "
@@ -1214,12 +1244,22 @@ qx[ /usr/bin/psql -U postgres -c "SELECT datname FROM pg_catalog.pg_database WHE
             print WHITE
 "The following ($PgDbCount) PostGreSQL databases can be found under: "
               . GREEN $username . "\n";
-            my $pg_table  = "";
-            my @PG_TABLES = undef;
+            my $PgDb;
             foreach $PgDb (@PSQLDBS) {
                 chomp($PgDb);
-                $PgDb = substr( $PgDb, 1 );
-                print expand( YELLOW "\t \\_" . $PgDb . "\n" );
+                $PgDb = alltrim($PgDb);
+
+                #                print expand( YELLOW "\t \\_" . $PgDb . "\n" );
+                print WHITE $PgDb . "\n";
+                my @DBusername =
+qx[ cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: ' ];
+                my $NewDBUser;
+                foreach $NewDBUser (@DBusername) {
+                    chomp($NewDBUser);
+                    $NewDBUser = alltrim($NewDBUser);
+                    print expand( YELLOW "\t \\_ " . $NewDBUser . "\n" );
+                    my ($DBUserOnly) = ( split( /\s+/, $NewDBUser ) )[1];
+                }
             }
         }
     }
@@ -1377,7 +1417,8 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
             my $DNSSEC_error =
 qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
             if ($DNSSEC_error) {
-                print RED "[WARN] " . WHITE "CAA record check failed with DNSSEC error!\n";
+                print RED "[WARN] "
+                  . WHITE "CAA record check failed with DNSSEC error!\n";
                 border();
                 return;
             }
@@ -1662,19 +1703,18 @@ sub cruft_check {
         if ( $parkcnt > 0 ) {
             print "It has $parkcnt Aliased domains\n";
         }
-
-        # Add up the total number of additional domains
-        $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
-
-        # Now add one more to that for the main account
-        $TotalDomainCnt++;
-
-# Now count the number of "DNS" lines in /var/cpanel/users/$username and make sure
-# it equalts $TotalDomainCnt.  Warn if it does NOT!
-        $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
     }
 
     # END OF ACCOUNTING LOG CHECK
+
+# Now count the number of "DNS" lines in /var/cpanel/users/$username and make sure
+# it equalts $TotalDomainCnt.  Warn if it does NOT!
+# Add up the total number of additional domains
+    $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
+
+    # Now add one more to that for the main account
+    $TotalDomainCnt++;
+    $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
 
     my $useQuery = 0;
     if (    !$isActive
@@ -1766,19 +1806,27 @@ sub cruft_check {
     #	print "DEBUG: QUERY = $QUERY\n";
     #	print "DEBUG: useQuery = $useQuery\n";
     my $file2searchu;
-    print "Searching the following files for $username:\n";
-    foreach $file2searchu (@FILES2SEARCHUSER) {
-        chomp($file2searchu);
-        if ( !( -s ($file2searchu) ) ) {
-            my $filestat = $file2searchu . " is either empty or missing";
-            my $fileskip = CYAN "[SKIPPING]";
-            print_output( $filestat, $fileskip );
-            next;
+    if ($username) {
+        if ( $username ne "nobody" ) {
+            print "Searching the following files for $username:\n";
+            foreach $file2searchu (@FILES2SEARCHUSER) {
+                chomp($file2searchu);
+                if ( !( -s ($file2searchu) ) ) {
+                    my $filestat =
+                      $file2searchu . " is either empty or missing";
+                    my $fileskip = CYAN "[SKIPPING]";
+                    print_output( $filestat, $fileskip );
+                    next;
+                }
+                $filestatus = check_file_existance( $file2searchu, $username );
+                if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
+                else               { $filestatus = RED "[MISSING]"; }
+                print_output( $file2searchu, $filestatus );
+            }
         }
-        $filestatus = check_file_existance( $file2searchu, $username );
-        if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
-        else               { $filestatus = RED "[MISSING]"; }
-        print_output( $file2searchu, $filestatus );
+    }
+    else {
+        print "No Username detected for $QUERY - skipping some checks!\n\n";
     }
     if ($IS_USERNAME) {
         $QUERY = $MAINDOMAIN;
@@ -1849,7 +1897,7 @@ sub cruft_check {
         if ( $DNSLineCnt != $TotalDomainCnt ) {
             print expand( RED
 "\t \\_ [WARN]: One or more DNS lines may be missing from this file!\n"
-            );
+            ) unless ( !("/var/cpanel/users/$username") );
         }
 
         # Check if /var/cpanel/databases/grants_$username.yaml exists!
@@ -2060,50 +2108,45 @@ sub cruft_check {
     }
 
     # Check MySQL users table.
-    my @MySQLUsers = undef;
-    my @MySQLDBs   = undef;
-    my $MySQLUser;
-    my $MySQLDB;
-    my $first8;
-    if ($DBPrefix) {
-        if ( length($username) > 8 ) {
-            $first8 = substr( $username, 0, 8 );
-        }
-        else {
-            $first8 = $username;
-        }
+    my @USERDBS  = undef;
+    my @USERDBS1 = undef;
+    my $USERDB;
+    my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+    my $USERDB1;
+    foreach $USERDB (@USERDBS) {
+        chomp($USERDB);
+        $USERDB = alltrim($USERDB);
+        ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
+        push( @USERDBS1, $USERDB1 );
     }
-    else {
-        $first8 = $username;
-    }
-
-    # Check for MySQL databases
-    my @MySQLDBs       = qx[ mysql -BNe "show databases like '$first8%'" ];
-    my @MySQLDBsUnique = uniq(@MySQLDBs);
-    my $dbnum          = @MySQLDBsUnique;
-    if ( $dbnum > 0 ) {
+    @USERDBS = undef;
+    @USERDBS = uniq(@USERDBS1);
+    splice( @USERDBS, 0, 1 );
+    my $DBCNT = @USERDBS;
+    if ( $DBCNT > 0 ) {
         print YELLOW "MySQL Databases Found\n";
-        foreach $MySQLDB (@MySQLDBsUnique) {
-            chomp($MySQLDB);
-            print expand( WHITE "\t \\_ " . $MySQLDB . "\n" );
+        foreach $USERDB (@USERDBS) {
+            print expand( WHITE "\t \\_ $USERDB\n" );
         }
     }
+    else {
+        print BOLD CYAN "No MySQL Databases Found!\n";
+    }
 
-    # Check for database users
-    if ( $first8 eq "" ) {
-        print "Skipping MySQL User check - no username found!\n";
+    #    # Check for database users
+    if ( $username eq "" ) {
+        print BOLD CYAN "Skipping MySQL User check - username undetermined!\n";
     }
     else {
-        my @MySQLUsers =
-qx[ echo "SELECT User from mysql.user WHERE User REGEXP '$first8'" | mysql -BN ];
-        my @MySQLUsersUnique = uniq(@MySQLUsers);
-        my $num              = @MySQLUsersUnique;
-        if ( $num > 0 ) {
-            print YELLOW "MySQL Users Found in MySQL.user table\n";
-            foreach $MySQLUser (@MySQLUsersUnique) {
-                chomp($MySQLUser);
-                print expand( WHITE "\t \\_ " . $MySQLUser . "\n" );
-            }
+        print YELLOW "MySQL Users Found in MySQL.user table\n";
+        my @DBusername =
+          qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'user: ' ];
+        my $NewDBUser;
+        @DBusername = uniq(@DBusername);
+        foreach $NewDBUser (@DBusername) {
+            chomp($NewDBUser);
+            $NewDBUser = alltrim($NewDBUser);
+            print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
         }
     }
 
@@ -2340,8 +2383,11 @@ sub display_mail_info {
           . BOLD CYAN " listed in the /etc/vdomainaliases directory. "
           . YELLOW "Existing accounts/autoresponders\nwill NOT forward!\n";
     }
+    my $TotalEmails = @EMAILACCTS;
+    $TotalEmails--;
+    $TotalEmails--;
 
-    print "Email accounts for $DOMAIN: \n";
+    print "There are $TotalEmails Email accounts for $DOMAIN: \n";
 
     foreach $emailacctline (@EMAILACCTS) {
         chomp($emailacctline);
@@ -2481,6 +2527,17 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
             else {
                 print RED $rcubechk . "\n";
             }
+        }
+
+        # Check for duplicate INBOX (CPANEL-19556)
+        my $DupINBOX =
+qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
+        if ( $DupINBOX > 0 ) {
+            print expand( RED
+"\t\t \\_ [WARN] - Duplicate INBOX detected for $emailacctline\@$DOMAIN "
+                  . CYAN
+                  . "[CPANEL-19556]" );
+            print "\n";
         }
 
         # mail filters
@@ -3178,6 +3235,38 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
 
 sub isUserReserved {
     my $lcUser = $_[0];
+    if ( $lcUser eq "system" or $lcUser eq "nobody" ) {
+        print RED "[WARN] - "
+          . YELLOW "Username for "
+          . WHITE
+          . $QUERY
+          . YELLOW " is listed as: "
+          . WHITE $lcUser
+          . YELLOW " in /etc/userdomains!\n";
+        $isInNamedConf = qx[ grep $QUERY /etc/named.conf ];
+        if ( $isInNamedConf and ( $lcUser eq "system" or $lcUser eq "nobody" ) )
+        {
+            print "$QUERY could be a DNS zone only!\n";
+        }
+        return if $cruft;
+        print "</c>\n";
+        exit;
+    }
+    my $part3;
+    if ( $IS_USERNAME == 0 ) {
+        print "Looking for username for $QUERY... - ";
+        my $part1 = qx[ grep $lcUser /etc/userdatadomains ];
+        my ($part2) = ( split( /: /, $part1 ) )[1];
+        my ($part3) = ( split( /=/,  $part2 ) )[0];
+        $lcUser = $part3;
+        if ($lcUser) {
+            print "Found ($lcUser)\n";
+        }
+        else {
+            print "not found - skipping!\n";
+            return 0;
+        }
+    }
     my $UserList;
     my @UserList =
 qx[ /usr/local/cpanel/3rdparty/bin/perl -MCpanel::Validate::Username -MData::Dumper -e 'print Dumper(Cpanel::Validate::Username::list_reserved_usernames());' ];
@@ -3220,14 +3309,16 @@ sub handle_error {
 
 sub checkperms {
     if ( !-e ("$RealHome") ) {
-        print RED"[WARN] - $RealHome directory is missing!";
+        print expand( RED "\t \\_ [WARN] - $RealHome directory is missing!\n" );
+        return;
     }
     else {
         my $statmode = ( stat($RealHome) )[2] & 07777;
         $statmode = sprintf "%lo", $statmode;
-        if ( $statmode != 711 ) {
-            print RED
-              "[WARN] - $RealHome permissions are not 711 [$statmode]\n";
+        if ( $statmode != 711 and ( -e ("/var/cpanel/fileprotect") ) ) {
+            print expand( RED
+"\t \\_ [WARN] - $RealHome permissions are not 711 [$statmode]\n"
+            );
         }
     }
     my $fuid       = ( stat "$RealHome" )[4];
@@ -3235,19 +3326,22 @@ sub checkperms {
     my $fileowner  = ( getpwuid $fuid )[0];
     my $groupowner = ( getgrgid $fgid )[0];
     if ( $fileowner ne $username or $groupowner ne $username ) {
-        print RED
-"[WARN] - Incorrect ownership/group for $RealHome [$fileowner:$groupowner]";
+        print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome [$fileowner:$groupowner]\n"
+        );
     }
 
     if ( !-e ("$RealHome/public_html") ) {
-        print RED"[WARN] - $RealHome/public_html directory is missing!";
+        print expand( RED
+              "\t \\_ [WARN] - $RealHome/public_html directory is missing!\n" );
     }
     else {
         my $statmode = ( stat("$RealHome/public_html") )[2] & 07777;
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 750 ) {
-            print RED
-"[WARN] - $RealHome/public_html permissions are not 750 [$statmode]";
+            print expand( RED
+"\t \\_ [WARN] - $RealHome/public_html permissions are not 750 [$statmode]\n"
+            );
         }
     }
     my $fuid       = ( stat "$RealHome/public_html" )[4];
@@ -3257,19 +3351,22 @@ sub checkperms {
     if ( $fileowner ne $username
         or ( $groupowner ne $username ) and ( $groupowner ne "nobody" ) )
     {
-        print RED
-"[WARN] - Incorrect ownership/group for $RealHome/public_html [$fileowner:$groupowner]";
+        print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html [$fileowner:$groupowner]\n"
+        );
     }
 
     if ( !-e ("$RealHome/etc") ) {
-        print RED"[WARN] - $RealHome/etc directory is missing!";
+        print expand(
+            RED "\t \\_ [WARN] - $RealHome/etc directory is missing!\n" );
     }
     else {
         my $statmode = ( stat("$RealHome/etc") )[2] & 07777;
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 750 ) {
-            print RED
-              "[WARN] - $RealHome/etc permissions are not 750 [$statmode]";
+            print expand( RED
+"\t \\_ [WARN] - $RealHome/etc permissions are not 750 [$statmode]\n"
+            );
         }
     }
     my $fuid       = ( stat "$RealHome/etc" )[4];
@@ -3277,19 +3374,22 @@ sub checkperms {
     my $fileowner  = ( getpwuid $fuid )[0];
     my $groupowner = ( getgrgid $fgid )[0];
     if ( $fileowner ne $username or $groupowner ne "mail" ) {
-        print RED
-"[WARN] - Incorrect ownership/group for $RealHome/etc [$fileowner:$groupowner] Default: user:mail";
+        print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/etc [$fileowner:$groupowner] Default: user:mail\n"
+        );
     }
 
     if ( !-e ("$RealHome/mail") ) {
-        print RED"[WARN] - $RealHome/mail folder is missing!";
+        print expand(
+            RED "\t \\_ [WARN] - $RealHome/mail folder is missing!\n" );
     }
     else {
         my $statmode = ( stat("$RealHome/mail") )[2] & 07777;
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 751 ) {
-            print RED
-              "[WARN] - $RealHome/mail permissions are not 751 [$statmode]";
+            print expand( RED
+"\t \\_ [WARN] - $RealHome/mail permissions are not 751 [$statmode]\n"
+            );
         }
     }
     my $fuid       = ( stat "$RealHome/mail" )[4];
@@ -3297,7 +3397,49 @@ sub checkperms {
     my $fileowner  = ( getpwuid $fuid )[0];
     my $groupowner = ( getgrgid $fgid )[0];
     if ( $fileowner ne $username or $groupowner ne $username ) {
-        print RED
-"[WARN] - Incorrect ownership/group for $RealHome/mail [$fileowner:$groupowner]";
+        print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/mail [$fileowner:$groupowner]\n"
+        );
+    }
+
+    if ( -e ("$RealHome/public_html/.well-known") ) {
+        my $statmode = ( stat("$RealHome/public_html/.well-known") )[2] & 07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 755 ) {
+            print expand( RED
+"\t \\_ [WARN] - $RealHome/public_html/.well-known permissions are not 755 [$statmode]\n"
+            );
+        }
+        my $fuid       = ( stat "$RealHome/public_html/.well-known" )[4];
+        my $fgid       = ( stat "$RealHome/public_html/.well-known" )[5];
+        my $fileowner  = ( getpwuid $fuid )[0];
+        my $groupowner = ( getgrgid $fgid )[0];
+        if ( $fileowner ne $username or $groupowner ne $username ) {
+            print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known [$fileowner:$groupowner]\n"
+            );
+        }
+    }
+    if ( -e ("$RealHome/public_html/.well-known/pki-validation") ) {
+        my $statmode =
+          ( stat("$RealHome/public_html/.well-known/pki-validation") )[2] &
+          07777;
+        $statmode = sprintf "%lo", $statmode;
+        if ( $statmode != 755 ) {
+            print expand( RED
+"\t \\_ [WARN] - $RealHome/public_html/.well-known/pki-validation permissions are not 755 [$statmode]\n"
+            );
+        }
+        my $fuid =
+          ( stat "$RealHome/public_html/.well-known/pki-validation" )[4];
+        my $fgid =
+          ( stat "$RealHome/public_html/.well-known/pki-validation" )[5];
+        my $fileowner  = ( getpwuid $fuid )[0];
+        my $groupowner = ( getgrgid $fgid )[0];
+        if ( $fileowner ne $username or $groupowner ne $username ) {
+            print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known/pki-validation [$fileowner:$groupowner]\n"
+            );
+        }
     }
 }
