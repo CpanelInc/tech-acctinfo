@@ -1,3 +1,6 @@
+V2.4.92- Bug fix - related to --cruft check skipping certain checks if username is blank
+         Caused MySQL errors - Thanks Kaden.
+
 V2.4.91- cruft check will skip username checks if username could not be determined
 V2.4.91- permissions check cleaned up and added .well-known and pki-validation directories
 V2.4.91- Add check for suspended.page directory under ~/public_html (old reseller suspend method)

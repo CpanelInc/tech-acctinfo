@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.91";
+my $VERSION = "2.4.92";
 
 our $sslsyscertdir;
 our $sslsubject;
@@ -2108,36 +2108,35 @@ sub cruft_check {
     }
 
     # Check MySQL users table.
-    my @USERDBS  = undef;
-    my @USERDBS1 = undef;
-    my $USERDB;
-    my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
-    my $USERDB1;
-    foreach $USERDB (@USERDBS) {
-        chomp($USERDB);
-        $USERDB = alltrim($USERDB);
-        ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
-        push( @USERDBS1, $USERDB1 );
-    }
-    @USERDBS = undef;
-    @USERDBS = uniq(@USERDBS1);
-    splice( @USERDBS, 0, 1 );
-    my $DBCNT = @USERDBS;
-    if ( $DBCNT > 0 ) {
-        print YELLOW "MySQL Databases Found\n";
-        foreach $USERDB (@USERDBS) {
-            print expand( WHITE "\t \\_ $USERDB\n" );
-        }
-    }
-    else {
-        print BOLD CYAN "No MySQL Databases Found!\n";
-    }
-
-    #    # Check for database users
     if ( $username eq "" ) {
-        print BOLD CYAN "Skipping MySQL User check - username undetermined!\n";
+        print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
     }
-    else {
+	else { 
+    	my @USERDBS  = undef;
+    	my @USERDBS1 = undef;
+    	my $USERDB;
+    	my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+    	my $USERDB1;
+    	foreach $USERDB (@USERDBS) {
+        	chomp($USERDB);
+        	$USERDB = alltrim($USERDB);
+        	($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
+        	push( @USERDBS1, $USERDB1 );
+    	}
+    	@USERDBS = undef;
+    	@USERDBS = uniq(@USERDBS1);
+    	splice( @USERDBS, 0, 1 );
+    	my $DBCNT = @USERDBS;
+    	if ( $DBCNT > 0 ) {
+        	print YELLOW "MySQL Databases Found\n";
+        	foreach $USERDB (@USERDBS) {
+            	print expand( WHITE "\t \\_ $USERDB\n" );
+        	}
+    	}
+    	else {
+        	print BOLD CYAN "No MySQL Databases Found!\n";
+    	}
+    	#    # Check for database users
         print YELLOW "MySQL Users Found in MySQL.user table\n";
         my @DBusername =
           qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'user: ' ];
