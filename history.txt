@@ -1,3 +1,11 @@
+V2.4.93- Bug fix - if /var/cpanel/users/username file is missing, skip check for missing DNS lines.
+V2.4.93- Bug fix - skip MySQL checks during cruft check if account is suspended. 
+V2.4.93- Add /etc/nocgiusers and /etc/userbwlimits to cruft check
+V2.4.93- Add check to cruft check if username begins with cptkt (cPanel support reseller).
+         These checks are unpredictable!
+V2.4.93- Skip /home/username/.trash for *.ini checks
+V2.4.93- Remove OCSP check from SAN's (not necessary).
+
 V2.4.92- Bug fix - related to --cruft check skipping certain checks if username is blank
          Caused MySQL errors - Thanks Kaden.
 

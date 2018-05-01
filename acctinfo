@@ -12,9 +12,13 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.92";
+my $VERSION = "2.4.93";
 
 our $sslsyscertdir;
+our $stderr;
+our $stdout;
+our $rccode;
+our $qxCMD;
 our $sslsubject;
 our $startdate;
 our $expiredate;
@@ -33,6 +37,7 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
+use Capture::Tiny 'capture';
 use Time::Piece;
 use Time::Seconds;
 use String::Random;
@@ -325,7 +330,11 @@ if ( $BWLIMIT ne "unlimited" ) {
 }
 
 my $HAS_AUTOSSL =
-qx[ whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1' ];
+
+#qx[ whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1' ];
+  captureit(
+"whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1'"
+  );
 
 $HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No";
 my $HAS_AUTOSSL_TEXT;
@@ -435,9 +444,10 @@ foreach $RESELLER (@ALL_RESELLERS) {
             {
                 next;
             }
-            $FOUND = "";
+
+            #            $FOUND = "";
             $FOUND =
-              qx[ grep 'OWNER=$username' /var/cpanel/users/$vcu_account ];
+              qx[ grep -w 'OWNER=$username' /var/cpanel/users/$vcu_account ];
             if ($FOUND) {
                 $ResellersAcct =
                   qx[ grep 'DNS=' /var/cpanel/users/$vcu_account ];
@@ -500,8 +510,11 @@ if ( $PWHash eq "" ) {
 }
 
 # Get IP address from .lastlogin file (if it exists)
-my $LastLoginIP =
-qx[ uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' ];
+#my $LastLoginIP =
+#qx[ uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' ];
+my $LastLoginIP = captureit(
+"uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata'"
+);
 chomp($LastLoginIP);
 $LastLoginIP = substr( $LastLoginIP, 8 );
 if ( $LastLoginIP eq "''" ) {
@@ -545,11 +558,19 @@ if (   -e ("/var/cpanel/bwlimited/$username")
 {
     print RED
 "[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
-    my ($bwused) =
-qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+
+#my ($bwused) =
+#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+    my ($bwused) = captureit(
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count'"
+    );
     chomp($bwused);
-    my ($bwmax) =
-qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+
+#    my ($bwmax) =
+#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+    my ($bwmax) = captureit(
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max'"
+    );
     chomp($bwmax);
     $bwused =~ s/count://g;
     $bwmax =~ s/max://g;
@@ -618,11 +639,18 @@ else {
 }
 
 # get quota info using whmapi1
+#my $quotaused =
+#  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
 my $quotaused =
-  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
+  alltrim(
+    captureit("whmapi1 accountsummary user=$username | grep 'diskused:'") );
 ($quotaused) = ( split( /\s+/, $quotaused ) )[1];
+
+#my $maxquota =
+#  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'disklimit' ]);
 my $maxquota =
-  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'disklimit' ]);
+  alltrim(
+    captureit("whmapi1 accountsummary user=$username | grep 'disklimit'") );
 ($maxquota) = ( split( /\s+/, $maxquota ) )[1];
 print "Disk Quota: $quotaused used of $maxquota allowed\n";
 
@@ -660,11 +688,18 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
 "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
 }
 else {
-    my ($bwused) =
-qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+#my ($bwused) =
+#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
+    my ($bwused) = captureit(
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count'"
+    );
     chomp($bwused);
-    my ($bwmax) =
-qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+
+#    my ($bwmax) =
+#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
+    my ($bwmax) = captureit(
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max'"
+    );
     chomp($bwmax);
     $bwused =~ s/count://g;
     $bwmax =~ s/max://g;
@@ -800,8 +835,11 @@ if ( $isEA4 and !$skipEA4 ) {
     if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
         print YELLOW "PHP-FPM pool detected\n";
     }
+
+    #my $old_fpm_flag =
+    #  qx[ whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1' ];
     my $old_fpm_flag =
-      qx[ whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1' ];
+      captureit("whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1'");
     if ($old_fpm_flag) {
         print RED "[WARN] Old PHP-FPM flags found!\n";
         print
@@ -849,7 +887,8 @@ qx[ /usr/bin/scl enable $PHPversion "php -i" | grep '^Scan this dir' ];
 
     # Search /home/username for any php.ini files (unless --skipfind)
     if ( $skipfind == 0 ) {
-        my @anyINI = qx [ find $RealHome -maxdepth 3 -name '*.ini' ];
+        my @anyINI =
+          qx [ find $RealHome -maxdepth 3 -name '*.ini' | grep -v '.trash' ];
         my $anyINIfile;
         if (@anyINI) {
             print GREEN "Custom *.ini files found in: \n";
@@ -1164,7 +1203,10 @@ if ( $listdbs or $all ) {
     my @USERDBS  = undef;
     my @USERDBS1 = undef;
     my $USERDB;
-    my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+
+    #my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+    my @USERDBS =
+      captureit("cpapi2 --user=$username MysqlFE listdbs | grep 'db: '");
     my $USERDB1;
     foreach $USERDB (@USERDBS) {
         chomp($USERDB);
@@ -1193,16 +1235,24 @@ if ( $listdbs or $all ) {
 
             #print expand($USERDB) . "\n";
             print $USERDB . "\n";
-            my @DBusername =
-qx[ cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' ];
+
+#            my @DBusername =
+#qx[ cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' ];
+            my @DBusername = captureit(
+"cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: '"
+            );
             my $NewDBUser;
             foreach $NewDBUser (@DBusername) {
                 chomp($NewDBUser);
                 $NewDBUser = alltrim($NewDBUser);
                 print expand( YELLOW "\t \\_ " . $NewDBUser . "\n" );
                 my ($DBUserOnly) = ( split( /\s+/, $NewDBUser ) )[1];
-                my @dbPrivs =
-qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - ' ];
+
+#                my @dbPrivs =
+#qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - ' ];
+                my @dbPrivs = captureit(
+"cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - '"
+                );
                 my $dbPriv;
                 foreach $dbPriv (@dbPrivs) {
                     chomp($dbPriv);
@@ -1221,7 +1271,10 @@ qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$U
     {    ## PostGreSQL is installed and running
         my @PSQLDBS = undef;
         my $PgDb;
-        @PSQLDBS = qx[ cpapi2 --user=$username Postgres listdbs | grep 'db: ' ];
+
+       #@PSQLDBS = qx[ cpapi2 --user=$username Postgres listdbs | grep 'db: ' ];
+        @PSQLDBS =
+          captureit("cpapi2 --user=$username Postgres listdbs | grep 'db: '");
         my $USERDB1;
         my @USERDBS1;
         foreach $USERDB (@PSQLDBS) {
@@ -1251,8 +1304,12 @@ qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$U
 
                 #                print expand( YELLOW "\t \\_" . $PgDb . "\n" );
                 print WHITE $PgDb . "\n";
-                my @DBusername =
-qx[ cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: ' ];
+
+ #                my @DBusername =
+ #qx[ cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: ' ];
+                my @DBusername = captureit(
+"cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: '"
+                );
                 my $NewDBUser;
                 foreach $NewDBUser (@DBusername) {
                     chomp($NewDBUser);
@@ -1299,15 +1356,7 @@ qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | gr
 
             foreach $SAN (@getSANS) {
                 chomp($SAN);
-                my $OCSPstatus =
-qx[ openssl s_client -connect $SAN:443 -servername $SAN -status <<<quit 2>&1 | egrep 'Cert Status:' ];
-                chomp($OCSPstatus);
-                print expand( YELLOW "\t \\_ " . CYAN $SAN);
-                if ($OCSPstatus) {
-                    print BOLD CYAN " - OCSP: "
-                      . BOLD MAGENTA substr( $OCSPstatus, 17 );
-                }
-                print "\n";
+                print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
             }
         }
         else {
@@ -1315,9 +1364,12 @@ qx[ openssl s_client -connect $SAN:443 -servername $SAN -status <<<quit 2>&1 | e
             print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
         }
 
-        # Check for excluded domains for AutoSSL
-        my @isExcluded =
-qx[ uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' ];
+# Check for excluded domains for AutoSSL
+#        my @isExcluded =
+#qx[ uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' ];
+        my @isExcluded = captureit(
+"uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:'"
+        );
         if ( (@isExcluded) ) {
             my $isExcluded;
             print BOLD MAGENTA
@@ -1353,6 +1405,11 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
                 }
             }
             else {
+                print WHITE "SSL Certificates installed under "
+                  . CYAN $MAINDOMAIN
+                  . WHITE " ("
+                  . GREEN $username
+                  . WHITE ")\n";
                 print YELLOW $SUB . "\n";
                 print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
             }
@@ -1361,8 +1418,12 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
         if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
-            my $SSL_PENDING =
-qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+
+          #my $SSL_PENDING =
+          #qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+            my $SSL_PENDING = captureit(
+                "whmapi1 get_autossl_pending_queue | grep -B3 'user: $username'"
+            );
             if ($SSL_PENDING) {
                 my $NEW_SSL_PENDING;
                 ( $NEW_SSL_PENDING = $SSL_PENDING ) =~
@@ -1389,13 +1450,15 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
             $PendingSSLOrder =~ s/\"//g;
             $PendingSSLOrder =~ s/,//g;
             $PendingSSLOrder =~ s/://g;
-            print expand( CYAN "\t \\_ Pending order number: "
-                  . GREEN
-                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
-            );
-        }
-        else {
-            print expand( GREEN "\t \\_ None\n" );
+            if ($PendingSSLOrder) {
+                print expand( CYAN "\t \\_ Pending order number: "
+                      . GREEN
+                      . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
+                );
+            }
+            else {
+                print expand( GREEN "\t \\_ None\n" );
+            }
         }
 
         # Check for CAA records here.
@@ -1651,6 +1714,13 @@ sub cruft_check {
     my $DNSLineCnt     = 0;
     my $TotalDomainCnt = 0;
 
+    if ( substr( $QUERY, 0, 5 ) eq "cptkt" ) {
+        print BOLD RED
+"[WARN] - cruft check for cPanel Support temporary reseller accounts are unpredictable!\n";
+        print "</c>\n";
+        exit;
+    }
+
    # Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
    # ONLY MAIN ACCT / DOMAIN is checked
     print BLUE "From your query of "
@@ -1784,6 +1854,8 @@ sub cruft_check {
       /etc/trueuserowners
       /var/cpanel/databases/users.db
       /etc/userdatadomains.json
+      /etc/nocgiusers
+      /etc/userbwlimits
     );
 
     my @FILES2SEARCH = qw(
@@ -1800,11 +1872,6 @@ sub cruft_check {
       /etc/ssldomains
     );
 
-    #	print "DEBUG: IS_USERNAME = $IS_USERNAME\n";
-    #	print "DEBUG: MAINDOMAIN = $MAINDOMAIN\n";
-    #	print "DEBUG: username = $username\n";
-    #	print "DEBUG: QUERY = $QUERY\n";
-    #	print "DEBUG: useQuery = $useQuery\n";
     my $file2searchu;
     if ($username) {
         if ( $username ne "nobody" ) {
@@ -1831,22 +1898,24 @@ sub cruft_check {
     if ($IS_USERNAME) {
         $QUERY = $MAINDOMAIN;
     }
-    print "Searching the following files for $QUERY\n";
-    foreach $file2search (@FILES2SEARCH) {
-        chomp($file2search);
-        if ( !( -s ($file2search) ) ) {
-            my $filestat = $file2search . " is either empty or missing";
-            my $fileskip = CYAN "[SKIPPING]";
-            print_output( $filestat, $fileskip );
-            next;
+    if ( $QUERY ne "" ) {
+        print "Searching the following files for $QUERY\n";
+        foreach $file2search (@FILES2SEARCH) {
+            chomp($file2search);
+            if ( !( -s ($file2search) ) ) {
+                my $filestat = $file2search . " is either empty or missing";
+                my $fileskip = CYAN "[SKIPPING]";
+                print_output( $filestat, $fileskip );
+                next;
+            }
+            if ( $MAINDOMAIN eq "" ) {
+                $MAINDOMAIN = $QUERY;
+            }
+            $filestatus = check_file_existance( $file2search, $QUERY );
+            if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
+            else               { $filestatus = RED "[MISSING]"; }
+            print_output( $file2search, $filestatus );
         }
-        if ( $MAINDOMAIN eq "" ) {
-            $MAINDOMAIN = $QUERY;
-        }
-        $filestatus = check_file_existance( $file2search, $QUERY );
-        if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
-        else               { $filestatus = RED "[MISSING]"; }
-        print_output( $file2search, $filestatus );
     }
     if ($username) {
 
@@ -1882,12 +1951,15 @@ sub cruft_check {
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/userdata/$username", $dirstatus );
-
-        # Check main file in /var/cpanel/userdata/$username directory
-        my $dirstatus = check_dir("/var/cpanel/userdata/$username/main");
-        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-        else              { $dirstatus = RED "[MISSING]"; }
-        print_output( "/var/cpanel/userdata/$username/main", $dirstatus );
+        if ( $dirstatus =~ m/EXISTS/ ) {
+            my @FoundHere =
+qx[ grep -srliw '$QUERY' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
+            my $FoundHere;
+            foreach $FoundHere (@FoundHere) {
+                chomp($FoundHere);
+                print expand( "\t \\_" . $FoundHere . "\n" );
+            }
+        }
 
         # Check /var/cpanel/users/$username
         my $dirstatus = check_dir("/var/cpanel/users/$username");
@@ -2108,44 +2180,60 @@ sub cruft_check {
     }
 
     # Check MySQL users table.
-    if ( $username eq "" ) {
-        print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
+    my $skipMySQLCruft = 0;
+    if ( -e ("/var/cpanel/suspended/$username") ) {
+        $skipMySQLCruft = 1;
+        print BOLD YELLOW "$username is suspended, skipping MySQL checks!\n";
     }
-	else { 
-    	my @USERDBS  = undef;
-    	my @USERDBS1 = undef;
-    	my $USERDB;
-    	my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
-    	my $USERDB1;
-    	foreach $USERDB (@USERDBS) {
-        	chomp($USERDB);
-        	$USERDB = alltrim($USERDB);
-        	($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
-        	push( @USERDBS1, $USERDB1 );
-    	}
-    	@USERDBS = undef;
-    	@USERDBS = uniq(@USERDBS1);
-    	splice( @USERDBS, 0, 1 );
-    	my $DBCNT = @USERDBS;
-    	if ( $DBCNT > 0 ) {
-        	print YELLOW "MySQL Databases Found\n";
-        	foreach $USERDB (@USERDBS) {
-            	print expand( WHITE "\t \\_ $USERDB\n" );
-        	}
-    	}
-    	else {
-        	print BOLD CYAN "No MySQL Databases Found!\n";
-    	}
-    	#    # Check for database users
-        print YELLOW "MySQL Users Found in MySQL.user table\n";
-        my @DBusername =
-          qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'user: ' ];
-        my $NewDBUser;
-        @DBusername = uniq(@DBusername);
-        foreach $NewDBUser (@DBusername) {
-            chomp($NewDBUser);
-            $NewDBUser = alltrim($NewDBUser);
-            print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+    if ( $skipMySQLCruft == 0 ) {
+        if ( $username eq "" ) {
+            print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
+        }
+        else {
+            my @USERDBS  = undef;
+            my @USERDBS1 = undef;
+            my $USERDB;
+
+     #my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
+            my @USERDBS =
+              captureit(
+                "cpapi2 --user=$username MysqlFE listdbs | grep 'db: '");
+            my $USERDB1;
+            foreach $USERDB (@USERDBS) {
+                chomp($USERDB);
+                $USERDB = alltrim($USERDB);
+                ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
+                push( @USERDBS1, $USERDB1 );
+            }
+            @USERDBS = undef;
+            @USERDBS = uniq(@USERDBS1);
+            splice( @USERDBS, 0, 1 );
+            my $DBCNT = @USERDBS;
+            if ( $DBCNT > 0 ) {
+                print YELLOW "MySQL Databases Found\n";
+                foreach $USERDB (@USERDBS) {
+                    print expand( WHITE "\t \\_ $USERDB\n" );
+                }
+            }
+            else {
+                print BOLD CYAN "No MySQL Databases Found!\n";
+            }
+
+            #    # Check for database users
+            print YELLOW "MySQL Users Found in MySQL.user table\n";
+
+       #        my @DBusername =
+       #          qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'user: ' ];
+            my @DBusername =
+              captureit(
+                "cpapi2 --user=$username MysqlFE listdbs | grep 'user: '");
+            my $NewDBUser;
+            @DBusername = uniq(@DBusername);
+            foreach $NewDBUser (@DBusername) {
+                chomp($NewDBUser);
+                $NewDBUser = alltrim($NewDBUser);
+                print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+            }
         }
     }
 
@@ -3014,8 +3102,12 @@ sub spin {
 
 sub getSSLProvider {
     my $RetVal = "";
-    my $SSLmodule =
-qx[ whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' ];
+
+#    my $SSLmodule =
+#qx[ whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' ];
+    my $SSLmodule = captureit(
+"whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name'"
+    );
     ($RetVal) = ( split( /:/, $SSLmodule ) )[1];
     chomp($RetVal);
     if ( $RetVal eq "" ) { $RetVal = "Disabled"; }
@@ -3023,8 +3115,11 @@ qx[ whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' ]
 }
 
 sub ChkForIntegration {
+
+    #    my @ILINKS =
+    #      qx[ whmapi1 list_integration_links user=$username | grep 'app:' ];
     my @ILINKS =
-      qx[ whmapi1 list_integration_links user=$username | grep 'app:' ];
+      captureit("whmapi1 list_integration_links user=$username | grep 'app:'");
     my $cnt = @ILINKS;
     if ( $cnt > 0 ) {
         print YELLOW "[NOTE] * Integration links found in " . GREEN
@@ -3196,8 +3291,12 @@ qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0
     if ( $CPVersion gt "11.60.0.26" ) {
         if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
-            my $SSL_PENDING =
-qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+
+          #            my $SSL_PENDING =
+          #qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
+            my $SSL_PENDING = captureit(
+                "whmapi1 get_autossl_pending_queue | grep -B3 'user: $username'"
+            );
             if ($SSL_PENDING) {
                 my $NEW_SSL_PENDING;
                 ( $NEW_SSL_PENDING = $SSL_PENDING ) =~
@@ -3441,4 +3540,15 @@ sub checkperms {
             );
         }
     }
+}
+
+sub captureit {
+    my $tcCommand = $_[0];
+    chomp($tcCommand);
+    ( $stdout, $stderr, $rccode ) = capture {
+        return qx[ $tcCommand ] unless ($stderr);
+    }
+    return qx[ $tcCommand ] unless ($stdout);
+
+    #	return "" unless($stdout);
 }
