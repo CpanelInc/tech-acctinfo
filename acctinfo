@@ -12,13 +12,13 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.93";
+my $VERSION = "2.4.94";
 
 our $sslsyscertdir;
 our $stderr;
 our $stdout;
-our $rccode;
-our $qxCMD;
+our $success;
+our $command;
 our $sslsubject;
 our $startdate;
 our $expiredate;
@@ -37,7 +37,7 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
-use Capture::Tiny 'capture';
+use IO::CaptureOutput qw(capture qxx qxy);
 use Time::Piece;
 use Time::Seconds;
 use String::Random;
@@ -48,8 +48,6 @@ use Socket;
 use DBI;
 use integer;
 
-# Just found out that Date::Manip is only available in 11.58+
-# (in 11.56 and lower, it's not installed).
 my $noDateManip = 0;
 eval("use Date::Manip");
 if ($@) {
@@ -509,14 +507,10 @@ if ( $PWHash eq "" ) {
     print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
 }
 
-# Get IP address from .lastlogin file (if it exists)
-#my $LastLoginIP =
-#qx[ uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' ];
 my $LastLoginIP = captureit(
-"uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata'"
+"uapi --user=$username LastLogin get_last_or_current_logged_in_ip | grep 'data:' | grep -v 'metadata' | cut -d : -f2"
 );
 chomp($LastLoginIP);
-$LastLoginIP = substr( $LastLoginIP, 8 );
 if ( $LastLoginIP eq "''" ) {
     $LastLoginIP = "";
 }
@@ -558,22 +552,14 @@ if (   -e ("/var/cpanel/bwlimited/$username")
 {
     print RED
 "[WARN] - $MAINDOMAIN ($username) may have exceeded their bandwidth limit!\n";
-
-#my ($bwused) =
-#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
     my ($bwused) = captureit(
-"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count'"
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count:' | cut -d : -f2"
     );
     chomp($bwused);
-
-#    my ($bwmax) =
-#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
     my ($bwmax) = captureit(
-"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max'"
+"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max:' | cut -d : -f2"
     );
     chomp($bwmax);
-    $bwused =~ s/count://g;
-    $bwmax =~ s/max://g;
     $bwused = alltrim($bwused);
     $bwmax  = alltrim($bwmax);
     print expand("\t \\_ $bwused / $bwmax\n");
@@ -639,18 +625,12 @@ else {
 }
 
 # get quota info using whmapi1
-#my $quotaused =
-#  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
 my $quotaused =
-  alltrim(
-    captureit("whmapi1 accountsummary user=$username | grep 'diskused:'") );
+  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'diskused:' ]);
 ($quotaused) = ( split( /\s+/, $quotaused ) )[1];
 
-#my $maxquota =
-#  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'disklimit' ]);
 my $maxquota =
-  alltrim(
-    captureit("whmapi1 accountsummary user=$username | grep 'disklimit'") );
+  alltrim(qx[ whmapi1 accountsummary user=$username | grep 'disklimit' ]);
 ($maxquota) = ( split( /\s+/, $maxquota ) )[1];
 print "Disk Quota: $quotaused used of $maxquota allowed\n";
 
@@ -688,18 +668,12 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
 "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
 }
 else {
-#my ($bwused) =
-#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
-    my ($bwused) = captureit(
-"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count'"
-    );
+    my ($bwused) =
+qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'count:' | grep -v '_count' ];
     chomp($bwused);
 
-#    my ($bwmax) =
-#qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
-    my ($bwmax) = captureit(
-"uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max'"
-    );
+    my ($bwmax) =
+qx[ uapi --user=$username StatsBar get_stats display=bandwidthusage | grep 'max:' | grep -v '_max' ];
     chomp($bwmax);
     $bwused =~ s/count://g;
     $bwmax =~ s/max://g;
@@ -836,8 +810,6 @@ if ( $isEA4 and !$skipEA4 ) {
         print YELLOW "PHP-FPM pool detected\n";
     }
 
-    #my $old_fpm_flag =
-    #  qx[ whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1' ];
     my $old_fpm_flag =
       captureit("whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1'");
     if ($old_fpm_flag) {
@@ -1203,19 +1175,11 @@ if ( $listdbs or $all ) {
     my @USERDBS  = undef;
     my @USERDBS1 = undef;
     my $USERDB;
-
-    #my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
-    my @USERDBS =
-      captureit("cpapi2 --user=$username MysqlFE listdbs | grep 'db: '");
-    my $USERDB1;
-    foreach $USERDB (@USERDBS) {
-        chomp($USERDB);
-        $USERDB = alltrim($USERDB);
-        ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
-        push( @USERDBS1, $USERDB1 );
-    }
-    @USERDBS = undef;
-    @USERDBS = uniq(@USERDBS1);
+    my $USERDBS =
+      captureit(
+"cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' | cut -d : -f2 | sort | uniq"
+      );
+    my @USERDBS = split( '\s+', $USERDBS );
     splice( @USERDBS, 0, 1 );
     my $DBCNT = @USERDBS;
     if ( $DBCNT == 0 ) {
@@ -1232,32 +1196,37 @@ if ( $listdbs or $all ) {
         foreach $USERDB (@USERDBS) {
             chomp($USERDB);
             $USERDB =~ s/\\//g;
-
-            #print expand($USERDB) . "\n";
             print $USERDB . "\n";
-
-#            my @DBusername =
-#qx[ cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' ];
-            my @DBusername = captureit(
-"cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: '"
+            my $DBusername = captureit(
+"cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' | cut -d : -f2"
             );
+            my @DBusername = split( '\s+', $DBusername );
+            splice( @DBusername, 0, 1 );
             my $NewDBUser;
+            my @dbPrivs;
+
             foreach $NewDBUser (@DBusername) {
                 chomp($NewDBUser);
                 $NewDBUser = alltrim($NewDBUser);
-                print expand( YELLOW "\t \\_ " . $NewDBUser . "\n" );
-                my ($DBUserOnly) = ( split( /\s+/, $NewDBUser ) )[1];
-
-#                my @dbPrivs =
-#qx[ cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - ' ];
-                my @dbPrivs = captureit(
-"cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$DBUserOnly db=$USERDB | grep ' - '"
+                print expand( YELLOW "\t \\_ User: " . $NewDBUser . "\n" );
+                my $dbPrivs = captureit(
+"cpapi2 --user=$username MysqlFE getdbuserprivileges dbuser=$NewDBUser db=$USERDB | grep ' - ' | sort"
                 );
+                if ( $dbPrivs != ~m/ALL/ ) {
+                    @dbPrivs = split( '\s+', $dbPrivs );
+                    splice( @dbPrivs, 0, 1 );
+                }
                 my $dbPriv;
                 foreach $dbPriv (@dbPrivs) {
                     chomp($dbPriv);
-                    $dbPriv =~ s/ - /\\_/;
-                    print expand( BOLD MAGENTA "\t\t" . $dbPriv . "\n" );
+                    next if $dbPriv =~ m/-/;
+                    next if $dbPriv =~ m/PRIVILEGE/;
+                    if ( $dbPriv =~ m/ALL/ ) {
+                        print expand(
+                            BOLD MAGENTA "\t\t \\_ ALL PRIVILEGES\n" );
+                        next;
+                    }
+                    print expand( BOLD MAGENTA "\t\t \\_" . $dbPriv . "\n" );
                 }
             }
         }
@@ -1270,21 +1239,12 @@ if ( $listdbs or $all ) {
     if ( -e ("/usr/bin/psql") and $psql_running )
     {    ## PostGreSQL is installed and running
         my @PSQLDBS = undef;
-        my $PgDb;
-
-       #@PSQLDBS = qx[ cpapi2 --user=$username Postgres listdbs | grep 'db: ' ];
-        @PSQLDBS =
-          captureit("cpapi2 --user=$username Postgres listdbs | grep 'db: '");
-        my $USERDB1;
-        my @USERDBS1;
-        foreach $USERDB (@PSQLDBS) {
-            chomp($USERDB);
-            $USERDB = alltrim($USERDB);
-            ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
-            push( @USERDBS1, $USERDB1 );
-        }
-        @PSQLDBS = undef;
-        @PSQLDBS = uniq(@USERDBS1);
+        my $PSQLDBS =
+          captureit(
+"cpapi2 --user=$username Postgres listdbs | grep 'db: ' | cut -d : -f2 | sort | uniq"
+          );
+        my @PSQLDBS = split( '\s+', $PSQLDBS );
+        splice( @PSQLDBS, 0, 1 );
         my $PgDbCount = @PSQLDBS;
         if ( $PgDbCount == 0 ) {
             print WHITE "No PostGreSQL databases found for "
@@ -1301,21 +1261,15 @@ if ( $listdbs or $all ) {
             foreach $PgDb (@PSQLDBS) {
                 chomp($PgDb);
                 $PgDb = alltrim($PgDb);
-
-                #                print expand( YELLOW "\t \\_" . $PgDb . "\n" );
                 print WHITE $PgDb . "\n";
-
- #                my @DBusername =
- #qx[ cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: ' ];
                 my @DBusername = captureit(
-"cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: '"
+"cpapi2 --user=$username Postgres listusersindb db=$PgDb | grep 'user: ' | cut -d : -f2"
                 );
                 my $NewDBUser;
                 foreach $NewDBUser (@DBusername) {
                     chomp($NewDBUser);
                     $NewDBUser = alltrim($NewDBUser);
-                    print expand( YELLOW "\t \\_ " . $NewDBUser . "\n" );
-                    my ($DBUserOnly) = ( split( /\s+/, $NewDBUser ) )[1];
+                    print expand( YELLOW "\t \\_ User: " . $NewDBUser . "\n" );
                 }
             }
         }
@@ -1335,13 +1289,21 @@ if ( $listssls or $all ) {
         $sslsyscertdir = "/var/cpanel/ssl/apache_tls/";
         if ( -e ("$sslsyscertdir/$MAINDOMAIN/certificates") ) {
             $sslsubject =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -subject -noout ];
+              captureit(
+"openssl x509 -in '$sslsyscertdir/$MAINDOMAIN/certificates' -subject -noout"
+              );
             $startdate =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -startdate -noout ];
+              captureit(
+"openssl x509 -in '$sslsyscertdir/$MAINDOMAIN/certificates' -startdate -noout"
+              );
             $expiredate =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -enddate -noout ];
+              captureit(
+"openssl x509 -in '$sslsyscertdir/$MAINDOMAIN/certificates' -enddate -noout"
+              );
             $isSelfSigned =
-qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed certificate' ];
+              captureit(
+"openssl verify '$sslsyscertdir/$MAINDOMAIN/certificates' | grep 'self signed certificate'"
+              );
 
             print WHITE "SSL Certificates installed under "
               . CYAN $MAINDOMAIN
@@ -1351,8 +1313,12 @@ qx[ openssl verify "$sslsyscertdir/$MAINDOMAIN/certificates" | grep 'self signed
             dispSSLdata($MAINDOMAIN);
             print WHITE "Protecting the following Subject Alternative Names:\n";
             my $SAN;
-            my @getSANS =
-qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
+            my $getSANS =
+              captureit(
+"openssl x509 -in '$sslsyscertdir/$MAINDOMAIN/certificates' -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+'"
+              );
+            my @getSANS = split( '\s+', $getSANS );
+            splice( @getSANS, 0, 1 );
 
             foreach $SAN (@getSANS) {
                 chomp($SAN);
@@ -1364,20 +1330,18 @@ qx[ openssl x509 -in "$sslsyscertdir/$MAINDOMAIN/certificates" -noout -text | gr
             print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
         }
 
-# Check for excluded domains for AutoSSL
-#        my @isExcluded =
-#qx[ uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' ];
-        my @isExcluded = captureit(
-"uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:'"
+        my $isExcluded = captureit(
+"uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' | cut -d : -f2"
         );
+        my @isExcluded = split( '\s+', $isExcluded );
+        splice( @isExcluded, 0, 1 );
         if ( (@isExcluded) ) {
             my $isExcluded;
             print BOLD MAGENTA
               "*** The following domains are excluded from AutoSSL ***\n";
             for $isExcluded (@isExcluded) {
                 chomp($isExcluded);
-                print expand(
-                    YELLOW "\t \\_ " . CYAN substr( $isExcluded, 23 ) . "\n" );
+                print expand( YELLOW "\t \\_ " . CYAN $isExcluded . "\n" );
             }
         }
 
@@ -1419,8 +1383,6 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
         if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
 
-          #my $SSL_PENDING =
-          #qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
             my $SSL_PENDING = captureit(
                 "whmapi1 get_autossl_pending_queue | grep -B3 'user: $username'"
             );
@@ -1710,6 +1672,7 @@ sub cruft_check {
     my $TrueUserLine   = "";
     my $isTerminated   = 0;
     my $termdate       = "";
+    my $createdate     = "";
     my @temp           = undef;
     my $DNSLineCnt     = 0;
     my $TotalDomainCnt = 0;
@@ -1740,13 +1703,16 @@ sub cruft_check {
         }
         if (/$check_for/) {
             $is_acct = 1;
-            if (/CREATE/) {
+            if (/:CREATE:/) {
                 $isActive     = 1;
                 $isTerminated = 0;
                 chomp( $username   = $temp[-1] );
                 chomp( $MAINDOMAIN = $temp[-3] );
+                @temp       = ();
+                @temp       = split(/:/);
+                $createdate = @temp[0] . ":" . @temp[1] . ":" . @temp[2];
             }
-            if (/REMOVE/) {
+            if (/:REMOVE:/) {
                 chomp( $username   = $temp[-1] );
                 chomp( $MAINDOMAIN = $temp[-2] );
                 $isActive     = 0;
@@ -1762,8 +1728,11 @@ sub cruft_check {
         print "$MAINDOMAIN ($username) was terminated on $termdate\n";
     }
     if ($isActive) {
-        print
-"$MAINDOMAIN ($username) is active (according to /var/cpanel/accounting.log)\n";
+        if ( $MAINDOMAIN eq $HOSTNAME or $MAINDOMAIN eq "root" ) {
+            print RED
+"[WARN] - $MAINDOMAIN is either root or is the same as hostname $HOSTNAME!\n";
+        }
+        print "$MAINDOMAIN ($username) is active since $createdate\n";
         if ( $addoncnt > 0 ) {
             print "It has $addoncnt Addon domains\n";
         }
@@ -1774,17 +1743,17 @@ sub cruft_check {
             print "It has $parkcnt Aliased domains\n";
         }
     }
+    if ( !($isTerminated) and !($isActive) ) {
+        print BOLD YELLOW
+          "Nothing was found in /var/cpanel/accounting.log for $QUERY\n";
+    }
 
     # END OF ACCOUNTING LOG CHECK
 
-# Now count the number of "DNS" lines in /var/cpanel/users/$username and make sure
-# it equalts $TotalDomainCnt.  Warn if it does NOT!
-# Add up the total number of additional domains
     $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
-
-    # Now add one more to that for the main account
     $TotalDomainCnt++;
-    $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
+    $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ]
+      unless ( $username eq "" );
 
     my $useQuery = 0;
     if (    !$isActive
@@ -1875,7 +1844,8 @@ sub cruft_check {
     my $file2searchu;
     if ($username) {
         if ( $username ne "nobody" ) {
-            print "Searching the following files for $username:\n";
+            print "Searching the following files for user: "
+              . BOLD MAGENTA $username . "\n";
             foreach $file2searchu (@FILES2SEARCHUSER) {
                 chomp($file2searchu);
                 if ( !( -s ($file2searchu) ) ) {
@@ -1895,11 +1865,10 @@ sub cruft_check {
     else {
         print "No Username detected for $QUERY - skipping some checks!\n\n";
     }
-    if ($IS_USERNAME) {
-        $QUERY = $MAINDOMAIN;
-    }
     if ( $QUERY ne "" ) {
-        print "Searching the following files for $QUERY\n";
+        print "Searching the following files for domain: "
+          . BOLD MAGENTA $MAINDOMAIN . "\n"
+          unless ( $MAINDOMAIN eq "" );
         foreach $file2search (@FILES2SEARCH) {
             chomp($file2search);
             if ( !( -s ($file2search) ) ) {
@@ -2005,9 +1974,6 @@ qx[ grep -srliw '$QUERY' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/bandwidth/$username.sqlite", $dirstatus );
 
-    }
-    else {
-        print "Could not determine username so skipping all username checks!\n";
     }
     if ( !$IS_USERNAME ) {
 
@@ -2181,32 +2147,19 @@ qx[ grep -srliw '$QUERY' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
 
     # Check MySQL users table.
     my $skipMySQLCruft = 0;
-    if ( -e ("/var/cpanel/suspended/$username") ) {
-        $skipMySQLCruft = 1;
-        print BOLD YELLOW "$username is suspended, skipping MySQL checks!\n";
-    }
     if ( $skipMySQLCruft == 0 ) {
-        if ( $username eq "" ) {
+        if ( $username eq "" or $QUERY eq "" ) {
             print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
         }
         else {
             my @USERDBS  = undef;
             my @USERDBS1 = undef;
             my $USERDB;
-
-     #my @USERDBS = qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' ];
-            my @USERDBS =
+            my $USERDBS =
               captureit(
-                "cpapi2 --user=$username MysqlFE listdbs | grep 'db: '");
-            my $USERDB1;
-            foreach $USERDB (@USERDBS) {
-                chomp($USERDB);
-                $USERDB = alltrim($USERDB);
-                ($USERDB1) = ( split( /\s+/, $USERDB ) )[1];
-                push( @USERDBS1, $USERDB1 );
-            }
-            @USERDBS = undef;
-            @USERDBS = uniq(@USERDBS1);
+"cpapi2 --user=$username MysqlFE listdbs | grep 'db: ' | cut -d : -f2 | sort | uniq"
+              );
+            my @USERDBS = split( '\s+', $USERDBS );
             splice( @USERDBS, 0, 1 );
             my $DBCNT = @USERDBS;
             if ( $DBCNT > 0 ) {
@@ -2221,41 +2174,44 @@ qx[ grep -srliw '$QUERY' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
 
             #    # Check for database users
             print YELLOW "MySQL Users Found in MySQL.user table\n";
-
-       #        my @DBusername =
-       #          qx[ cpapi2 --user=$username MysqlFE listdbs | grep 'user: ' ];
-            my @DBusername =
+            my $DBusername =
               captureit(
-                "cpapi2 --user=$username MysqlFE listdbs | grep 'user: '");
+"mysql -BNe \"SELECT User FROM mysql.user WHERE User LIKE '$username\\_%'\" | sort | uniq"
+              );
+            $DBusername .=
+              captureit(
+"mysql -BNe \"SELECT User FROM mysql.user WHERE User = '$username'\" | sort | uniq"
+              );
+            my @DBusernames = split( '\s+', $DBusername );
             my $NewDBUser;
-            @DBusername = uniq(@DBusername);
-            foreach $NewDBUser (@DBusername) {
+            foreach $NewDBUser (@DBusernames) {
                 chomp($NewDBUser);
-                $NewDBUser = alltrim($NewDBUser);
                 print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
             }
         }
     }
 
-    # Check for postgres
-    my $psql_running = 0;
-    if (qx[ ps ax | grep postgres | grep -v grep ]) { $psql_running = 1; }
-    if ( -e ("/usr/bin/psql") and $psql_running )
-    {    ## PostGreSQL is installed and running
-        my @check_postgres_users =
-qx[ /usr/bin/psql -t -h localhost --username=postgres -c 'select usename from pg_user'|grep "$username" ];
-        if (@check_postgres_users) {
-            print YELLOW "PostGreSQL Users Found in pg_user database\n";
-            my @postgres_users = split( "\n", "@check_postgres_users" );
-            foreach (@postgres_users) {
+    # Check postgres
+    my $PostGreSQLDBs = captureit(
+"cpapi2 --user=$username Postgres listusers | grep 'db: ' | cut -d : -f2 | sort | uniq"
+    );
+    my @PostGreSQLDBs = split( '\s+', $PostGreSQLDBs );
+    splice( @PostGreSQLDBs, 0, 1 );
+    if (@PostGreSQLDBs) {
+        print YELLOW "PostGreSQL Databases Found:\n";
+        foreach (@PostGreSQLDBs) {
+            chomp($_);
+            print expand( WHITE "\t \\_" . $_ . "\n" );
+            my $PSQLUsers = captureit(
+"cpapi2 --user=$username Postgres listusersindb db=$_ | grep 'user: ' | cut -d : -f2 | sort | uniq"
+            );
+            my @PSQLUsers = split( '\s+', $PSQLUsers );
+            splice( @PSQLUsers, 0, 1 );
+            foreach (@PSQLUsers) {
                 chomp($_);
-                print expand( WHITE "\t \\_" . $_ . "\n" );
+                print expand( WHITE "\t\t \\_ User: " . $_ . "\n" );
             }
         }
-    }
-    else {
-        print "\nPostGreSQL server is not installed (or running) on "
-          . MAGENTA $HOSTNAME . "\n";
     }
     border();
     print "</c>\n" unless ($nocodeblock);
@@ -2388,7 +2344,6 @@ sub get_php_version() {
     my $userdataline;
     my @USERDATA;
 
-    # NOTE: If $IS_USERNAME, then use $MAINDOMAIN, otherwise use $QUERY.
     my $tcDomain = "";
     if ( $IS_USERNAME or $QUERY eq $MAINDOMAIN ) {
         $tcDomain = $MAINDOMAIN;
@@ -2443,7 +2398,6 @@ sub display_mail_info {
         $DOMAIN = $MAINDOMAIN;
     }
 
-    # first let's get the email accounts.
     my $emailacctline;
     opendir( EMAILACCTS, "$RealHome/mail/$DOMAIN" );
     my @EMAILACCTS = readdir(EMAILACCTS);
@@ -3038,7 +2992,6 @@ sub scan {
     my @DEFINITIONS = qx[ curl -s $URL ];
     my $StringCnt   = @DEFINITIONS;
 
-    # Need to define and use $RealHome if $HOMEDIR doesn't exist!!!
     open( PASSWD, "/etc/passwd" );
     @PASSWDS = <PASSWD>;
     close(PASSWD);
@@ -3103,21 +3056,15 @@ sub spin {
 sub getSSLProvider {
     my $RetVal = "";
 
-#    my $SSLmodule =
-#qx[ whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' ];
     my $SSLmodule = captureit(
-"whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name'"
+"whmapi1 get_autossl_providers | grep -A1 'enabled: 1' | grep 'module_name' | cut -d : -f2"
     );
-    ($RetVal) = ( split( /:/, $SSLmodule ) )[1];
-    chomp($RetVal);
+    $RetVal = $SSLmodule;
     if ( $RetVal eq "" ) { $RetVal = "Disabled"; }
     return $RetVal;
 }
 
 sub ChkForIntegration {
-
-    #    my @ILINKS =
-    #      qx[ whmapi1 list_integration_links user=$username | grep 'app:' ];
     my @ILINKS =
       captureit("whmapi1 list_integration_links user=$username | grep 'app:'");
     my $cnt = @ILINKS;
@@ -3291,9 +3238,6 @@ qx[ openssl x509 -in "$sslcertdir/$cert" -noout -text | grep -oP '(?<=DNS:)[a-z0
     if ( $CPVersion gt "11.60.0.26" ) {
         if ( $SSLProvider eq " cPanel" ) {
             print "\nChecking for pending AutoSSL orders: \n";
-
-          #            my $SSL_PENDING =
-          #qx[ whmapi1 get_autossl_pending_queue | grep -B3 'user: $username' ];
             my $SSL_PENDING = captureit(
                 "whmapi1 get_autossl_pending_queue | grep -B3 'user: $username'"
             );
@@ -3312,7 +3256,7 @@ s/order_item_id: /order_item_id: https:\/\/manage2.cpanel.net\/certificate.cgi\?
         }
     }
 
-    # Check for CAA records here.
+    # Check for CAA records here. OLD METHOD!!!
     print "Checking for CAA records: \n";
     my @HasCAA = qx[ dig +tries=2 +time=5 $MAINDOMAIN caa +short ];
     my $CAARecord;
@@ -3353,10 +3297,11 @@ sub isUserReserved {
     my $part3;
     if ( $IS_USERNAME == 0 ) {
         print "Looking for username for $QUERY... - ";
-        my $part1 = qx[ grep $lcUser /etc/userdatadomains ];
-        my ($part2) = ( split( /: /, $part1 ) )[1];
-        my ($part3) = ( split( /=/,  $part2 ) )[0];
-        $lcUser = $part3;
+
+        #my $part1 = qx[ grep $lcUser /etc/userdatadomains ];
+        my $part1 = captureit(
+            "grep $QUERY /etc/userdatadomains | cut -d = -f1 | cut -d : -f2 ");
+        $part1 =~ s/\s+//g;
         if ($lcUser) {
             print "Found ($lcUser)\n";
         }
@@ -3543,12 +3488,15 @@ sub checkperms {
 }
 
 sub captureit {
-    my $tcCommand = $_[0];
-    chomp($tcCommand);
-    ( $stdout, $stderr, $rccode ) = capture {
-        return qx[ $tcCommand ] unless ($stderr);
-    }
-    return qx[ $tcCommand ] unless ($stdout);
+    my @tcCommand = $_[0];
+    chomp(@tcCommand);
 
-    #	return "" unless($stdout);
+    #	print "DEBUG: @tcCommand\n";
+    ( $stdout, $stderr, $success ) = qxx(@tcCommand);
+    if ($stderr) {
+        return "";
+    }
+    else {
+        return $stdout;
+    }
 }

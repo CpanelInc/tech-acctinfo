@@ -1,3 +1,12 @@
+V2.4.94- Bug fix - cruft check errored if MySQL checks occurred when username missing from 
+         /etc/passwd.  - Reported by Kaden P. 
+V2.4.94- Bug fix - Needed to anchor CREATE and REMOVE from /var/cpanel/accounting.log to 
+         accommodate the new CREATEAPITOKEN and REMOVEAPITOKEN strings. - Reported by Chris D. 
+V2.4.94- Bug fix - cruft check was checking for "root" user when username could not be 
+         determined. - Reported by Jordan B.
+V2.4.94- Bug fix - when entering domain, it searches for a username and in some cases was
+         returning the wrong username.  - Reported by Jack S. 
+
 V2.4.93- Bug fix - if /var/cpanel/users/username file is missing, skip check for missing DNS lines.
 V2.4.93- Bug fix - skip MySQL checks during cruft check if account is suspended. 
 V2.4.93- Add /etc/nocgiusers and /etc/userbwlimits to cruft check
