@@ -1,3 +1,29 @@
+V2.4.94- Bug fix - cruft check errored if MySQL checks occurred when username missing from 
+         /etc/passwd.  - Reported by Kaden P. 
+V2.4.94- Bug fix - Needed to anchor CREATE and REMOVE from /var/cpanel/accounting.log to 
+         accommodate the new CREATEAPITOKEN and REMOVEAPITOKEN strings. - Reported by Chris D. 
+V2.4.94- Bug fix - cruft check was checking for "root" user when username could not be 
+         determined. - Reported by Jordan B.
+V2.4.94- Bug fix - when entering domain, it searches for a username and in some cases was
+         returning the wrong username.  - Reported by Jack S. 
+
+V2.4.93- Bug fix - if /var/cpanel/users/username file is missing, skip check for missing DNS lines.
+V2.4.93- Bug fix - skip MySQL checks during cruft check if account is suspended. 
+V2.4.93- Add /etc/nocgiusers and /etc/userbwlimits to cruft check
+V2.4.93- Add check to cruft check if username begins with cptkt (cPanel support reseller).
+         These checks are unpredictable!
+V2.4.93- Skip /home/username/.trash for *.ini checks
+V2.4.93- Remove OCSP check from SAN's (not necessary).
+
+V2.4.92- Bug fix - related to --cruft check skipping certain checks if username is blank
+         Caused MySQL errors - Thanks Kaden.
+
+V2.4.91- cruft check will skip username checks if username could not be determined
+V2.4.91- permissions check cleaned up and added .well-known and pki-validation directories
+V2.4.91- Add check for suspended.page directory under ~/public_html (old reseller suspend method)
+V2.4.91- MySQL usernames and GRANTS now displayed next to databases when --listdb switch is used
+V2.4.91- Added check for duplicate INBOX.INBOX (CPANEL-19556) to --mail switch
+
 V2.4.90- Change LastLoginIP to a uapi call
 V2.4.90- Change AutoSSL excluded domain to a uapi call
 V2.4.90- Change AutoSSL feature enabled to a whmapi1 call
