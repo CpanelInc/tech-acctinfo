@@ -1,3 +1,14 @@
+V2.4.95- Add check for DNS= vs main_domain line and warn if different (causes MISSING IP address).
+V2.4.95- Add check for MAX_DEFER_FAIL_PERCENTAGE > 100 and warn if found CPANEL-20909.
+V2.4.95- Add check for misisng/blank documentroot and warn if found.
+V2.4.95- Add check for max_defer in email_send_limits and alert if found.
+V2.4.95- Clean up cruft check to report "None" for MySQL users (Suggested by H. Borresen)
+V2.4.95- Bug Fix cruft check failed to detect users/userdata under certain conditions (Reported by S. Clay)
+V2.4.95- Bug Fix --mail check sometimes reported -2 email accounts found.
+V2.4.95- Improved reserved username check
+V2.4.95- Bug Fix - pending autossl check was returning no data even though there were pending orders.
+V2.4.95- Improved quota check and removed the need for --skipquota function.
+
 V2.4.94- Bug fix - cruft check errored if MySQL checks occurred when username missing from 
          /etc/passwd.  - Reported by Kaden P. 
 V2.4.94- Bug fix - Needed to anchor CREATE and REMOVE from /var/cpanel/accounting.log to 
