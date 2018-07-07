@@ -1,3 +1,9 @@
+V2.4.96- Bug Fix - SSL output, displaying multiple title lines
+V2.4.96- Bug Fix - anchored username during search so it would only return the correct match.
+V2.4.96- Bug Fix - Don't grep DNS lines for missing /v/c/u/username during cruft check if account was terminated.  
+V2.4.96- Bug Fix - Fix Can't return outside subroutine error when checking for CAA records.
+V2.4.96- Add MySQL Database size next to databases during --listdbs check. Nothing printed if size is 0 bytes or can't be determined.
+
 V2.4.95- Add check for DNS= vs main_domain line and warn if different (causes MISSING IP address).
 V2.4.95- Add check for MAX_DEFER_FAIL_PERCENTAGE > 100 and warn if found CPANEL-20909.
 V2.4.95- Add check for misisng/blank documentroot and warn if found.

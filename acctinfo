@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.95";
+my $VERSION = "2.4.96";
 
 our $sslsyscertdir;
 our $stderr;
@@ -41,6 +41,7 @@ use IO::CaptureOutput qw(capture qxx qxy);
 use Time::Piece;
 use Time::Seconds;
 use String::Random;
+use Math::Round;
 use Text::Tabs;
 $tabstop = 4;
 use Net::DNS;
@@ -478,7 +479,7 @@ if ($IS_USERNAME) {
 }
 else {
     print GREEN ON_BLACK "\nThe user name for "
-      . BLUE $DOMAIN
+      . BRIGHT_BLUE $DOMAIN
       . GREEN ON_BLACK " is: "
       . YELLOW $username . "\n";
 }
@@ -1212,7 +1213,21 @@ if ( $listdbs or $all ) {
         foreach $USERDB (@USERDBS) {
             chomp($USERDB);
             $USERDB =~ s/\\//g;
-            print $USERDB . "\n";
+
+            #print $USERDB . "\n";
+            my $DBSize = captureit(
+"mysql -BNe \"SELECT table_schema, sum(data_length + index_length) / 1024 / 1024 FROM information_schema.TABLES WHERE table_schema = '$USERDB' GROUP BY table_schema;\""
+            );
+            my @DBSize = split( '\s+', $DBSize );
+            splice( @DBSize, 0, 1 );
+            chomp($DBSize);
+            alltrim($DBSize);
+            print $USERDB;
+            print BRIGHT_GREEN " [Size: " unless ( !@DBSize );
+            my $rounded = sprintf( "%.2f", @DBSize );
+            print BRIGHT_WHITE $rounded unless ( !@DBSize );
+            print BRIGHT_GREEN " MB ]"  unless ( !@DBSize );
+            print "\n";
             my $DBusername = captureit(
 "cpapi2 --user=$username MysqlFE listusersindb db=$USERDB | grep 'user: ' | cut -d : -f2"
             );
@@ -1346,20 +1361,11 @@ if ( $listssls or $all ) {
             print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
         }
 
-        my $isExcluded = captureit(
-"uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' | cut -d : -f2"
-        );
-        my @isExcluded = split( '\s+', $isExcluded );
-        splice( @isExcluded, 0, 1 );
-        if ( (@isExcluded) ) {
-            my $isExcluded;
-            print BOLD MAGENTA
-              "*** The following domains are excluded from AutoSSL ***\n";
-            for $isExcluded (@isExcluded) {
-                chomp($isExcluded);
-                print expand( YELLOW "\t \\_ " . CYAN $isExcluded . "\n" );
-            }
-        }
+        #        print WHITE "SSL Certificates installed under "
+        #          . CYAN $MAINDOMAIN
+        #          . WHITE " ("
+        #          . GREEN $username
+        #          . WHITE ")\n";
 
         foreach $SUB (@SUBDOMAINS) {
             chomp($SUB);
@@ -1385,14 +1391,26 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
                 }
             }
             else {
-                print WHITE "SSL Certificates installed under "
-                  . CYAN $MAINDOMAIN
-                  . WHITE " ("
-                  . GREEN $username
-                  . WHITE ")\n";
                 print YELLOW $SUB . "\n";
                 print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
             }
+        }
+
+        my $isExcluded = captureit(
+"uapi --user=$username SSL get_autossl_excluded_domains | grep 'excluded_domain:' | cut -d : -f2"
+        );
+        my @isExcluded = split( '\s+', $isExcluded );
+        splice( @isExcluded, 0, 1 );
+        if ( (@isExcluded) ) {
+            my $isExcluded;
+            print BOLD MAGENTA
+              "\n*** The following domains are excluded from AutoSSL ***\n";
+            for $isExcluded (@isExcluded) {
+                chomp($isExcluded);
+                print expand(
+                    YELLOW "\t \\_ " . BRIGHT_BLUE $isExcluded . "\n" );
+            }
+            print "\n";
         }
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
@@ -1468,8 +1486,8 @@ qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' 
             if ($DNSSEC_error) {
                 print RED "[WARN] "
                   . WHITE "CAA record check failed with DNSSEC error!\n";
-                border();
-                return;
+                $CAAFound = 1;
+                last;
             }
             @HasCAA =
 qx[ dig +tries=2 +time=5 \@208.67.220.220 +noall +answer $CAADOMAIN CAA ];
@@ -1710,9 +1728,9 @@ sub cruft_check {
 
    # Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
    # ONLY MAIN ACCT / DOMAIN is checked
-    print BLUE "From your query of "
+    print BRIGHT_BLUE "From your query of "
       . GREEN $QUERY
-      . BLUE " I have determined:\n";
+      . BRIGHT_BLUE " I have determined:\n";
     my $isActive;
     my $is_acct;
     my $check_for;
@@ -1748,8 +1766,10 @@ sub cruft_check {
         }
     }
     close(ACCOUNTING);
+    my $NOGrep = 0;
     if ($isTerminated) {  ## $is_acct is true if this is the main account/domain
         print "$MAINDOMAIN ($username) was terminated on $termdate\n";
+        $NOGrep = 1;
     }
     if ($isActive) {
         if ( $MAINDOMAIN eq $HOSTNAME or $MAINDOMAIN eq "root" ) {
@@ -1777,7 +1797,7 @@ sub cruft_check {
     $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
     $TotalDomainCnt++;
     $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ]
-      unless ( $username eq "" );
+      unless ( $username eq "" or $NOGrep );
 
     my $useQuery = 0;
     if (    !$isActive
@@ -3339,9 +3359,8 @@ sub isUserReserved {
     }
     if ( $IS_USERNAME == 0 ) {
         print "Looking for username for $QUERY... - ";
-
         my $part1 = captureit(
-            "egrep '$QUERY' /etc/userdatadomains | cut -d = -f1 | cut -d : -f2 "
+"egrep '^$QUERY' /etc/userdatadomains | cut -d = -f1 | cut -d ' ' -f2 "
         );
         $part1 =~ s/\s+//g;
         chomp($part1);
