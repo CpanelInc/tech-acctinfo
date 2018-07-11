@@ -1,3 +1,5 @@
+V2.4.97- Bug Fix - Add check for UID_MIN/GID_MIN to cruft check.  If /etc/passwd file exists and username is known.  
+
 V2.4.96- Bug Fix - SSL output, displaying multiple title lines
 V2.4.96- Bug Fix - anchored username during search so it would only return the correct match.
 V2.4.96- Bug Fix - Don't grep DNS lines for missing /v/c/u/username during cruft check if account was terminated.  

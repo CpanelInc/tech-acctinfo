@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.96";
+my $VERSION = "2.4.97";
 
 our $sslsyscertdir;
 our $stderr;
@@ -508,6 +508,19 @@ foreach $passline (@PASSWDS) {
     }
 }
 
+# Check UID/GID against UID_MIN and GID_MIN in /etc/login.defs
+my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
+my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
+($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
+($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
+$UID_MIN = alltrim($UID_MIN);
+$GID_MIN = alltrim($GID_MIN);
+
+if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
+    print RED
+"[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n";
+}
+
 # Check for missing hash in /etc/shadow
 my ($PWHash) = ( split( /:/, qx[ grep $username /etc/shadow ] ) )[1];
 if ( $PWHash eq "" ) {
@@ -619,20 +632,9 @@ if ( -e ("/etc/ftpusers") ) {
 "[WARN] - $username found in /etc/ftpusers file (FTP authentication will fail!\n";
     }
 }
-print WHITE "UID/GID: " . CYAN $UID . "/" . $GID;
-my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
-my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
-($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
-($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
-$UID_MIN = alltrim($UID_MIN);
-$GID_MIN = alltrim($GID_MIN);
 
-if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
-    print RED " - [WARN] - UID/GID is less than $UID_MIN/$GID_MIN\n";
-}
-else {
-    print "\n";
-}
+# Check to make sure UID/GID is greater than what is defined in /etc/login.defs
+print WHITE "UID/GID: " . CYAN $UID . "/" . $GID . "\n";
 
 # get quota info using whmapi1
 my $quotaused =
@@ -1790,6 +1792,33 @@ sub cruft_check {
     if ( !($isTerminated) and !($isActive) ) {
         print BOLD YELLOW
           "Nothing was found in /var/cpanel/accounting.log for $QUERY\n";
+    }
+
+    if ( $username and -e "/etc/passwd" ) {
+        open( PASSWD, "/etc/passwd" );
+        @PASSWDS = <PASSWD>;
+        close(PASSWD);
+        foreach $passline (@PASSWDS) {
+            chomp($passline);
+            if ( $passline =~ m/\b$username\b/ ) {
+                ($UID) = ( split( /:/, $passline ) )[2];
+                ($GID) = ( split( /:/, $passline ) )[3];
+                last;
+            }
+        }
+
+        # Check UID/GID against UID_MIN and GID_MIN in /etc/login.defs
+        my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
+        my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
+        ($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
+        ($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
+        $UID_MIN = alltrim($UID_MIN);
+        $GID_MIN = alltrim($GID_MIN);
+
+        if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
+            print RED
+"[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n";
+        }
     }
 
     # END OF ACCOUNTING LOG CHECK
