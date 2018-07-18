@@ -335,6 +335,15 @@ if ( $BWLIMIT ne "unlimited" ) {
     $BWLIMIT = ( $BWLIMIT / 1024 ) / 1024;
 }
 
+my $HAS_CUSTOMHTTPCONF = 
+
+captureit(
+whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1'"
+  );
+
+$HAS_CUSTOMHTTPCONF = ($HAS_CUSTOMHTTPCONF) ? "CE" : "CUM";
+my $HAS_CUSTOMHTTPCONF_TEXT;
+
 my $HAS_AUTOSSL =
 
   captureit(
