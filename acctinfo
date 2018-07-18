@@ -725,6 +725,7 @@ print WHITE "Max Mailman Lists: " . CYAN $MAXLST . "\n";
 print WHITE "Max FTP Accounts: " . CYAN $MAXFTP . "\n";
 print WHITE "Max Bandwidth Allowed: " . CYAN $BWLIMIT . " MB\n";
 print WHITE "AutoSSL Enabled: " . CYAN $HAS_AUTOSSL . "\n";
+print WHITE "CustomHTTTCONF Enabled: " . CYAN $HAS_CUSTOMHTTPCONF . "\n";
 print WHITE "Backup Enabled: "
   . CYAN $BACKUPENABLED
   . GREEN " / "
