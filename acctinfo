@@ -338,10 +338,10 @@ if ( $BWLIMIT ne "unlimited" ) {
 my $HAS_CUSTOMHTTPCONF = 
 
 captureit(
-"whmapi1 verify_user_has_feature user=$username feature=autossl | grep 'has_feature: 1'"
+"test -d /etc/apache2/conf.d/userdata/std/2_4/$username/"
   );
 
-$HAS_CUSTOMHTTPCONF = ($HAS_CUSTOMHTTPCONF) ? "Ce" : "Cum";
+$HAS_CUSTOMHTTPCONF = ($HAS_CUSTOMHTTPCONF) ? "Yes" : "No";
 my $HAS_CUSTOMHTTPCONF_TEXT;
 
 my $HAS_AUTOSSL =
