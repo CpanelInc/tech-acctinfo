@@ -885,14 +885,14 @@ if ( $isEA4 and !$skipEA4 ) {
 }
 
 # Check for custom (user) httpd.conf files
-if ( -e ("/etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN/") ) {
+if ( -e ("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/") ) {
     print expand( YELLOW
-"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN\n"
+"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN\n"
     );
 }
-if ( -e ("/etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN/") ) {
+if ( -e ("/etc/apache2/conf.d/userdata/ssl/2_4/$username/$MAINDOMAIN/") ) {
     print expand( YELLOW
-"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN\n"
+"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/ssl/2_4/$username/$MAINDOMAIN\n"
     );
 }
 
