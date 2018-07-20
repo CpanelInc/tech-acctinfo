@@ -338,7 +338,11 @@ if ( $BWLIMIT ne "unlimited" ) {
 my $HAS_CUSTOMHTTPCONF = 
 
 captureit(
-"test -d /etc/apache2/conf.d/userdata/std/2_4/$username/"
+"if ( -e ("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/") ) {
+    print expand( YELLOW
+        "\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN\n"
+                );
+    }"
   );
 
 $HAS_CUSTOMHTTPCONF = ($HAS_CUSTOMHTTPCONF) ? "Yes" : "No";
