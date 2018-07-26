@@ -1,3 +1,7 @@
+V2.4.98- Bug Fix - old_fpm_flag was sometimes returning true even though no fpm.conf file was found.
+V2.4.98- Add - check for existence of shadow.roottn.bak file during --mail check (possible compromise) - Thanks Hans B.
+V2.4.98- Fix - Spelling error during --cruft check "MySQL users in myaql.user table" - Thanks Joshua B. 
+
 V2.4.97- Bug Fix - Add check for UID_MIN/GID_MIN to cruft check.  If /etc/passwd file exists and username is known.  
 
 V2.4.96- Bug Fix - SSL output, displaying multiple title lines

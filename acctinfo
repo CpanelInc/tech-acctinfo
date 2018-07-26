@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.97";
+my $VERSION = "2.4.98";
 
 our $sslsyscertdir;
 our $stderr;
@@ -811,7 +811,7 @@ if ( $isEA4 and !$skipEA4 ) {
 
     my $old_fpm_flag =
       captureit("whmapi1 php_get_old_fpm_flag | grep 'old_fpm_flag: 1'");
-    if ($old_fpm_flag) {
+    if ($old_fpm_flag and (-e("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/"))) {
         print RED "[WARN] Old PHP-FPM flags found!\n";
         print
 "Look in /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/ for an fpm.conf file.\n";
@@ -978,7 +978,7 @@ if ( $MainDNSLine ne $MainDomainLine ) {
     print expand (
         CYAN "\t \\_ main_domain: " . YELLOW $MainDomainLine . "\n" );
     print expand ( RED
-"\t \\_ [WARN]: DNS= line in users file does not match main_domain in userdata!\n\t\\_ Can cause IP Address to show up as MISSING in List Accounts!\n"
+"\t \\_ [WARN]: DNS= line in users file does not match main_domain in userdata!\n\t\\_ Can cause IP Address to show up as MISSING in List Accounts! [CPANEL-20670]\n"
     );
 }
 
@@ -1362,12 +1362,6 @@ if ( $listssls or $all ) {
             print YELLOW $MAINDOMAIN . "\n";
             print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
         }
-
-        #        print WHITE "SSL Certificates installed under "
-        #          . CYAN $MAINDOMAIN
-        #          . WHITE " ("
-        #          . GREEN $username
-        #          . WHITE ")\n";
 
         foreach $SUB (@SUBDOMAINS) {
             chomp($SUB);
@@ -2246,7 +2240,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             }
 
             #    # Check for database users
-            print YELLOW "Checking for any MySQL users in myaql.user table\n";
+            print YELLOW "Checking for any MySQL users in mysql.user table\n";
             my $DBusername =
               captureit(
 "mysql -BNe \"SELECT User FROM mysql.user WHERE User LIKE '$username\\_%'\" | sort | uniq"
@@ -2504,12 +2498,19 @@ sub display_mail_info {
           . YELLOW "Existing accounts/autoresponders\nwill NOT forward!\n";
     }
     my $TotalEmails = @EMAILACCTS;
-    if ( $TotalEmails > 2 ) {
+    if ( $TotalEmails >= 2 ) {
         $TotalEmails--;
         $TotalEmails--;
     }
 
     print "There are $TotalEmails Email accounts for $DOMAIN: \n";
+
+	if ( -e("$RealHome/etc/$DOMAIN/shadow.roottn.bak")) { 
+		print expand( RED
+"\t \\_ [WARN] - $RealHome/etc/$DOMAIN/shadow.roottn.bak file exists. Account may have been compromised!"
+		);
+		print "\n";
+	}
 
     foreach $emailacctline (@EMAILACCTS) {
         chomp($emailacctline);
