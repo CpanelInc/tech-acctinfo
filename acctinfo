@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.98";
+my $VERSION = "2.4.99";
 
 our $sslsyscertdir;
 our $stderr;
@@ -25,6 +25,7 @@ our $expiredate;
 our $isSelfSigned;
 our $CPVersion = `cat /usr/local/cpanel/version`;
 our $result;
+our @FilesToScan;
 chomp($CPVersion);
 
 use Getopt::Long;
@@ -225,7 +226,7 @@ foreach $ACCT (@USERDATADOMAINS) {
 
                 # Get documentroot for $DOMAIN from /etc/userdatadomains
                 my ($docroot) =
-                  ( split( /==/, qx[ grep $sub_domain /etc/userdatadomains ] ) )
+                  ( split( /==/, qx[ grep $sub_domain: /etc/userdatadomains ] ) )
                   [4];
                 $IS_SUB =
                     expand("$DOMAIN is a sub domain of $MAINDOMAIN \n\t\\_ ")
@@ -254,7 +255,7 @@ foreach $ACCT (@USERDATADOMAINS) {
                 # Get documentroot for $DOMAIN from /etc/userdatadomains
                 my ($docroot) = (
                     split(
-                        /==/, qx[ grep $addon_domain /etc/userdatadomains ]
+                        /==/, qx[ grep $addon_domain: /etc/userdatadomains ]
                     )
                 )[4];
                 $IS_ADDON =
@@ -284,7 +285,7 @@ foreach $ACCT (@USERDATADOMAINS) {
                 # Get documentroot for $DOMAIN from /etc/userdatadomains
                 my ($docroot) = (
                     split(
-                        /==/, qx[ grep $parked_domain /etc/userdatadomains ]
+                        /==/, qx[ grep $parked_domain: /etc/userdatadomains ]
                     )
                 )[4];
                 $IS_PARKED = expand(
@@ -548,7 +549,7 @@ if ( $QUERY eq $HOSTNAME ) {
 
 # Get docroot for MAINDOMAIN too.
 my ($maindocroot) =
-  ( split( /==/, qx[ grep '^$MAINDOMAIN' /etc/userdatadomains ] ) )[4];
+  ( split( /==/, qx[ grep '^$MAINDOMAIN:' /etc/userdatadomains ] ) )[4];
 print expand(
     "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n" );
 if ( $maindocroot eq "" ) {
@@ -1947,7 +1948,8 @@ sub cruft_check {
                 print_output( $filestat, $fileskip );
                 next;
             }
-            $filestatus = check_file_existance( $file2search, $QUERY );
+            #$filestatus = check_file_existance( $file2search, $QUERY );
+            $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
             if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
             else               { $filestatus = RED "[MISSING]"; }
             print_output( $file2search, $filestatus );
@@ -3099,39 +3101,54 @@ sub scan {
         }
     }
 
-    print "Scanning $RealHome for ($StringCnt) known infections:\n";
+    print YELLOW "Scanning $RealHome for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
-    my @FOUND           = undef;
+	my @SCANRESULTS=undef;
     my $SOMETHING_FOUND = 0;
     my $SEARCHSTRING;
+    my $FileToScan;
+	my $LastScanned;
     my ( $sec, $min, $hour, $mday, $mon, $year );
     my $scanstarttime = Time::Piece->new;
 
-    print "Scan started on $scanstarttime\n";
-
-    foreach $SEARCHSTRING (@SEARCHSTRING) {
-        spin();
-        chomp($SEARCHSTRING);
-        my $SCAN =
-qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude-dir=access-logs -w "$SEARCHSTRING" $RealHome/* ];
-
-        chomp($SCAN);
-        if ($SCAN) {
-            $SOMETHING_FOUND = 1;
-            $SEARCHSTRING =~ s/\\//g;
-            print YELLOW "\n\n\bThe phrase "
-              . CYAN
-              . $SEARCHSTRING
-              . YELLOW
-              . " was found in file(s)\n";
-            print GREEN
-"==================================================================\n";
-            print RED "$SCAN\n";
-        }
+    print YELLOW "Scan started on $scanstarttime\n";
+	# First let's do a clamscan (if clamAV is installed)
+	my $isClamAVInstalled=qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
+	if ($isClamAVInstalled) {
+		print "ClamAV installed - running clamscan on $RealHome/public_html\n";
+		# update ClamAV databases with freshclam
+		qx[ /usr/local/cpanel/3rdparty/bin/freshclam &> /dev/null ];
+		my $ClamScanResults = qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z --phishing-sigs=yes --phishing-scan-urls=yes --algorithmic-detection=yes "$RealHome/public_html" ];
+		print $ClamScanResults . "\n";
+	}
+	traverse("$RealHome/public_html");
+	foreach $FileToScan(@FilesToScan) { 
+		chomp($FileToScan);
+		$LastScanned="";
+    	foreach $SEARCHSTRING (@SEARCHSTRING) {
+        	chomp($SEARCHSTRING);
+			spin();
+        	my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ] unless -d $FileToScan;
+        	if ($SCAN) {
+            	$SOMETHING_FOUND = 1;
+				push(@SCANRESULTS, RED "\nThe following phrase(s) was/were found in " . GREEN $FileToScan ) unless($FileToScan eq $LastScanned);
+				push(@SCANRESULTS, MAGENTA "===============================================================================================") unless($FileToScan eq $LastScanned);
+				$LastScanned=$FileToScan;
+            	$SEARCHSTRING =~ s/\\//g;
+				push(@SCANRESULTS, WHITE "Found: " . CYAN $SEARCHSTRING);
+        	}
+		}
     }
     if ( $SOMETHING_FOUND == 0 ) {
         print GREEN "\bNothing suspicious found!\n";
     }
+	else { 
+		my $printResults;
+		foreach $printResults(@SCANRESULTS) { 
+			chomp($printResults);
+			print $printResults . "\n";
+		}
+	}
     print "\n";
     my $scanendtime = Time::Piece->new;
     print "Scan completed on $scanendtime\n";
@@ -3144,6 +3161,19 @@ sub spin {
     my %spinner = ( '|' => '/', '/' => '-', '-' => '\\', '\\' => '|' );
     $spincounter = ( !defined $spincounter ) ? '|' : $spinner{$spincounter};
     print STDERR "\b$spincounter";
+}
+
+sub traverse {
+    my ($thing) = @_;
+    push(@FilesToScan, $thing . "\n");
+    return if not -d $thing;
+    opendir my $dh, $thing or die;
+    while (my $sub = readdir $dh) {
+        next if $sub eq '.' or $sub eq '..';
+        traverse("$thing/$sub");
+    }
+    close $dh;
+    return;
 }
 
 sub getSSLProvider {

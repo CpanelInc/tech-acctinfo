@@ -1,3 +1,6 @@
+V2.4.99- Bug Fix - In rare cases the wrong username was returned for some alias/sub/addon domains. Fixed anchor. - Reported by Rex H.
+V2.4.99- Improved scan. Much faster now and also runs a clamscan (if ClamAV installed) - ideas provided by Bill B.
+
 V2.4.98- Bug Fix - old_fpm_flag was sometimes returning true even though no fpm.conf file was found.
 V2.4.98- Add - check for existence of shadow.roottn.bak file during --mail check (possible compromise) - Thanks Hans B.
 V2.4.98- Fix - Spelling error during --cruft check "MySQL users in myaql.user table" - Thanks Joshua B. 
