@@ -69,6 +69,7 @@ my $reselleraccts = undef;
 my $resellerperms = undef;
 my $resellerprivs = undef;
 my $clearscreen   = undef;
+my $skipClam      = undef;
 my $helpME        = undef;
 my $SearchFor     = undef;
 my $useDig        = undef;
@@ -93,13 +94,14 @@ GetOptions(
     'resellerprivs' => \$resellerperms,
     'all'           => \$all,
     'help'          => \$helpME,
-    'useDig'        => \$useDig,
     'cruft'         => \$cruft,
     'mail'          => \$mail,
     'scan'          => \$scan,
     'skipfind'      => \$skipfind,
     'q'             => \$clearscreen,
     'nocode'        => \$nocodeblock,
+    'useDig'        => \$useDig,
+    'skipClam'        => \$skipClam,
 );
 
 if ($skipfind) {
@@ -1517,49 +1519,53 @@ exit;
 sub Usage {
     print WHITE "\nUsage: "
       . CYAN "acctinfo"
-      . WHITE " [options] domainname.tld or cPUsername [options]\n\n";
+      . WHITE " {domainname.tld,cPUsername} ACTION [ADDITIONAL OPTIONS]\n\n";
     print YELLOW "Examples: \n"
       . CYAN "acctinfo"
-      . WHITE " --listdbs somedomain.net\n";
+      . WHITE " --listdbs somedomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print expand( GREEN "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL databases for somedomain.net\n");
+    print CYAN "acctinfo" . WHITE " --listsubs cptestdo [--skipfind | --useDig | -q | --nocode]\n";
+    print expand( GREEN "\t Lists all sub domains under the cptestdo user name.\n" );
+    print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN
-"\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL\n\t databases for somedomain.net\n\n"
+"\t Lists all addon domains under the cptestdomain.net domain name.\n"
     );
-    print CYAN "acctinfo" . WHITE " --listsubs cptestdo\n";
-    print expand(
-        GREEN "\t Lists all sub domains under the cptestdo user name.\n\n" );
-    print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net\n";
+    print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN
-"\t Lists all addon domains under the cptestdomain.net domain name.\n\n"
+"\t Lists all alias (parked) domains under the cptestdomain.net domain name.\n"
     );
-    print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net\n";
+    print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN
-"\t Lists all alias (parked) domains under the cptestdomain.net domain name.\n\n"
+"\t Lists reseller information and domains under the cptestdo user name.\n"
     );
-    print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo\n";
+    print CYAN "acctinfo" . WHITE " --resellerperms cptestdo [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN
-"\t Lists reseller information and domains under the cptestdo user name.\n\n"
-    );
-    print CYAN "acctinfo" . WHITE " --resellerperms cptestdo\n";
+          "\t Lists reseller permissions under the cptestdo user name.\n" );
+    print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN
-          "\t Lists reseller permissions under the cptestdo user name.\n\n" );
-    print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net\n";
-    print expand( GREEN
-          "\t Lists any SSL's under the cptestdomain.net domain name.\n\n" );
+          "\t Lists any SSL's under the cptestdomain.net domain name.\n" );
     print CYAN "acctinfo" . WHITE " --cruft cptestdomain.net\n";
-    print expand( GREEN "\t Perform a cruft check on cptestdomain.net.\n\n" );
-    print CYAN "acctinfo" . WHITE " --mail cptestdomain.net\n";
+    print expand( GREEN "\t Perform a cruft check on cptestdomain.net.\n" );
+    print CYAN "acctinfo" . WHITE " --mail cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand(
-        GREEN "\t Display mail information for cptestdomain.net.\n\n" );
-    print CYAN "acctinfo" . WHITE " --scan cptest\n";
+        GREEN "\t Display mail information for cptestdomain.net.\n" );
+    print CYAN "acctinfo" . WHITE " --scan cptest [--skipClam]\n";
     print expand(
-        GREEN "\t Scan users home directory for known infection strings.\n\n" );
-    print CYAN "acctinfo" . WHITE " --all cptestdomain.net\n";
+        GREEN "\t Scan users home directory for known infection strings.\n" );
+    print CYAN "acctinfo" . WHITE " --all cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand(
-        GREEN "\t Lists everything for the cptestdomain.net domain name.\n\n" );
+        GREEN "\t Lists everything for the cptestdomain.net domain name.\n" );
     print CYAN "acctinfo" . WHITE " --help\n";
     print expand( GREEN
-"\t Shows this usage information. (NOTE: [options] can go before or after domain/username).\n\n"
+"\t Shows this usage information. (NOTE: ACTION can go before or after domain/username).\n\n"
     );
+	print expand(
+		YELLOW "\t ADDITIONAL OPTIONS (Optional):\n");
+	print BOLD BLUE "\t--useDig - Uses dig command to resolve A and MX records\n";
+	print BOLD BLUE "\t--nocode - Do not display ticket code blocks before/after output.\n";
+	print BOLD BLUE "\t--skipClam - Skip ClamAV scan during --scan ACTION.\n";
+	print BOLD BLUE "\t--skipfind - Skip find command for additional *.ini files.\n";
+	print BOLD BLUE "\t--q - Clear the screen before output.\n";
     exit;
 }
 
@@ -1812,7 +1818,7 @@ sub cruft_check {
 
         if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
             print RED
-"[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n";
+"[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n" unless($UID == 0or $GID == 0);
         }
     }
 
@@ -3086,7 +3092,6 @@ sub scan {
 "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
     my @DEFINITIONS = qx[ curl -s $URL ];
     my $StringCnt   = @DEFINITIONS;
-
     open( PASSWD, "/etc/passwd" );
     @PASSWDS = <PASSWD>;
     close(PASSWD);
@@ -3100,61 +3105,44 @@ sub scan {
             last;
         }
     }
-
-    print YELLOW "Scanning $RealHome for ($StringCnt) known infections:\n";
+    print YELLOW "Scanning $RealHome/public_html for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
 	my @SCANRESULTS=undef;
     my $SOMETHING_FOUND = 0;
     my $SEARCHSTRING;
-    my $FileToScan;
-	my $LastScanned;
     my ( $sec, $min, $hour, $mday, $mon, $year );
     my $scanstarttime = Time::Piece->new;
 
     print YELLOW "Scan started on $scanstarttime\n";
-	# First let's do a clamscan (if clamAV is installed)
 	my $isClamAVInstalled=qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
-	if ($isClamAVInstalled) {
+	if ($isClamAVInstalled and !$skipClam) {
 		print "ClamAV installed - running clamscan on $RealHome/public_html\n";
-		# update ClamAV databases with freshclam
 		qx[ /usr/local/cpanel/3rdparty/bin/freshclam &> /dev/null ];
-		my $ClamScanResults = qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z --phishing-sigs=yes --phishing-scan-urls=yes --algorithmic-detection=yes "$RealHome/public_html" ];
+		my $ClamScanResults = qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z --phishing-sigs=yes --phishing-scan-urls=yes $RealHome/public_html ];
 		print $ClamScanResults . "\n";
 	}
-	traverse("$RealHome/public_html");
-	foreach $FileToScan(@FilesToScan) { 
-		chomp($FileToScan);
-        next if (-d $FileToScan);
-        next if (! -T $FileToScan);
-		$LastScanned="";
-    	foreach $SEARCHSTRING (@SEARCHSTRING) {
-        	chomp($SEARCHSTRING);
-			#spin();
-        	#my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ] unless -d $FileToScan;
-        	my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ];
-        	if ($SCAN) {
-            	$SOMETHING_FOUND = 1;
-				#push(@SCANRESULTS, RED "\nThe following phrase(s) was/were found in " . GREEN $FileToScan ) unless($FileToScan eq $LastScanned);
-				#push(@SCANRESULTS, MAGENTA "===============================================================================================") unless($FileToScan eq $LastScanned);
-				print RED "\nThe following phrase(s) was/were found in" . GREEN $FileToScan . "\n" unless($FileToScan eq $LastScanned);
-				print MAGENTA "===============================================================================================\n" unless($FileToScan eq $LastScanned);
-				$LastScanned=$FileToScan;
-            	$SEARCHSTRING =~ s/\\//g;
-				#push(@SCANRESULTS, WHITE "Found: " . CYAN $SEARCHSTRING);
-				print WHITE "Found: " . CYAN $SEARCHSTRING . "\n";
-        	}
+   	foreach $SEARCHSTRING (@SEARCHSTRING) {
+		spin();
+       	chomp($SEARCHSTRING);
+		my $SCAN =
+qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude-dir=access-logs -w "$SEARCHSTRING" $RealHome/* ];
+		chomp($SCAN);
+		if ($SCAN) {
+			$SOMETHING_FOUND = 1;
+			$SEARCHSTRING =~ s/\\//g;
+			print YELLOW "\n\n\bThe phrase "
+			. CYAN
+			. $SEARCHSTRING
+			. YELLOW
+			. " was found in file(s)\n";
+			print GREEN
+"==================================================================\n";
+			print RED "$SCAN\n";
 		}
-    }
+	}
     if ( $SOMETHING_FOUND == 0 ) {
         print GREEN "\bNothing suspicious found!\n";
     }
-#	else { 
-#		my $printResults;
-#		foreach $printResults(@SCANRESULTS) { 
-#			chomp($printResults);
-#			print $printResults . "\n";
-#		}
-#	}
     print "\n";
     my $scanendtime = Time::Piece->new;
     print "Scan completed on $scanendtime\n";
