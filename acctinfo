@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.4.99";
+my $VERSION = "2.5.01";
 
 our $sslsyscertdir;
 our $stderr;
@@ -2247,7 +2247,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 print BOLD CYAN "No MySQL Databases Found!\n";
             }
 
-            #    # Check for database users
+            # Check for database users
             print YELLOW "Checking for any MySQL users in mysql.user table\n";
             my $DBusername =
               captureit(
@@ -2257,9 +2257,9 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
               captureit(
 "mysql -BNe \"SELECT User FROM mysql.user WHERE User = '$username'\" | sort | uniq"
               );
-            my @DBusernames = split( '\s+', $DBusername );
+            my @DBusernames = split( '\n', $DBusername );
             my $DBUserCnt = @DBusernames;
-            if ( $DBUserCnt > 1 ) {
+            if ( $DBUserCnt >= 1 ) {
                 my $NewDBUser;
                 foreach $NewDBUser (@DBusernames) {
                     chomp($NewDBUser);
@@ -2269,6 +2269,29 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             else {
                 print expand( WHITE "\t \\_ None\n" );
             }
+
+            print YELLOW "Checking for any MySQL users and databases in mysql.db table\n";
+            my $DBusername =
+              captureit(
+"mysql -BNe \"SELECT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'\" | sort | uniq"
+              );
+            $DBusername .=
+              captureit(
+"mysql -BNe \"SELECT User,Db FROM mysql.db WHERE User = '$username'\" | sort | uniq"
+              );
+            my @DBusernames = split( '\n', $DBusername );
+            my $DBUserCnt = @DBusernames;
+            if ( $DBUserCnt >= 1 ) {
+                my $NewDBUser;
+                foreach $NewDBUser (@DBusernames) {
+                    chomp($NewDBUser);
+                    print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+                }
+            }
+            else {
+                print expand( WHITE "\t \\_ None\n" );
+            }
+
         }
     }
 

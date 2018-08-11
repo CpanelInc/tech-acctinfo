@@ -1,3 +1,5 @@
+V2.5.01- Bug Fix - cruft check was missing the MySQL users data in certain conditions. Also added mysql.db table check.
+
 V2.4.99- Bug Fix - In rare cases the wrong username was returned for some alias/sub/addon domains. Fixed anchor. - Reported by Rex H.
 V2.4.99- Improved scan. Much faster now and also runs a clamscan (if ClamAV installed) - ideas provided by Bill B.
 
