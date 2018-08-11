@@ -3124,31 +3124,37 @@ sub scan {
 	traverse("$RealHome/public_html");
 	foreach $FileToScan(@FilesToScan) { 
 		chomp($FileToScan);
+        next if (-d $FileToScan);
+        next if (! -T $FileToScan);
 		$LastScanned="";
     	foreach $SEARCHSTRING (@SEARCHSTRING) {
         	chomp($SEARCHSTRING);
-			spin();
-        	my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ] unless -d $FileToScan;
+			#spin();
+        	#my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ] unless -d $FileToScan;
+        	my $SCAN = qx[ grep -w "$SEARCHSTRING" $FileToScan ];
         	if ($SCAN) {
             	$SOMETHING_FOUND = 1;
-				push(@SCANRESULTS, RED "\nThe following phrase(s) was/were found in " . GREEN $FileToScan ) unless($FileToScan eq $LastScanned);
-				push(@SCANRESULTS, MAGENTA "===============================================================================================") unless($FileToScan eq $LastScanned);
+				#push(@SCANRESULTS, RED "\nThe following phrase(s) was/were found in " . GREEN $FileToScan ) unless($FileToScan eq $LastScanned);
+				#push(@SCANRESULTS, MAGENTA "===============================================================================================") unless($FileToScan eq $LastScanned);
+				print RED "\nThe following phrase(s) was/were found in" . GREEN $FileToScan . "\n" unless($FileToScan eq $LastScanned);
+				print MAGENTA "===============================================================================================\n" unless($FileToScan eq $LastScanned);
 				$LastScanned=$FileToScan;
             	$SEARCHSTRING =~ s/\\//g;
-				push(@SCANRESULTS, WHITE "Found: " . CYAN $SEARCHSTRING);
+				#push(@SCANRESULTS, WHITE "Found: " . CYAN $SEARCHSTRING);
+				print WHITE "Found: " . CYAN $SEARCHSTRING . "\n";
         	}
 		}
     }
     if ( $SOMETHING_FOUND == 0 ) {
         print GREEN "\bNothing suspicious found!\n";
     }
-	else { 
-		my $printResults;
-		foreach $printResults(@SCANRESULTS) { 
-			chomp($printResults);
-			print $printResults . "\n";
-		}
-	}
+#	else { 
+#		my $printResults;
+#		foreach $printResults(@SCANRESULTS) { 
+#			chomp($printResults);
+#			print $printResults . "\n";
+#		}
+#	}
     print "\n";
     my $scanendtime = Time::Piece->new;
     print "Scan completed on $scanendtime\n";
