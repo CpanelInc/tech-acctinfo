@@ -12,7 +12,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.5.01";
+my $VERSION = "2.5.02";
 
 our $sslsyscertdir;
 our $stderr;
@@ -121,6 +121,10 @@ my $conf      = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
 my $HOMEDIR   = $conf->{'HOMEDIR'};
 my $HOMEMATCH = $conf->{'HOMEMATCH'};
 my $SERVER_IP = $conf->{'ADDR'};
+my $NS1       = $conf->{'NS'};
+my $NS2       = $conf->{'NS2'};
+my $NS3       = $conf->{'NS3'};
+my $NS4       = $conf->{'NS4'};
 my $cpconf    = Cpanel::Config::LoadCpConf::loadcpconf();
 my $DBPrefix  = $cpconf->{'database_prefix'};
 
@@ -349,7 +353,7 @@ $HAS_AUTOSSL = ($HAS_AUTOSSL) ? "Yes" : "No";
 my $HAS_AUTOSSL_TEXT;
 
 # Check disabled feature list to see if autossl=0 exists
-my $AutoSSL_Disabled = qx[ grep 'autossl=0' /var/cpanel/features/disabled ];
+my $AutoSSL_Disabled = qx[ grep 'autossl=0' "/var/cpanel/features/disabled" ];
 if ($AutoSSL_Disabled) {
     $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in feature list)";
 }
@@ -362,7 +366,7 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
 }
 else {
     $AutoSSL_Disabled =
-      qx[ grep 'autossl=0' /var/cpanel/features/$FEATURELIST ];
+      qx[ grep 'autossl=0' "/var/cpanel/features/$FEATURELIST" ];
     if ($AutoSSL_Disabled) {
         $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in $FEATURELIST)";
     }
@@ -563,7 +567,8 @@ print WHITE "Real Home Directory (/etc/passwd): "
   . YELLOW " - Checking permissions...";
 print "\n";
 checkperms();
-print "\n";
+#print "\n";
+securitychk();
 
 # Check if user is in demo mode
 my $InDemo = qx[ grep $username /etc/demousers /etc/demodomains];
@@ -721,7 +726,7 @@ print WHITE "Max SQL Databases: " . CYAN $MAXSQL . "\n";
 print WHITE "Max Mailman Lists: " . CYAN $MAXLST . "\n";
 print WHITE "Max FTP Accounts: " . CYAN $MAXFTP . "\n";
 print WHITE "Max Bandwidth Allowed: " . CYAN $BWLIMIT . " MB\n";
-print WHITE "AutoSSL Enabled: " . CYAN $HAS_AUTOSSL . "\n";
+print WHITE "AutoSSL Enabled: " . CYAN $HAS_AUTOSSL . " [" . YELLOW $SSLProvider . CYAN "]\n";
 print WHITE "Backup Enabled: "
   . CYAN $BACKUPENABLED
   . GREEN " / "
@@ -972,7 +977,7 @@ if ( !($FoundInHTTPDconf) ) {
 
 my $MainDNSLine = qx[ grep 'DNS=' /var/cpanel/users/$username | cut -d = -f2 ];
 my $MainDomainLine =
-qx[ grep 'main_domain: ' /var/cpanel/userdata/$username/main | cut -d ' ' -f2 ];
+qx[ grep 'main_domain: ' /var/cpanel/userdata/$username/main | cut -d ' ' -f2 ] unless(! -e("/var/cpanel/userdata/$username/main"));
 chomp($MainDNSLine);
 chomp($MainDomainLine);
 if ( $MainDNSLine ne $MainDomainLine ) {
@@ -1484,7 +1489,7 @@ qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore
 qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
             if ($DNSSEC_error) {
                 print RED "[WARN] "
-                  . WHITE "CAA record check failed with DNSSEC error!\n";
+                  . WHITE "CAA record check failed with DNSSEC error on $DOMAIN\n";
                 $CAAFound = 1;
                 last;
             }
@@ -1944,8 +1949,11 @@ sub cruft_check {
             $MAINDOMAIN = $QUERY;
             $username   = $QUERY;
         }
+        if ($IS_USERNAME) { 
+            $QUERY=$MAINDOMAIN;
+        }
         print "Searching the following files for domain: "
-          . BOLD MAGENTA $MAINDOMAIN . "\n";
+          . BOLD MAGENTA $QUERY . "\n";
         foreach $file2search (@FILES2SEARCH) {
             chomp($file2search);
             if ( !( -s ($file2search) ) ) {
@@ -3075,6 +3083,12 @@ qx[ dig +tries=2 +time=5 \@208.67.220.220 default._domainkey.$DOMAIN TXT +short 
     print WHITE "Using Custom IP (/etc/mailips): "
       . CYAN $CustomMailIP . " "
       . YELLOW $CustomMailIPText . "\n";
+
+	if (-e("/etc/mail/spamassassin/local.cf")) { 
+		my $SAscore;
+		($SAscore)=(split(/\s+/,qx[ grep 'required_score' /etc/mail/spamassassin/local.cf ]))[2];
+		print WHITE "SpamAssassin Score Required For Spam: " . CYAN $SAscore . "\n";
+	}
     border();
 }
 
@@ -3647,4 +3661,13 @@ sub captureit {
     else {
         return $stdout;
     }
+}
+
+sub securitychk { 
+	if (-e("$RealHome/.accesshash")) { 
+		print RED "[WARN] - $RealHome/.accesshash file found - Consider using API Tokens instead!\n";
+	}
+	if (-e("$RealHome/.my.cnf")) { 
+		print RED "[WARN] - $RealHome/.my.cnf file found - No longer required nor recommended!\n";
+	}
 }

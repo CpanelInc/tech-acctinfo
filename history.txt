@@ -1,3 +1,9 @@
+V2.5.02- Bug Fix - Feature list containing spaces caused acctinfo to hang indefinitely. Reported by Ryland R.
+V2.5.02- Add SpamAssassin required spam score to --mail output
+V2.5.02- Bug Fix - Ignore DNS= check if /var/cpanel/userdata/username/main file is missing
+V2.5.02- Add SSL Provider to output (behind AutoSSL Enabled:)
+V2.5.02- Add Security check to output and display if user .my.cnf or user .accesshash files were found.
+
 V2.5.01- Bug Fix - cruft check was missing the MySQL users data in certain conditions. Also added mysql.db table check.
 
 V2.4.99- Bug Fix - In rare cases the wrong username was returned for some alias/sub/addon domains. Fixed anchor. - Reported by Rex H.
