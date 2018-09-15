@@ -1,3 +1,8 @@
+V2.5.03- Fix GRANTS output if not ALL PRIVILEGES in --listdb 
+V2.5.03- Add PHP Handler to EA4 output.
+V2.5.03- Add ADDON domain check to cruft check which uses the subdomain.  
+V2.5.03- Add message about using predef if shadow.roottn exploit is found in --mail check - Suggested by Jack S. 
+
 V2.5.02- Bug Fix - Feature list containing spaces caused acctinfo to hang indefinitely. Reported by Ryland R.
 V2.5.02- Add SpamAssassin required spam score to --mail output
 V2.5.02- Bug Fix - Ignore DNS= check if /var/cpanel/userdata/username/main file is missing
