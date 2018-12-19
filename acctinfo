@@ -1,9 +1,37 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# SCRIPT: acctinfo                                                                    #
-# PURPOSE: Get as much information for a username or domain entered at command line   #
-# as possible.                                                                        #
-# AUTHOR: Peter Elsner <peter.elsner@cpanel.net>                                      #
-#######################################################################################
+# Copyright 2018, cPanel, L.L.C.
+# All rights reserved.
+# http://cpanel.net
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# 1. Redistributions of source code must retain the above copyright notice,
+# this list of conditions and the following disclaimer.
+#
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+#
+# 3. Neither the name of the owner nor the names of its contributors may be
+# used to endorse or promote products derived from this software without
+# specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# SCRIPT: acctinfo
+# PURPOSE: Get as much information for a username or domain entered at command line as possible.
+# AUTHOR: Peter Elsner <peter.elsner@cpanel.net>
+# MAINTAINER: Peter Elsner <peter.elsner@cpanel.net>
 
 BEGIN {
     unshift @INC, '/usr/local/cpanel';
@@ -12,7 +40,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.5.03";
+my $VERSION = "2.5.04";
 
 our $sslsyscertdir;
 our $stderr;
@@ -22,10 +50,12 @@ our $command;
 our $sslsubject;
 our $startdate;
 our $expiredate;
+our $isExpired;
 our $isSelfSigned;
 our $CPVersion = `cat /usr/local/cpanel/version`;
 our $result;
 our @FilesToScan;
+our @InstalledMods = captureit("httpd -M");
 chomp($CPVersion);
 
 use Getopt::Long;
@@ -69,7 +99,7 @@ my $reselleraccts = undef;
 my $resellerperms = undef;
 my $resellerprivs = undef;
 my $clearscreen   = undef;
-my $skipClam      = undef;
+my $useClam       = undef;
 my $helpME        = undef;
 my $SearchFor     = undef;
 my $useDig        = undef;
@@ -101,7 +131,7 @@ GetOptions(
     'q'             => \$clearscreen,
     'nocode'        => \$nocodeblock,
     'useDig'        => \$useDig,
-    'skipClam'      => \$skipClam,
+    'useClam'       => \$useClam,
 );
 
 if ($skipfind) {
@@ -117,16 +147,17 @@ if ($helpME) {
     Usage();
 }
 
-my $conf      = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
-my $HOMEDIR   = $conf->{'HOMEDIR'};
-my $HOMEMATCH = $conf->{'HOMEMATCH'};
-my $SERVER_IP = $conf->{'ADDR'};
-my $NS1       = $conf->{'NS'};
-my $NS2       = $conf->{'NS2'};
-my $NS3       = $conf->{'NS3'};
-my $NS4       = $conf->{'NS4'};
-my $cpconf    = Cpanel::Config::LoadCpConf::loadcpconf();
-my $DBPrefix  = $cpconf->{'database_prefix'};
+my $conf        = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
+my $HOMEDIR     = $conf->{'HOMEDIR'};
+my $HOMEMATCH   = $conf->{'HOMEMATCH'};
+my $SERVER_IP   = $conf->{'ADDR'};
+my $NS1         = $conf->{'NS'};
+my $NS2         = $conf->{'NS2'};
+my $NS3         = $conf->{'NS3'};
+my $NS4         = $conf->{'NS4'};
+my $cpconf      = Cpanel::Config::LoadCpConf::loadcpconf();
+my $DBPrefix    = $cpconf->{'database_prefix'};
+my $ACLSEnabled = $cpconf->{'acls'};
 
 my ( $os_release, $os_ises ) = get_release_version();
 
@@ -460,7 +491,7 @@ foreach $RESELLER (@ALL_RESELLERS) {
             }
 
             $FOUND =
-              qx[ grep -w 'OWNER=$username' /var/cpanel/users/$vcu_account ];
+              qx[ grep 'OWNER=$username' /var/cpanel/users/$vcu_account ];
             if ($FOUND) {
                 $ResellersAcct =
                   qx[ grep 'DNS=' /var/cpanel/users/$vcu_account ];
@@ -477,11 +508,18 @@ foreach $RESELLER (@ALL_RESELLERS) {
 
 my $TOTAL_DOMAINS = qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
+my ($FirstHost) = ( split( /\./, $HOSTNAME ) )[0];
+my $FirstHostWarn = "";
+if ( $FirstHost =~ m/whm|cpanel|webmail|webdisk|mail/ ) {
+    $FirstHostWarn =
+      YELLOW " - Should not begin with service subdomain ($FirstHost) - \nSee: "
+      . CYAN "https://documentation.cpanel.net/display/76Docs/Change+Hostname";
+}
 print WHITE "There are "
   . YELLOW $TOTAL_DOMAINS
   . WHITE " total accounts on ("
   . GREEN ON_BLACK $HOSTNAME
-  . WHITE ").\n";
+  . WHITE ") $FirstHostWarn\n";
 if ($IS_USERNAME) {
     print "\n";
 }
@@ -559,6 +597,11 @@ my ($maindocroot) =
   ( split( /==/, qx[ grep '^$MAINDOMAIN:' /etc/userdatadomains ] ) )[4];
 print expand(
     "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n" );
+my $isForwarded =
+  captureit("curl -sk --head https://$MAINDOMAIN | grep -i 'location'");
+if ($isForwarded) {
+    print expand( YELLOW "\t \\_ [NOTE] - $MAINDOMAIN might be forwarded.\n" );
+}
 if ( $maindocroot eq "" ) {
     print expand( RED "\t \\_ [WARN] - DocumentRoot is blank!\n" );
 }
@@ -567,7 +610,9 @@ print WHITE "Real Home Directory (/etc/passwd): "
   . CYAN $RealHome
   . YELLOW " - Checking permissions...";
 print "\n";
-checkperms();
+
+#checkperms();
+checkperms2();
 
 #print "\n";
 securitychk();
@@ -740,7 +785,9 @@ print WHITE "Backup Enabled: "
 
 my $PHPDefaultVersion;
 my $PHPversion;
-my $isEA4       = 0;
+my $isEA4 = 0;
+
+chk_tomcat();
 my $cageFSStats = check_for_cagefs();
 if ($cageFSStats) {
     print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
@@ -784,13 +831,16 @@ if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" )
 }
 
 my $skipEA4 = 0;
-if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
-    $skipEA4 = 1;
-}
+
+# CL.SELECTOR (PHP SELECTOR) is no longer used in most cases.  CL now recommends EA4's MultiPHP.
+#if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
+#    $skipEA4 = 1;
+#}
 
 $isEA4 = isEA4();
 my $clPHPActive = 0;
 if ( $isEA4 and !$skipEA4 ) {
+
     $PHPDefaultVersion = get_system_php_version();
     if ( $PHPDefaultVersion eq "" ) {
         $PHPDefaultVersion = "UNKNOWN";
@@ -804,6 +854,10 @@ if ( $isEA4 and !$skipEA4 ) {
       . CYAN $PHPversion
       . " (System Default: $PHPDefaultVersion) ";
 
+    if ( $PHPversion eq $PHPDefaultVersion and -e "/usr/bin/selectorctl" ) {
+        $clPHPActive = 1;
+    }
+
     # Check for ^suPHP_ConfigPath variable in .htaccess files
     my $suPHPConfPathFound;
     if ( -e ("$RealHome/public_html/.htaccess") ) {
@@ -813,13 +867,27 @@ if ( $isEA4 and !$skipEA4 ) {
     }
 
     if ( $clPHPActive and $cageFSStats eq "Enabled" ) {
-        print MAGENTA "CloudLinux PHP Version has precedence\n";
+        print MAGENTA "CloudLinux PHP Selector version has precedence\n";
     }
     else {
-        print MAGENTA "cPanel EA4 PHP Version has precedence\n";
+        print MAGENTA "cPanel EA4 PHP version has precedence\n";
     }
     if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
         print YELLOW "PHP-FPM pool detected\n";
+        my $FPMPoolSet;
+        open( POOL,
+            "/opt/cpanel/$PHPversion/root/etc/php-fpm.d/$MAINDOMAIN.conf" );
+        my @PHPFPMPOOLSettings = <POOL>;
+        close(POOL);
+        foreach $FPMPoolSet (@PHPFPMPOOLSettings) {
+            chomp($FPMPoolSet);
+            if ( substr( $FPMPoolSet, 0, 3 ) eq "pm\." ) {
+                next
+                  if (
+                    $FPMPoolSet =~ m/spare_servers|start_servers|status_path/ );
+                print expand( GREEN "\t \\_ $FPMPoolSet\n" );
+            }
+        }
     }
 
     my $PHPHandler = captureit(
@@ -863,7 +931,8 @@ if ( $isEA4 and !$skipEA4 ) {
               . WHITE
               . " - suPHP_ConfigPath found in "
               . CYAN
-              . $suPHPConfPathFound;
+              . $suPHPConfPathFound
+              . "/.htaccess";
             my ($UsersuPHPConfPath) =
               ( split( /\s+/, $suPHPConfPathFound ) )[1];
             $PHPiniFile =
@@ -901,14 +970,36 @@ if ( $isEA4 and !$skipEA4 ) {
 
 # Check for custom (user) httpd.conf files
 if ( -e ("/etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN/") ) {
-    print expand( YELLOW
-"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN\n"
-    );
+    print expand( YELLOW "[INFO] Found a userdata directory: "
+          . GREEN
+          . "/etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN\n" );
+    my $confFile;
+    my @CONFDATA;
+    opendir( CONFD,
+        "/etc/apache2/conf.d/userdata/std/2/$username/$MAINDOMAIN" );
+    @CONFDATA = readdir(CONFD);
+    closedir(CONFD);
+    foreach $confFile (@CONFDATA) {
+        chomp($confFile);
+        next unless ( $confFile =~ m/\.conf/ );
+        print expand("\t \\_ $confFile\n");
+    }
 }
 if ( -e ("/etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN/") ) {
-    print expand( YELLOW
-"\t[INFO] Found userdata directory: /etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN\n"
-    );
+    print expand( YELLOW "[INFO] Found a userdata directory: "
+          . GREEN
+          . "/etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN\n" );
+    my $confFile;
+    my @CONFDATA;
+    opendir( CONFD,
+        "/etc/apache2/conf.d/userdata/ssl/2/$username/$MAINDOMAIN" );
+    @CONFDATA = readdir(CONFD);
+    closedir(CONFD);
+    foreach $confFile (@CONFDATA) {
+        chomp($confFile);
+        next unless ( $confFile =~ m/\.conf/ );
+        print expand("\t \\_ $confFile\n");
+    }
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
@@ -936,7 +1027,7 @@ if ( $TotalARecords > 1 ) {
         chomp($ResolvedIP);
         $ResolvesToDetail = check_resolved_ip($ResolvedIP);
         print expand(
-            CYAN "\t \\_" . $ResolvedIP . " " . RED $ResolvesToDetail . "\n" );
+            CYAN "\t \\_ " . $ResolvedIP . " " . RED $ResolvesToDetail . "\n" );
     }
 }
 else {    ##  ONLY 1 A RECORED RETURNED.
@@ -958,6 +1049,8 @@ else {    ##  ONLY 1 A RECORED RETURNED.
 
 # Check to see if domain name is in httpd.conf
 my $FoundInHTTPDconf;
+
+# NEED TO REVIEW THIS.  SHOULD I JUST CHECK FOR $QUERY (regardless if it's a username or not?)
 if ($isEA4) {
     if ($IS_USERNAME) {
         $FoundInHTTPDconf = qx[ grep -w '$QUERY' /etc/apache2/conf/httpd.conf ];
@@ -1353,18 +1446,21 @@ if ( $listssls or $all ) {
               . GREEN $username
               . WHITE ")\n";
             dispSSLdata($MAINDOMAIN);
-            print WHITE "Protecting the following Subject Alternative Names:\n";
-            my $SAN;
-            my $getSANS =
-              captureit(
+            if ( !$isExpired ) {
+                print WHITE
+                  "Protecting the following Subject Alternative Names:\n";
+                my $SAN;
+                my $getSANS =
+                  captureit(
 "openssl x509 -in '$sslsyscertdir/$MAINDOMAIN/certificates' -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+'"
-              );
-            my @getSANS = split( '\s+', $getSANS );
-            splice( @getSANS, 0, 1 );
+                  );
+                my @getSANS = split( '\s+', $getSANS );
+                splice( @getSANS, 0, 1 );
 
-            foreach $SAN (@getSANS) {
-                chomp($SAN);
-                print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                foreach $SAN (@getSANS) {
+                    chomp($SAN);
+                    print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                }
             }
         }
         else {
@@ -1384,15 +1480,17 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
                 $isSelfSigned =
 qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
                 dispSSLdata($SUB);
-                print WHITE
-                  "Protecting the following Subject Alternative Names:\n";
-                my $SAN;
-                my @getSANS =
+                if ( !$isExpired ) {
+                    print WHITE
+                      "Protecting the following Subject Alternative Names:\n";
+                    my $SAN;
+                    my @getSANS =
 qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
 
-                foreach $SAN (@getSANS) {
-                    chomp($SAN);
-                    print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                    foreach $SAN (@getSANS) {
+                        chomp($SAN);
+                        print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                    }
                 }
             }
             else {
@@ -1420,7 +1518,7 @@ qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP 
 
 # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
         if ( $SSLProvider eq "cPanel" ) {
-            print "Checking for pending AutoSSL orders: \n";
+            print "\nChecking for pending AutoSSL orders: \n";
             my $SSL_PENDING = captureit(
                 "whmapi1 get_autossl_pending_queue | grep -B3 'user: $username'"
             );
@@ -1572,7 +1670,7 @@ sub Usage {
       . WHITE
       " --mail cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
     print expand( GREEN "\t Display mail information for cptestdomain.net.\n" );
-    print CYAN "acctinfo" . WHITE " --scan cptest [--skipClam]\n";
+    print CYAN "acctinfo" . WHITE " --scan cptest [--useClam]\n";
     print expand(
         GREEN "\t Scan users home directory for known infection strings.\n" );
     print CYAN "acctinfo"
@@ -1589,7 +1687,8 @@ sub Usage {
       "\t--useDig - Uses dig command to resolve A and MX records\n";
     print BOLD BLUE
       "\t--nocode - Do not display ticket code blocks before/after output.\n";
-    print BOLD BLUE "\t--skipClam - Skip ClamAV scan during --scan ACTION.\n";
+    print BOLD BLUE
+      "\t--useClam - Use ClamAV when scanning for infections --scan ACTION.\n";
     print BOLD BLUE
       "\t--skipfind - Skip find command for additional *.ini files.\n";
     print BOLD BLUE "\t--q - Clear the screen before output.\n";
@@ -1817,10 +1916,6 @@ sub cruft_check {
             print "It has $parkcnt Aliased domains\n";
         }
     }
-    if ( !($isTerminated) and !($isActive) ) {
-        print BOLD YELLOW
-          "Nothing was found in /var/cpanel/accounting.log for $QUERY\n";
-    }
 
     if ( $username and -e "/etc/passwd" ) {
         open( PASSWD, "/etc/passwd" );
@@ -1929,7 +2024,9 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
       /etc/trueuserowners
       /var/cpanel/databases/users.db
       /etc/userdatadomains.json
+      /var/cpanel/quotawarned
       /etc/nocgiusers
+      /etc/userips
       /etc/userbwlimits
     );
 
@@ -1990,8 +2087,9 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
                 next;
             }
 
-            #$filestatus = check_file_existance( $file2search, $QUERY );
-            $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
+            $filestatus = check_file_existance( $file2search, $QUERY );
+
+            #$filestatus = check_file_existance( $file2search, $MAINDOMAIN );
             if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
             else               { $filestatus = RED "[MISSING]"; }
             print_output( $file2search, $filestatus );
@@ -2085,6 +2183,11 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/bandwidth/$username.sqlite", $dirstatus );
 
+        my $dirstatus = check_dir("/var/cpanel/bwlimited/$username");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/var/cpanel/bwlimited/$username", $dirstatus );
+
     }
     if ( !$IS_USERNAME ) {
 
@@ -2130,6 +2233,8 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
 
         my $isEA4 = isEA4();
         if ($isEA4) {
+
+# NEED TO REVIEW THIS.  Should probably chek for $QUERY and not $MAINDOMAIN here!
             my $dirstatus =
               check_file_existance( "/etc/apache2/conf/httpd.conf",
                 $MAINDOMAIN );
@@ -2182,8 +2287,15 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/named.conf", $dirstatus );
 
+        my $dirstatus = check_dir("/var/cpanel/bwlimited/$MAINDOMAIN");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/var/cpanel/bwlimited/$MAINDOMAIN", $dirstatus );
+
         my $isEA4 = isEA4();
         if ($isEA4) {
+
+# NEED TO REVIEW THIS.  Should probably chek for $QUERY and not $MAINDOMAIN here!
             my $dirstatus =
               check_file_existance( "/etc/apache2/conf/httpd.conf",
                 $MAINDOMAIN );
@@ -2387,7 +2499,8 @@ sub check_file_existance {
     my $FoundLine = "";
     if ( -e ($TheFile) ) {
 
-        $FoundLine = qx[ grep -w '$TheSearchString' $TheFile ];
+        #$FoundLine = qx[ grep -w '$TheSearchString' $TheFile ];
+        $FoundLine = qx[ grep '^$TheSearchString' $TheFile ];
         if   ($FoundLine) { return 1; }
         else              { return 0; }
     }
@@ -2525,8 +2638,6 @@ sub get_php_version() {
 
 sub get_system_php_version() {
     return unless ($isEA4);
-
-#my $phpDefault=captureit("/usr/local/cpanel/bin/rebuild_phpconf --current | grep DEFAULT | cut -d ' ' -f3");
     my $phpDefault = captureit(
 "whmapi1 php_get_system_default_version | grep version: | head -1 | cut -d ' ' -f4"
     );
@@ -2560,17 +2671,9 @@ sub display_mail_info {
     @EMAILACCTS = @SORTED2;
     smborder();
 
-    # Check for suspended from outgoing email
-    my $SMTPUserSusp = qx[ grep $username /etc/outgoing_mail_suspended_users ];
-    if ($SMTPUserSusp) {
-        print RED "[WARN] - $username is suspended from sending email\n";
-    }
-
-    # Check for hold from outgoing email
-    my $SMTPUserHold = qx[ grep $username /etc/outgoing_mail_hold_users ];
-    if ($SMTPUserHold) {
-        print RED "[WARN] - $username is on hold from sending email\n";
-    }
+    # Check for suspended/held outgoing email
+    chk_mail_suspend( $username, 0 );
+    chk_mail_hold( $username, 0 );
 
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
         print YELLOW "[INFO] - "
@@ -2707,6 +2810,23 @@ qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep 
             print expand( YELLOW "\t \t \\_ Spam Boxtrapper Enabled\n" );
         }
 
+        # Check for default webmail app
+        my $DefWebMailApp;
+        if (
+            -e (
+"$RealHome/.cpanel/nvdata/$emailacctline\@$DOMAIN\_default_webmail_app"
+            )
+          )
+        {
+            $DefWebMailApp = ucfirst(
+                captureit(
+"cat $RealHome/.cpanel/nvdata/$emailacctline\@$DOMAIN\_default_webmail_app"
+                )
+            );
+            print expand(
+                YELLOW "\t \t \\_ Default Webmail Client $DefWebMailApp\n" );
+        }
+
         # Check for mailbox_format.cpanel file. Display contents if it exists
         if (
             -e ("$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel") )
@@ -2718,18 +2838,21 @@ qx [ cat "$RealHome/mail/$DOMAIN/$emailacctline/mailbox_format.cpanel" ];
                 YELLOW "\t \t \\_ Account is using the $mbformat format.\n" );
         }
 
+        chk_mail_suspend( "$emailacctline\@$DOMAIN", 1 );
+        chk_mail_hold( "$emailacctline\@$DOMAIN", 1 );
+
         # Check rcube.db for corruption
         if ( -e ("$RealHome/etc/$DOMAIN/$emailacctline.rcube.db") ) {
-            print expand( CYAN
-"\t\t \\_ Checking $RealHome/etc/$DOMAIN/$emailacctline.rcube.db for corruption: "
-            );
             my $rcubechk =
               SQLiteDBChk("$RealHome/etc/$DOMAIN/$emailacctline.rcube.db");
             if ( $rcubechk =~ m/ok/ ) {
-                print GREEN "OK\n";
+
+                #                print GREEN "OK\n";
             }
             else {
-                print RED $rcubechk . "\n";
+                print RED
+"$RealHome/etc/$DOMAIN/$emailacctline.rcube.db might be corrupted: "
+                  . $rcubechk . "\n";
             }
         }
 
@@ -2742,6 +2865,40 @@ qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
                   . CYAN
                   . "[CPANEL-19556]" );
             print "\n";
+        }
+
+        # Check for dovecot-acl file
+        my $dovecotACL = captureit(
+            "find $RealHome/mail/$DOMAIN/$emailacctline -name 'dovecot-acl'");
+        chomp($dovecotACL);
+        if ($dovecotACL) {
+            print expand( RED
+"\t\t \\_ [WARN] - Found $dovecotACL - can cause odd permission issues.\n"
+            ) unless ( !-s $dovecotACL );
+        }
+
+        # Check for dovecot-uidlist.lock file
+        if ( -e ("$RealHome/mail/$DOMAIN/$emailacctline/dovecot-uidlist.lock") )
+        {
+            print expand( RED
+"\t\t \\_ [WARN] - Found dovecot-uidlist.lock file in $RealHome/mail/$DOMAIN/$emailacctline/ \n\t\tWebmail acting strangely? - remove it and see if resolved.\n"
+            );
+        }
+
+        # Check for cphulkd blocks
+        my $isCPHulkEnabled =
+          captureit("whmapi1 cphulk_status | grep 'is_enabled: 1'");
+        chomp($isCPHulkEnabled);
+        if ($isCPHulkEnabled) {
+            my $cPHBlock = captureit(
+"whmapi1 get_cphulk_failed_logins | grep -c 'user: $emailacctline\@$DOMAIN'"
+            );
+            chomp($cPHBlock);
+            if ( $cPHBlock > 0 ) {
+                print expand( RED
+"\t\t [WARN] - \\_ $emailacctline\@$DOMAIN has at least $cPHBlock brute force blocks detected via cPHulkd\n"
+                );
+            }
         }
 
         # mail filters
@@ -2895,8 +3052,8 @@ qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
     smborder();
-    my $IsInRemoteDomains = qx[ egrep -w '^$DOMAIN' /etc/remotedomains ];
-    my $IsInLocalDomains  = qx[ egrep -w '^$DOMAIN' /etc/localdomains ];
+    my $IsInRemoteDomains = qx[ egrep '^$DOMAIN' /etc/remotedomains ];
+    my $IsInLocalDomains  = qx[ egrep '^$DOMAIN' /etc/localdomains ];
     chomp($IsInRemoteDomains);
     chomp($IsInLocalDomains);
     print "Checking email routing (based on MX check above)...\n";
@@ -2905,7 +3062,7 @@ qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
         if ($IsInRemoteDomains) {
             print expand( GREEN
                   "\t \\_ [OK] - $DOMAIN is listed in /etc/remotedomains\n" );
-            $IsInLocalDomains = qx[ egrep -w '^$DOMAIN' /etc/localdomains ];
+            $IsInLocalDomains = qx[ egrep '^$DOMAIN' /etc/localdomains ];
             if ($IsInLocalDomains) {
                 print expand( RED
                       "\t \\_ [WARN] - $DOMAIN was found in /etc/localdomains\n"
@@ -2930,7 +3087,7 @@ qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
         if ($IsInLocalDomains) {
             print expand( GREEN
                   "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n" );
-            $IsInRemoteDomains = qx[ egrep -w '^$DOMAIN' /etc/remotedomains ];
+            $IsInRemoteDomains = qx[ egrep '^$DOMAIN' /etc/remotedomains ];
             if ($IsInRemoteDomains) {
                 print expand( RED
 "\t \\_ [WARN] - $DOMAIN was found in /etc/remotedomains\n"
@@ -3126,16 +3283,15 @@ qx[ dig +tries=2 +time=5 \@208.67.220.220 default._domainkey.$DOMAIN TXT +short 
       . CYAN $CustomMailIP . " "
       . YELLOW $CustomMailIPText . "\n";
 
-    if ( -e ("/etc/mail/spamassassin/local.cf") ) {
+    if ( -e ("$RealHome/.spamassassin/user_prefs") ) {
         my $SAscore;
         ($SAscore) = (
             split(
                 /\s+/,
-                qx[ grep 'required_score' /etc/mail/spamassassin/local.cf ]
+                qx[ grep '^required_score' $RealHome/.spamassassin/user_prefs ]
             )
-        )[2];
-        print WHITE "SpamAssassin Score Required For Spam: "
-          . CYAN $SAscore . "\n";
+        )[1];
+        print WHITE "Spam Threshold Score: " . CYAN $SAscore . "\n";
     }
     border();
 }
@@ -3173,6 +3329,7 @@ sub getArecords {
 }
 
 sub scan {
+    my $SuspiciousItems = 0;
     my $URL =
 "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
     my @DEFINITIONS = qx[ curl -s $URL ];
@@ -3190,6 +3347,18 @@ sub scan {
             last;
         }
     }
+    my $isClamAVInstalled =
+      qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
+    if ( $isClamAVInstalled and !$useClam ) {
+        print "ClamAV installed - pass --useClam to include a ClamAV scan.\n";
+    }
+    if ( $isClamAVInstalled and $useClam ) {
+        print "--useClam passed. Running clamscan on $RealHome/public_html\n";
+        qx[ /usr/local/cpanel/3rdparty/bin/freshclam &> /dev/null ];
+        my $ClamScanResults =
+qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z -o --phishing-sigs=yes --phishing-scan-urls=yes $RealHome/public_html ];
+        print $ClamScanResults . "\n";
+    }
     print YELLOW
       "Scanning $RealHome/public_html for ($StringCnt) known infections:\n";
     my @SEARCHSTRING    = sort(@DEFINITIONS);
@@ -3200,15 +3369,6 @@ sub scan {
     my $scanstarttime = Time::Piece->new;
 
     print YELLOW "Scan started on $scanstarttime\n";
-    my $isClamAVInstalled =
-      qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
-    if ( $isClamAVInstalled and !$skipClam ) {
-        print "ClamAV installed - running clamscan on $RealHome/public_html\n";
-        qx[ /usr/local/cpanel/3rdparty/bin/freshclam &> /dev/null ];
-        my $ClamScanResults =
-qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z --phishing-sigs=yes --phishing-scan-urls=yes $RealHome/public_html ];
-        print $ClamScanResults . "\n";
-    }
     foreach $SEARCHSTRING (@SEARCHSTRING) {
         spin();
         chomp($SEARCHSTRING);
@@ -3216,6 +3376,9 @@ qx[ /usr/local/cpanel/3rdparty/bin/clamscan -i -r -z --phishing-sigs=yes --phish
 qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=*.png --exclude=*.svg --exclude-dir=access-logs -w "$SEARCHSTRING" $RealHome/* ];
         chomp($SCAN);
         if ($SCAN) {
+            $SuspiciousItems++;
+            my $ChangeDate = captureit("stat $SCAN | grep -i change");
+            $ChangeDate =~ s/Change://g;
             $SOMETHING_FOUND = 1;
             $SEARCHSTRING =~ s/\\//g;
             print YELLOW "\n\n\bThe phrase "
@@ -3225,11 +3388,14 @@ qx[ grep -srIl --exclude-dir=www --exclude-dir=mail --exclude-dir=tmp --exclude=
               . " was found in file(s)\n";
             print GREEN
 "==================================================================\n";
-            print RED "$SCAN\n";
+            print RED "$SCAN - " . YELLOW $ChangeDate . "\n";
         }
     }
     if ( $SOMETHING_FOUND == 0 ) {
         print GREEN "\bNothing suspicious found!\n";
+    }
+    else {
+        print RED "\bSsuspicious Items Found: " . WHITE $SuspiciousItems . "\n";
     }
     print "\n";
     my $scanendtime = Time::Piece->new;
@@ -3272,6 +3438,7 @@ sub getSSLProvider {
 sub ChkForIntegration {
     my @ILINKS =
       captureit("whmapi1 list_integration_links user=$username | grep 'app:'");
+    splice( @ILINKS, 0, 1 );
     my $cnt = @ILINKS;
     if ( $cnt > 0 ) {
         print YELLOW "[NOTE] * Integration links found in " . GREEN
@@ -3502,7 +3669,7 @@ sub isUserReserved {
     if ( $IS_USERNAME == 0 ) {
         print "Looking for username for $QUERY... - ";
         my $part1 = captureit(
-"egrep '^$QUERY' /etc/userdatadomains | cut -d = -f1 | cut -d ' ' -f2 "
+"egrep '^$QUERY:' /etc/userdatadomains | cut -d = -f1 | cut -d ' ' -f2 "
         );
         $part1 =~ s/\s+//g;
         chomp($part1);
@@ -3574,7 +3741,7 @@ sub checkperms {
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 711 and ( -e ("/var/cpanel/fileprotect") ) ) {
             print expand( RED
-"\t \\_ [WARN] - $RealHome permissions are not 711 [$statmode]\n"
+"\t \\_ [WARN] - $RealHome permissions are $statmode [Default is 0711]\n"
             );
         }
     }
@@ -3582,34 +3749,15 @@ sub checkperms {
     my $fgid       = ( stat "$RealHome" )[5];
     my $fileowner  = ( getpwuid $fuid )[0];
     my $groupowner = ( getgrgid $fgid )[0];
+    if ( $fileowner eq "" ) {
+        $fileowner = "UNKNOWN";
+    }
+    if ( $groupowner eq "" ) {
+        $groupowner = "UNKNOWN";
+    }
     if ( $fileowner ne $username or $groupowner ne $username ) {
         print expand( RED
 "\t \\_ [WARN] - Incorrect ownership/group for $RealHome [$fileowner:$groupowner]\n"
-        );
-    }
-
-    if ( !-e ("$RealHome/public_html") ) {
-        print expand( RED
-              "\t \\_ [WARN] - $RealHome/public_html directory is missing!\n" );
-    }
-    else {
-        my $statmode = ( stat("$RealHome/public_html") )[2] & 07777;
-        $statmode = sprintf "%lo", $statmode;
-        if ( $statmode != 750 ) {
-            print expand( RED
-"\t \\_ [WARN] - $RealHome/public_html permissions are not 750 [$statmode]\n"
-            );
-        }
-    }
-    my $fuid       = ( stat "$RealHome/public_html" )[4];
-    my $fgid       = ( stat "$RealHome/public_html" )[5];
-    my $fileowner  = ( getpwuid $fuid )[0];
-    my $groupowner = ( getgrgid $fgid )[0];
-    if ( $fileowner ne $username
-        or ( $groupowner ne $username ) and ( $groupowner ne "nobody" ) )
-    {
-        print expand( RED
-"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html [$fileowner:$groupowner]\n"
         );
     }
 
@@ -3622,18 +3770,24 @@ sub checkperms {
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 750 ) {
             print expand( RED
-"\t \\_ [WARN] - $RealHome/etc permissions are not 750 [$statmode]\n"
+"\t \\_ [WARN] - $RealHome/etc permissions are $statmode [Default is 0750]\n"
             );
         }
-    }
-    my $fuid       = ( stat "$RealHome/etc" )[4];
-    my $fgid       = ( stat "$RealHome/etc" )[5];
-    my $fileowner  = ( getpwuid $fuid )[0];
-    my $groupowner = ( getgrgid $fgid )[0];
-    if ( $fileowner ne $username or $groupowner ne "mail" ) {
-        print expand( RED
-"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/etc [$fileowner:$groupowner] Default: $username:mail\n"
-        );
+        my $fuid       = ( stat "$RealHome/etc" )[4];
+        my $fgid       = ( stat "$RealHome/etc" )[5];
+        my $fileowner  = ( getpwuid $fuid )[0];
+        my $groupowner = ( getgrgid $fgid )[0];
+        if ( $fileowner eq "" ) {
+            $fileowner = "UNKNOWN";
+        }
+        if ( $groupowner eq "" ) {
+            $groupowner = "UNKNOWN";
+        }
+        if ( $fileowner ne $username or $groupowner ne "mail" ) {
+            print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/etc $fileowner:$groupowner [Default: $username:mail]\n"
+            );
+        }
     }
 
     if ( !-e ("$RealHome/mail") ) {
@@ -3645,58 +3799,107 @@ sub checkperms {
         $statmode = sprintf "%lo", $statmode;
         if ( $statmode != 751 ) {
             print expand( RED
-"\t \\_ [WARN] - $RealHome/mail permissions are not 751 [$statmode]\n"
+"\t \\_ [WARN] - $RealHome/mail permissions are $statmode [Default is 0751]\n"
             );
         }
-    }
-    my $fuid       = ( stat "$RealHome/mail" )[4];
-    my $fgid       = ( stat "$RealHome/mail" )[5];
-    my $fileowner  = ( getpwuid $fuid )[0];
-    my $groupowner = ( getgrgid $fgid )[0];
-    if ( $fileowner ne $username or $groupowner ne $username ) {
-        print expand( RED
+        my $fuid       = ( stat "$RealHome/mail" )[4];
+        my $fgid       = ( stat "$RealHome/mail" )[5];
+        my $fileowner  = ( getpwuid $fuid )[0];
+        my $groupowner = ( getgrgid $fgid )[0];
+        if ( $fileowner eq "" ) {
+            $fileowner = "UNKNOWN";
+        }
+        if ( $groupowner eq "" ) {
+            $groupowner = "UNKNOWN";
+        }
+        if ( $fileowner ne $username or $groupowner ne $username ) {
+            print expand( RED
 "\t \\_ [WARN] - Incorrect ownership/group for $RealHome/mail [$fileowner:$groupowner]\n"
-        );
+            );
+        }
     }
 
-    if ( -e ("$RealHome/public_html/.well-known") ) {
-        my $statmode = ( stat("$RealHome/public_html/.well-known") )[2] & 07777;
-        $statmode = sprintf "%lo", $statmode;
-        if ( $statmode != 755 ) {
-            print expand( RED
-"\t \\_ [WARN] - $RealHome/public_html/.well-known permissions are not 755 [$statmode]\n"
-            );
-        }
-        my $fuid       = ( stat "$RealHome/public_html/.well-known" )[4];
-        my $fgid       = ( stat "$RealHome/public_html/.well-known" )[5];
-        my $fileowner  = ( getpwuid $fuid )[0];
-        my $groupowner = ( getgrgid $fgid )[0];
-        if ( $fileowner ne $username or $groupowner ne $username ) {
-            print expand( RED
-"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known [$fileowner:$groupowner]\n"
-            );
-        }
+    if ( !-e ("$RealHome/public_html") ) {
+        print expand( RED
+              "\t \\_ [WARN] - $RealHome/public_html directory is missing!\n" );
     }
-    if ( -e ("$RealHome/public_html/.well-known/pki-validation") ) {
-        my $statmode =
-          ( stat("$RealHome/public_html/.well-known/pki-validation") )[2] &
-          07777;
+    else {
+        my $statmode = ( stat("$RealHome/public_html") )[2] & 07777;
         $statmode = sprintf "%lo", $statmode;
-        if ( $statmode != 755 ) {
+        if ( $statmode != 750 ) {
             print expand( RED
-"\t \\_ [WARN] - $RealHome/public_html/.well-known/pki-validation permissions are not 755 [$statmode]\n"
+"\t \\_ [WARN] - $RealHome/public_html permissions are $statmode [Default is 0750]\n"
             );
         }
-        my $fuid =
-          ( stat "$RealHome/public_html/.well-known/pki-validation" )[4];
-        my $fgid =
-          ( stat "$RealHome/public_html/.well-known/pki-validation" )[5];
+        my $fuid       = ( stat "$RealHome/public_html" )[4];
+        my $fgid       = ( stat "$RealHome/public_html" )[5];
         my $fileowner  = ( getpwuid $fuid )[0];
         my $groupowner = ( getgrgid $fgid )[0];
-        if ( $fileowner ne $username or $groupowner ne $username ) {
+        if ( $fileowner eq "" ) {
+            $fileowner = "UNKNOWN";
+        }
+        if ( $groupowner eq "" ) {
+            $groupowner = "UNKNOWN";
+        }
+        if ( $fileowner ne $username
+            or ( $groupowner ne $username ) and ( $groupowner ne "nobody" ) )
+        {
             print expand( RED
-"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known/pki-validation [$fileowner:$groupowner]\n"
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html [$fileowner:$groupowner]\n"
             );
+        }
+        if ( -e ("$RealHome/public_html/.well-known") ) {
+            my $statmode =
+              ( stat("$RealHome/public_html/.well-known") )[2] & 07777;
+            $statmode = sprintf "%lo", $statmode;
+            if ( $statmode != 755 ) {
+                print expand( RED
+"\t \\_ [WARN] - $RealHome/public_html/.well-known permissions are $statmode [Default is 0755]\n"
+                );
+            }
+            my $fuid       = ( stat "$RealHome/public_html/.well-known" )[4];
+            my $fgid       = ( stat "$RealHome/public_html/.well-known" )[5];
+            my $fileowner  = ( getpwuid $fuid )[0];
+            my $groupowner = ( getgrgid $fgid )[0];
+            if ( $fileowner eq "" ) {
+                $fileowner = "UNKNOWN";
+            }
+            if ( $groupowner eq "" ) {
+                $groupowner = "UNKNOWN";
+            }
+            if ( $fileowner ne $username or $groupowner ne $username ) {
+                print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known [$fileowner:$groupowner]\n"
+                );
+            }
+        }
+        if ( -e ("$RealHome/public_html/.well-known/pki-validation") ) {
+            my $statmode =
+              ( stat("$RealHome/public_html/.well-known/pki-validation") )[2] &
+              07777;
+            $statmode = sprintf "%lo", $statmode;
+            if ( $statmode != 755 ) {
+                print expand( RED
+"\t \\_ [WARN] - $RealHome/public_html/.well-known/pki-validation permissions are $statmode [Default is 0755]\n"
+                );
+            }
+            my $fuid =
+              ( stat "$RealHome/public_html/.well-known/pki-validation" )[4];
+            my $fgid =
+              ( stat "$RealHome/public_html/.well-known/pki-validation" )[5];
+            my $fileowner  = ( getpwuid $fuid )[0];
+            my $groupowner = ( getgrgid $fgid )[0];
+            if ( $fileowner eq "" ) {
+                $fileowner = "UNKNOWN";
+            }
+            if ( $groupowner eq "" ) {
+                $groupowner = "UNKNOWN";
+            }
+            if ( $fileowner ne $username or $groupowner ne $username ) {
+                print expand( RED
+"\t \\_ [WARN] - Incorrect ownership/group for $RealHome/public_html/.well-known/pki-validation [$fileowner:$groupowner]\n"
+                );
+            }
         }
     }
 }
@@ -3717,10 +3920,233 @@ sub captureit {
 sub securitychk {
     if ( -e ("$RealHome/.accesshash") ) {
         print RED
-"[WARN] - $RealHome/.accesshash file found - Consider using API Tokens instead!\n";
+"[SECURITY WARNING] - $RealHome/.accesshash file found - Consider using API Tokens instead!\n";
     }
     if ( -e ("$RealHome/.my.cnf") ) {
         print RED
-"[WARN] - $RealHome/.my.cnf file found - No longer required nor recommended!\n";
+"[SECURITY WARNING] - $RealHome/.my.cnf file found - No longer required nor recommended!\n";
+    }
+}
+
+sub checkperms2 {
+    if ( !-e ("$RealHome") ) {
+        print expand( RED "\t \\_ [WARN] - $RealHome directory is missing!\n" );
+        return;
+    }
+    else {
+        my $FProtectEnabled = !-e "/var/cpanel/fileprotec" ? 1 : 0;
+        my $suExecEnabled = grep( /suexec/, @InstalledMods ) ? 1 : 0;
+        my $RUID2Enabled  = grep( /ruid/,   @InstalledMods ) ? 1 : 0;
+        my $ITKEnabled    = grep( /itk/,    @InstalledMods ) ? 1 : 0;
+        my $PHPHandler    = captureit(
+"uapi --user=$username LangPHP php_get_domain_handler type=vhost vhost=$MAINDOMAIN | grep 'php_handler:' | cut -d ' ' -f6"
+        );
+        chomp($PHPHandler);
+
+        #print "DEBUG: FileProtection: $FProtectEnabled\n";
+        #print "DEBUG: suExec $suExecEnabled\n";
+        #print "DEBUG: RUID2 $RUID2Enabled\n";
+        #print "DEBUG: ITK $ITKEnabled\n";
+        #print "DEBUG: PHP Handler $PHPHandler\n";
+        if ($ACLSEnabled) {
+            getPerms( "$RealHome", "0750", "$username", "$username" );
+        }
+        else {
+            getPerms( "$RealHome", "0711", "$username", "$username" );
+        }
+        if ( !-e ("$RealHome/public_html") ) {
+        }
+        else {
+            if (    $FProtectEnabled
+                and $PHPHandler =~ m/cgi|suphp/
+                and ( $RUID2Enabled or $ITKEnabled ) )
+            {
+                getPerms(
+                    "$RealHome/public_html", "0750",
+                    "$username",             "$username"
+                ) unless ( !-e "$RealHome/public_html" );
+            }
+            if ( $FProtectEnabled and ( !$RUID2Enabled and !$ITKEnabled ) ) {
+                getPerms( "$RealHome/public_html", "0750", "$username",
+                    "nobody" )
+                  unless ( !-e "$RealHome/public_html" );
+            }
+            if ( !$FProtectEnabled ) {
+                getPerms(
+                    "$RealHome/public_html", "0755",
+                    "$username",             "$username"
+                ) unless ( !-e "$RealHome/public_html" );
+            }
+            if ( -e ("$RealHome/public_html/.well-known") ) {
+                getPerms(
+                    "$RealHome/public_html/.well-known", "0755",
+                    "$username",                         "$username"
+                );
+            }
+            if ( -e ("$RealHome/public_html/.well-known/pki-validation") ) {
+                getPerms( "$RealHome/public_html/.well-known/pki-validation",
+                    "0755", "$username", "$username" );
+            }
+            if ( -e ("$RealHome/public_html/.well-known/acme-challenge") ) {
+                getPerms( "$RealHome/public_html/.well-known/acme-challenge",
+                    "0755", "$username", "$username" );
+            }
+        }
+        if ( !-e ("$RealHome/etc") ) {
+            print expand(
+                RED "\t \\_ [WARN] - $RealHome/etc directory is missing!\n" );
+        }
+        else {
+            getPerms( "$RealHome/etc", "0750", "$username", "mail" );
+        }
+        if ( !-e ("$RealHome/mail") ) {
+            print expand(
+                RED "\t \\_ [WARN] - $RealHome/mail folder is missing!\n" );
+        }
+        else {
+            getPerms( "$RealHome/mail", "0751", "$username", "$username" );
+        }
+    }
+}
+
+sub getPerms {
+    my $tcPermFile  = $_[0];
+    my $DefPerm     = $_[1];
+    my $DefPermUser = $_[2];
+    my $DefPermGrp  = $_[3];
+    my $currentPerm = sprintf '%04o', ( stat $tcPermFile )[2] & 07777;
+    my $curUserID   = ( stat $tcPermFile )[4];
+    my $curGrpID    = ( stat $tcPermFile )[5];
+    my $currentUser = ( getpwuid $curUserID )[0];
+    my $currentGrp  = ( getgrgid $curGrpID )[0];
+    if ( $currentUser eq "" ) {
+        $currentUser = "UNKNOWN";
+    }
+    if ( $currentGrp eq "" ) {
+        $currentGrp = "UNKNOWN";
+    }
+    if ( $DefPerm ne $currentPerm ) {
+        print RED
+"[WARN] - $tcPermFile has invalid permissions ($currentPerm) [Default: $DefPerm]\n";
+    }
+    if ( $DefPermUser ne $currentUser ) {
+        print RED
+"[WARN] - $tcPermFile has invalid user ($currentUser) [Default: $DefPermUser]\n";
+    }
+    if ( $DefPermGrp ne $currentGrp ) {
+        print RED
+"[WARN] - $tcPermFile has invalid group ($currentGrp) [Default: $DefPermGrp]\n";
+    }
+}
+
+sub chk_mail_suspend {
+    my $tcAccount = $_[0];
+    my $llTab     = $_[1];
+    my $SMTPUserSusp =
+      qx[ grep '^$tcAccount' /etc/outgoing_mail_suspended_users ];
+    if ($SMTPUserSusp) {
+        if ($llTab) {
+            print expand(
+                RED "\t\t \\_ $tcAccount is suspended from sending email\n" );
+        }
+        else {
+            print RED "$tcAccount is suspended from sending email\n";
+        }
+    }
+}
+
+sub chk_mail_hold {
+    my $tcAccount    = $_[0];
+    my $llTab        = $_[1];
+    my $SMTPUserHold = qx[ grep '^$tcAccount' /etc/outgoing_mail_hold_users ];
+    if ($SMTPUserHold) {
+        if ($llTab) {
+            print expand(
+                RED "\t\t \\_ $tcAccount is on hold from sending email\n" );
+        }
+        else {
+            print RED "$tcAccount is on hold from sending email\n";
+        }
+    }
+}
+
+sub chk_tomcat {
+    return if ( $RealShell ne "/bin/bash" );
+    my $TCEnabled = captureit(
+        "/usr/local/cpanel/scripts/ea-tomcat85 list | grep '^$username'");
+    if ($TCEnabled) {
+        my $TCStatus =
+          captureit("su - $username -s /bin/bash -c 'ubic status ea-tomcat85'");
+        chomp($TCStatus);
+        print YELLOW $TCStatus . "\n";
+        if ( -e "$RealHome/ea-tomcat85/conf/server.xml" ) {
+            my $TCConnPort = captureit(
+"egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
+            );
+            ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
+            $TCConnPort =~ s/\"//g;
+            print expand( CYAN "\t \\_ HTTP Connector Port: "
+                  . GREEN
+                  . $TCConnPort
+                  . "\n" );
+            my $TCAJPPort = captureit(
+"egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
+            );
+            ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
+            $TCAJPPort =~ s/\"//g;
+            print expand( CYAN "\t \\_ AJP Connector Port: "
+                  . GREEN
+                  . $TCAJPPort
+                  . "\n" );
+            my $TCHost = captureit(
+"grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
+            );
+            ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
+            $TCHost =~ s/\"//g;
+            print expand( CYAN "\t \\_ Host: " . GREEN . $TCHost . "\n" );
+            my $TCunpackWARs = captureit(
+                "grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'");
+            ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
+            $TCunpackWARs =~ s/\"//g;
+            print expand(
+                CYAN "\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
+            my $TCautoDeploy = captureit(
+                "grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'");
+            ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
+            $TCautoDeploy =~ s/\"//g;
+            print expand(
+                CYAN "\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
+            my $TCDeployStartup = captureit(
+                "grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'"
+            );
+            ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
+            $TCDeployStartup =~ s/\"//g;
+            print expand( CYAN "\t \\_ deployOnStartup: "
+                  . GREEN
+                  . $TCDeployStartup
+                  . "\n" );
+            my $TCDeployXML = captureit(
+                "grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'");
+            ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
+            $TCDeployXML =~ s/\"//g;
+            $TCDeployXML =~ s/>//g;
+            print expand(
+                CYAN "\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
+
+            if ( -d "$RealHome/ea-tomcat85/webapps/ROOT/" ) {
+                print YELLOW
+                  "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/:\n";
+                my $jspFile;
+                my @JSP;
+                opendir( JSPDATA, "$RealHome/ea-tomcat85/webapps/ROOT/" );
+                @JSP = readdir(JSPDATA);
+                closedir(JSPDATA);
+                foreach $jspFile (@JSP) {
+                    chomp($jspFile);
+                    next unless ( $jspFile =~ m/\.jsp/ );
+                    print expand("\t \\_ $jspFile\n");
+                }
+            }
+        }
     }
 }

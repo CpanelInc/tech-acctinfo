@@ -1,3 +1,28 @@
+V2.5.04- Refactored directory permissions check (please let me know if you encounter issues with this)
+V2.5.04- Fix false positive on intregation link check - Reported by Rex H. 
+V2.5.04- Fix false positive in cruft check
+V2.5.04- Fix bug where in some cases cruft check would check accounting.log file twice
+V2.5.04- Add space between A records when multiple A records for a domain were found
+V2.5.04- Add domain forward check. Should display an information message if a redirect using "Location" is found 
+V2.5.04- Skip displaying Protecting SAN's if SSL cert for parent domain is expired
+V2.5.04- Refactored email suspended/held check within --mail
+V2.5.04- Add /var/cpanel/quotawarned to cruft check
+V2.5.04- Add ea-tomcat85 output if shell is /bin/bash - displays current status and settings of ea-tomcat85 for account
+V2.5.04- Fix check for custom userdata files - could be needed/used for Tomcat settings  
+V2.5.04- Add date/timestamp to files found during --scan (could help indicate when compromise occurred)
+V2.5.04- Add default webmail client (if defined per email address) during --mail check
+V2.5.04- Add /var/cpanel/bwlimited/{username,domainname.tld} to cruft check
+V2.5.04- Add PHP-FPM Pool settings if PHP-FPM is enabled
+V2.5.04- Add check for dovecot-acl file during --mail check (can cause webmail issues if found)
+V2.5.04- Add check for dovecot-uidlist.lock file during --mail check (can cause mail to not display in webmail)
+V2.5.04- Add cPHulkd check for email addresses --mail check (easily see if an email account might be blocked)
+V2.5.04- Change [WARN] to [SECURITY WARNING] for .accesshash and .my.cnf files if they are found within an account
+V2.5.04- Add check if hostname begins with a service subdomain - CPANEL-23915
+V2.5.04- Add /etc/userips to --cruft check
+V2.5.04- Only show rcube.db status during --mail check if sqlite db is corrupted (skip if status is OK)
+V2.5.04- Add required_score to --mail output 
+V2.5.04- Change --skipClam to --useClam for --scan option (default is now to skip ClamAV check unless --useClam is passed)
+
 V2.5.03- Fix GRANTS output if not ALL PRIVILEGES in --listdb 
 V2.5.03- Add PHP Handler to EA4 output.
 V2.5.03- Add ADDON domain check to cruft check which uses the subdomain.  
