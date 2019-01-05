@@ -40,7 +40,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.5.04";
+my $VERSION = "2.5.05";
 
 our $sslsyscertdir;
 our $stderr;
@@ -508,18 +508,11 @@ foreach $RESELLER (@ALL_RESELLERS) {
 
 my $TOTAL_DOMAINS = qx[ cat /etc/trueuserdomains | wc -l ];
 chomp($TOTAL_DOMAINS);
-my ($FirstHost) = ( split( /\./, $HOSTNAME ) )[0];
-my $FirstHostWarn = "";
-if ( $FirstHost =~ m/whm|cpanel|webmail|webdisk|mail/ ) {
-    $FirstHostWarn =
-      YELLOW " - Should not begin with service subdomain ($FirstHost) - \nSee: "
-      . CYAN "https://documentation.cpanel.net/display/76Docs/Change+Hostname";
-}
 print WHITE "There are "
   . YELLOW $TOTAL_DOMAINS
   . WHITE " total accounts on ("
   . GREEN ON_BLACK $HOSTNAME
-  . WHITE ") $FirstHostWarn\n";
+  . WHITE ")\n";
 if ($IS_USERNAME) {
     print "\n";
 }
@@ -597,8 +590,9 @@ my ($maindocroot) =
   ( split( /==/, qx[ grep '^$MAINDOMAIN:' /etc/userdatadomains ] ) )[4];
 print expand(
     "\t\\_ " . YELLOW . "(DocumentRoot: " . WHITE $maindocroot . ")\n" );
+# NEED TO ADD A TIMEOUT TO CURL BELOW!!!  
 my $isForwarded =
-  captureit("curl -sk --head https://$MAINDOMAIN | grep -i 'location'");
+  captureit("curl --connect-timeout=5 -sk --head https://$MAINDOMAIN | grep -i 'location'");
 if ($isForwarded) {
     print expand( YELLOW "\t \\_ [NOTE] - $MAINDOMAIN might be forwarded.\n" );
 }
@@ -613,8 +607,6 @@ print "\n";
 
 #checkperms();
 checkperms2();
-
-#print "\n";
 securitychk();
 
 # Check if user is in demo mode
@@ -2103,6 +2095,17 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "$HOMEDIR/$username", $dirstatus );
+        if ( $dirstatus =~ m/EXISTS/ ) {
+            my @FoundHere = qw( etc mail public_html ssl tmp );
+            my $FoundHere;
+            foreach $FoundHere (@FoundHere) {
+                chomp($FoundHere);
+				my $dirstatus = check_dir("/$HOMEDIR/$username/$FoundHere");
+				if ($dirstatus) { $dirstatus = GREEN "EXISTS"; }
+				else { $dirstatus = RED "MISSING"; }
+                print expand( "\t \\_ " . $FoundHere . " - " . $dirstatus . "\n" );
+            }
+        }
         if ( $dirstatus =~ m/MISSING/ ) {
             if ($HOMEMATCH) {
                 print "Checking other possible home directory locations...\n";
@@ -2133,7 +2136,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             my $FoundHere;
             foreach $FoundHere (@FoundHere) {
                 chomp($FoundHere);
-                print expand( "\t \\_" . $FoundHere . "\n" );
+                print expand( "\t \\_ " . $FoundHere . "\n" );
             }
         }
 
@@ -2896,7 +2899,7 @@ qx[ doveadm mailbox list -u $emailacctline\@$DOMAIN | grep -c 'INBOX.INBOX' ];
             chomp($cPHBlock);
             if ( $cPHBlock > 0 ) {
                 print expand( RED
-"\t\t [WARN] - \\_ $emailacctline\@$DOMAIN has at least $cPHBlock brute force blocks detected via cPHulkd\n"
+"\t\t  \\_ [WARN] - $emailacctline\@$DOMAIN has at least $cPHBlock brute force blocks detected via cPHulkd\n"
                 );
             }
         }
@@ -3409,6 +3412,7 @@ sub spin {
     my %spinner = ( '|' => '/', '/' => '-', '-' => '\\', '\\' => '|' );
     $spincounter = ( !defined $spincounter ) ? '|' : $spinner{$spincounter};
     print STDERR "\b$spincounter";
+    print STDERR "\b";
 }
 
 sub traverse {
@@ -3792,7 +3796,7 @@ sub checkperms {
 
     if ( !-e ("$RealHome/mail") ) {
         print expand(
-            RED "\t \\_ [WARN] - $RealHome/mail folder is missing!\n" );
+            RED "\t \\_ [WARN] - $RealHome/mail directory is missing!\n" );
     }
     else {
         my $statmode = ( stat("$RealHome/mail") )[2] & 07777;
@@ -3955,6 +3959,8 @@ sub checkperms2 {
             getPerms( "$RealHome", "0711", "$username", "$username" );
         }
         if ( !-e ("$RealHome/public_html") ) {
+        	print expand( RED
+              "\t \\_ [WARN] - $RealHome/public_html directory is missing!\n" );
         }
         else {
             if (    $FProtectEnabled
@@ -4001,7 +4007,7 @@ sub checkperms2 {
         }
         if ( !-e ("$RealHome/mail") ) {
             print expand(
-                RED "\t \\_ [WARN] - $RealHome/mail folder is missing!\n" );
+                RED "\t \\_ [WARN] - $RealHome/mail directory is missing!\n" );
         }
         else {
             getPerms( "$RealHome/mail", "0751", "$username", "$username" );
