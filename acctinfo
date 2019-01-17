@@ -833,7 +833,7 @@ sub custom_UD {
 	if ( -d ("/etc/apache2/conf.d/userdata/ssl/2_4/") ) {
     	$userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2_4";
 	}
-	if ($userdataSTDPath) {
+	if (-e "$userdataSTDPath/$username/$MAINDOMAIN") {
     	print expand( YELLOW "[INFO] Found a custom userdata (std) directory: " . GREEN . "$userdataSTDPath/$username/$MAINDOMAIN\n" );
     	my $confFile;
     	my @CONFDATA;
@@ -848,7 +848,7 @@ sub custom_UD {
         	print expand("\t \\_ $confFile\n");
     	}
 	}
-	if ($userdataSSLPath) {
+	if (-e "$userdataSSLPath/$username/$MAINDOMAIN") {
     	print expand( YELLOW "[INFO] Found a custom userdata (ssl) directory: " . GREEN . "$userdataSSLPath/$username/$MAINDOMAIN\n" );
     	my $confFile;
     	my @CONFDATA;
