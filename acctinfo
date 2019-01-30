@@ -40,7 +40,7 @@ BEGIN {
 }
 
 use strict;
-my $VERSION = "2.5.06";
+my $VERSION = "2.5.07";
 
 our $sslsyscertdir;
 our $stderr;
@@ -693,8 +693,7 @@ if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" ) 
     chomp($clPHPVer);
     $clPHPVer = alltrim($clPHPVer);
     if ($clPHPVer) {
-        print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . "\n";
-
+        print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . MAGENTA "CloudLinux PHP Selector version has precedence\n";
         my $PHPiniFile = captureit("su -s /bin/bash $username -c 'php -i' | grep '^Configuration File' ");
         my $PHPiniLoad = captureit("su -s /bin/bash $username -c 'php -i' | grep '^Loaded Configuration File' ");
         my $PHPiniScan = captureit("su -s /bin/bash $username -c 'php -i' | grep '^Scan this dir'");
@@ -709,11 +708,6 @@ if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" ) 
         $skipEA4 = 1;
     }
 }
-
-# CL.SELECTOR (PHP SELECTOR) is no longer used in most cases.  CL now recommends EA4's MultiPHP.
-#if ( $clPHPVer and $cageFSStats eq "Enabled" ) {
-#    $skipEA4 = 1;
-#}
 
 my $clPHPActive = 0;
 if ( $isEA4 and !$skipEA4 ) {
@@ -744,24 +738,6 @@ if ( $isEA4 and !$skipEA4 ) {
     else {
         print MAGENTA "cPanel EA4 PHP version has precedence\n";
     }
-    if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
-        print YELLOW "PHP-FPM pool detected\n";
-        my $FPMPoolSet;
-        open( POOL,
-            "/opt/cpanel/$PHPversion/root/etc/php-fpm.d/$MAINDOMAIN.conf"
-        );
-        my @PHPFPMPOOLSettings = <POOL>;
-        close(POOL);
-        foreach $FPMPoolSet (@PHPFPMPOOLSettings) {
-            chomp($FPMPoolSet);
-            if ( substr( $FPMPoolSet, 0, 3 ) eq "pm\." ) {
-                next
-                  if ( $FPMPoolSet =~ m/spare_servers|start_servers|status_path/ );
-                print expand( GREEN "\t \\_ $FPMPoolSet\n" );
-            }
-        }
-    }
-
     my $PHPHandler = captureit("uapi --user=$username LangPHP php_get_domain_handler type=vhost vhost=$MAINDOMAIN | grep 'php_handler:' | cut -d ' ' -f6");
     chomp($PHPHandler);
     print WHITE "PHP Handler: " . YELLOW $PHPHandler . "\n";
@@ -799,6 +775,24 @@ if ( $isEA4 and !$skipEA4 ) {
         print expand( YELLOW "\t \\_ $PHPiniScan\n" );
     }
 
+    if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
+        print CYAN "\nPHP-FPM pool detected\n";
+        my $FPMPoolSet;
+        open( POOL,
+            "/opt/cpanel/$PHPversion/root/etc/php-fpm.d/$MAINDOMAIN.conf"
+        );
+        my @PHPFPMPOOLSettings = <POOL>;
+        close(POOL);
+        foreach $FPMPoolSet (@PHPFPMPOOLSettings) {
+            chomp($FPMPoolSet);
+            if ( substr( $FPMPoolSet, 0, 3 ) eq "pm\." ) {
+                next
+                  if ( $FPMPoolSet =~ m/spare_servers|start_servers|status_path/ );
+                print expand( GREEN "\t \\_ $FPMPoolSet\n" );
+            }
+        }
+    }
+
     if ( !( -e ("$RealHome/public_html") ) ) {
         $skipfind = 1;
     }
@@ -818,51 +812,58 @@ if ( $isEA4 and !$skipEA4 ) {
     }
 }
 
-sub custom_UD { 
-	my $userdataSTDPath = "";
-	my $userdataSSLPath = "";
-	if ( -d ("/etc/apache2/conf.d/userdata/std/2/") ) {
-    	$userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2";
-	}
-	if ( -d ("/etc/apache2/conf.d/userdata/ssl/2/") ) {
-    	$userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2";
-	}
-	if ( -d ("/etc/apache2/conf.d/userdata/std/2_4/") ) {
-    	$userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2_4";
-	}
-	if ( -d ("/etc/apache2/conf.d/userdata/ssl/2_4/") ) {
-    	$userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2_4";
-	}
-	if (-e "$userdataSTDPath/$username/$MAINDOMAIN") {
-    	print expand( YELLOW "[INFO] Found a custom userdata (std) directory: " . GREEN . "$userdataSTDPath/$username/$MAINDOMAIN\n" );
-    	my $confFile;
-    	my @CONFDATA;
-    	opendir( CONFD,
-        	"$userdataSTDPath/$username/$MAINDOMAIN"
-    	);
-    	@CONFDATA = readdir(CONFD);
-    	closedir(CONFD);
-    	foreach $confFile (@CONFDATA) {
-        	chomp($confFile);
-        	next unless ( $confFile =~ m/\.conf/ );
-        	print expand("\t \\_ $confFile\n");
-    	}
-	}
-	if (-e "$userdataSSLPath/$username/$MAINDOMAIN") {
-    	print expand( YELLOW "[INFO] Found a custom userdata (ssl) directory: " . GREEN . "$userdataSSLPath/$username/$MAINDOMAIN\n" );
-    	my $confFile;
-    	my @CONFDATA;
-    	opendir( CONFD,
-        	"$userdataSSLPath/$username/$MAINDOMAIN"
-    	);
-    	@CONFDATA = readdir(CONFD);
-    	closedir(CONFD);
-    	foreach $confFile (@CONFDATA) {
-        	chomp($confFile);
-        	next unless ( $confFile =~ m/\.conf/ );
-        	print expand("\t \\_ $confFile\n");
-    	}
-	}
+sub custom_UD {
+    my $userdataSTDPath = "";
+    my $userdataSSLPath = "";
+    if ( -d ("/etc/apache2/conf.d/userdata/std/2/") ) {
+        $userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2";
+    }
+    if ( -d ("/etc/apache2/conf.d/userdata/ssl/2/") ) {
+        $userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2";
+    }
+    if ( -d ("/etc/apache2/conf.d/userdata/std/2_4/") ) {
+        $userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2_4";
+    }
+    if ( -d ("/etc/apache2/conf.d/userdata/ssl/2_4/") ) {
+        $userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2_4";
+    }
+    if ( -e "$userdataSTDPath/$username/$MAINDOMAIN" ) {
+        print expand( YELLOW "[INFO] Found a custom userdata (std) directory: " . GREEN . "$userdataSTDPath/$username/$MAINDOMAIN\n" );
+        my $confFile;
+        my @CONFDATA;
+        opendir( CONFD,
+            "$userdataSTDPath/$username/$MAINDOMAIN"
+        );
+        @CONFDATA = readdir(CONFD);
+        closedir(CONFD);
+        foreach $confFile (@CONFDATA) {
+            chomp($confFile);
+            next unless ( $confFile =~ m/\.conf/ );
+            print expand("\t \\_ $confFile\n");
+        }
+    }
+    if ( -e "$userdataSSLPath/$username/$MAINDOMAIN" ) {
+        print expand( YELLOW "[INFO] Found a custom userdata (ssl) directory: " . GREEN . "$userdataSSLPath/$username/$MAINDOMAIN\n" );
+        my $confFile;
+        my @CONFDATA;
+        opendir( CONFD,
+            "$userdataSSLPath/$username/$MAINDOMAIN"
+        );
+        @CONFDATA = readdir(CONFD);
+        closedir(CONFD);
+        foreach $confFile (@CONFDATA) {
+            chomp($confFile);
+            next unless ( $confFile =~ m/\.conf/ );
+            print expand("\t \\_ $confFile\n");
+        }
+    }
+    if ( $userdataSTDPath and !$userdataSSLPath ) {
+        print YELLOW "\\_ Note: No ssl directory found!\n";
+    }
+    if ( $userdataSSLPath and !$userdataSTDPath ) {
+        print YELLOW "\\_ Note: No std directory found!\n";
+    }
+    print "\n";
 }
 
 my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
@@ -980,7 +981,7 @@ else {
     print GREEN "No";
 }
 if ( -d ("$RealHome/public_html/suspended.page") ) {
-    print RED " suspended.page template found in $RealHome/public_html directory!";
+    print RED ", but a suspended.page template directory was found in $RealHome/public_html directory!";
 }
 print "\n";
 print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "ALIASES " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
@@ -1513,7 +1514,7 @@ sub check_resolved_ip {
     }
     my $IS_NAT = check_for_nat($IP2CHK);
     if ($IS_NAT) {
-        $RetVal = " NAT detected ($IS_NAT => $IP2CHK)";
+        $RetVal = GREEN " NAT detected ($IS_NAT => $IP2CHK)";
         if ( $IS_NAT eq $IPADDR ) {
             $RetVal = $RetVal .= GREEN . " [SAME]";
             $defaultsite = 0;
@@ -3346,58 +3347,116 @@ sub chk_mail_hold {
 }
 
 sub chk_tomcat {
-    return if ( $RealShell ne "/bin/bash" );
-    my $TCEnabled = captureit("/usr/local/cpanel/scripts/ea-tomcat85 list | grep '^$username'");
-    if ($TCEnabled) {
-        my $TCStatus = captureit("su - $username -s /bin/bash -c 'ubic status ea-tomcat85'");
-        chomp($TCStatus);
-        print YELLOW $TCStatus . "\n";
-        if ( -e "$RealHome/ea-tomcat85/conf/server.xml" and ( $TCStatus =~ m/running/ ) ) {
-            my $TCConnPort = captureit("egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
-            ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
-            $TCConnPort =~ s/\"//g;
-            print expand( CYAN "\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
-            my $TCAJPPort = captureit("egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
-            ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
-            $TCAJPPort =~ s/\"//g;
-            print expand( CYAN "\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
-            my $TCHost = captureit("grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
-            ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
-            $TCHost =~ s/\"//g;
-            print expand( CYAN "\t \\_ Host: " . GREEN . $TCHost . "\n" );
-            my $TCunpackWARs = captureit("grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'");
-            ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
-            $TCunpackWARs =~ s/\"//g;
-            print expand( CYAN "\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
-            my $TCautoDeploy = captureit("grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'");
-            ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
-            $TCautoDeploy =~ s/\"//g;
-            print expand( CYAN "\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
-            my $TCDeployStartup = captureit("grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'");
-            ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
-            $TCDeployStartup =~ s/\"//g;
-            print expand( CYAN "\t \\_ deployOnStartup: " . GREEN . $TCDeployStartup . "\n" );
-            my $TCDeployXML = captureit("grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'");
-            ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
-            $TCDeployXML =~ s/\"//g;
-            $TCDeployXML =~ s/>//g;
-            print expand( CYAN "\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
 
-            if ( -d "$RealHome/ea-tomcat85/webapps/ROOT/" ) {
-                my $jspFile;
-                my @JSP;
-                opendir( JSPDATA, "$RealHome/ea-tomcat85/webapps/ROOT/" );
-                @JSP = grep {$_ ne '.' and $_ ne '..'} readdir(JSPDATA);
-                closedir(JSPDATA);
-				my $jspcnt=@JSP;
-				if ($jspcnt) { 
-                	print YELLOW "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/:\n";
-                	foreach $jspFile (@JSP) {
-                    	chomp($jspFile);
-                    	next unless ( $jspFile =~ m/\.jsp/ );
-                    	print expand("\t \\_ $jspFile\n");
-                	}
-				}
+    #return unless( -e ("$RealHome/ea-tomcat85/conf/server.xml") );
+    my $TCEnabled = captureit("/usr/local/cpanel/scripts/ea-tomcat85 list | grep '^$username'");
+    return unless ($TCEnabled);
+    my $TCDispStatus = 1;
+    if ( $RealShell ne "/bin/bash" ) {
+        print RED "[WARN] - $username\'s shell is not Normal (/bin/bash) - unable to obtain a valid status for ea-tomcat85.\n";
+        $TCDispStatus = 0;
+        print "\t \\_ Continuing with the remainder of the configuration.\n";
+    }
+    if ( -e ("/etc/profile.d/limits.sh") ) {
+        print RED "[WARN] - Shell fork bomb protection enabled - unable to obtain a valid status for ea-tomcat85.\n";
+        $TCDispStatus = 0;
+        print "\t \\_ Continuing with the remainder of the configuration.\n";
+    }
+    if ($TCDispStatus) {
+        my $PerlPath = qx[ readlink /usr/local/cpanel/3rdparty/bin/perl ];
+        chomp($PerlPath);
+        $PerlPath =~ s/\/bin\/perl/\/bin/;
+        my $ubicPathFound = captureit("grep $PerlPath '$RealHome/.bashrc'");
+        chomp($ubicPathFound);
+        if ($ubicPathFound) {
+            my $TCStatus = captureit("su - $username -s /bin/bash -c 'ubic status ea-tomcat85'");
+            chomp($TCStatus);
+            my ($TCStatus1) = ( split( /\s+/, $TCStatus ) )[1];
+            print YELLOW "ea-tomcat85 is: ";
+            if ( $TCStatus1 eq "running" ) {
+                print GREEN "running\n";
+            }
+            else {
+                print RED "not running\n";
+            }
+        }
+        else {
+            print RED "[WARN] " . CYAN "- Check " . WHITE "$RealHome/.bashrc " . CYAN "file for PATH containing " . WHITE "$PerlPath\n" . YELLOW "\t[ubic command will not work without it].\n\n";
+        }
+    }
+    print YELLOW "Checking $RealHome/ea-tomcat85/conf/server.xml:\n";
+    my $TCConnPort = captureit("egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
+    $TCConnPort =~ s/\"//g;
+    print expand( CYAN "\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
+    my $TCAJPPort = captureit("egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
+    $TCAJPPort =~ s/\"//g;
+    print expand( CYAN "\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
+    my $TCHost = captureit("grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
+    $TCHost =~ s/\"//g;
+    print expand( CYAN "\t \\_ Host: " . GREEN . $TCHost . "\n" );
+    my $TCunpackWARs = captureit("grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'");
+    ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
+    $TCunpackWARs =~ s/\"//g;
+
+    if ( $TCunpackWARs =~ m/true/ ) {
+        print expand( CYAN "\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
+    }
+    else {
+        print expand( CYAN "\t \\_ unpackWARs: " . RED . $TCunpackWARs . " [ SHOULD BE TRUE ]\n" );
+    }
+    my $TCautoDeploy = captureit("grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'");
+    ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
+    $TCautoDeploy =~ s/\"//g;
+    if ( $TCautoDeploy =~ m/true/ ) {
+        print expand( CYAN "\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
+    }
+    else {
+        print expand( CYAN "\t \\_ autoDeploy: " . RED . $TCautoDeploy . " [ SHOULD BE TRUE ]\n" );
+    }
+    my $TCDeployStartup = captureit("grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'");
+    ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
+    $TCDeployStartup =~ s/\"//g;
+    if ( $TCDeployStartup =~ m/true/ ) {
+        print expand( CYAN "\t \\_ deployOnStartup: " . GREEN . $TCDeployStartup . "\n" );
+    }
+    else {
+        print expand( CYAN "\t \\_ deployOnStartup: " . RED . $TCDeployStartup . " [ SHOULD BE TRUE ]\n" );
+    }
+    my $TCDeployXML = captureit("grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'");
+    ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
+    $TCDeployXML =~ s/\"//g;
+    $TCDeployXML =~ s/>//g;
+    if ( $TCDeployXML =~ m/true/ ) {
+        print expand( CYAN "\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
+    }
+    else {
+        print expand( CYAN "\t \\_ deployXML " . RED . $TCDeployXML . " [ SHOULD BE TRUE ]\n" );
+    }
+    if ( -d "$RealHome/ea-tomcat85/webapps/ROOT/" ) {
+        my $jspFile;
+        my @JSP;
+        opendir( JSPDATA, "$RealHome/ea-tomcat85/webapps/ROOT/" );
+        @JSP = grep { $_ ne '.' and $_ ne '..' } readdir(JSPDATA);
+        closedir(JSPDATA);
+        my $jspcnt = @JSP;
+        if ($jspcnt) {
+            print YELLOW "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/:\n";
+            foreach $jspFile (@JSP) {
+                chomp($jspFile);
+                next unless ( $jspFile =~ m/\.jsp/ );
+                print expand("\t \\_ $jspFile\n");
+                if ( $jspFile eq "test.jsp" ) {
+                    my $TJP = captureit("lynx --dump http://$MAINDOMAIN/test.jsp | head -1");
+                    if ( $TJP =~ m/Test JSP Page/ ) {
+                        print GREEN "\t \\_ Success: " . WHITE "http://$MAINDOMAIN/test.jsp" . CYAN " Works!\n";
+                    }
+                    else {
+                        print RED "\t \\_ Failed: " . WHITE "http://$MAINDOMAIN/test.jsp" . CYAN " Didn't work!\n";
+                    }
+                }
             }
         }
     }
