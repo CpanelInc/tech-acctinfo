@@ -1,3 +1,56 @@
+V2.5.04- Refactored directory permissions check (please let me know if you encounter issues with this)
+V2.5.04- Fix false positive on intregation link check - Reported by Rex H. 
+V2.5.04- Fix false positive in cruft check
+V2.5.04- Fix bug where in some cases cruft check would check accounting.log file twice
+V2.5.04- Add space between A records when multiple A records for a domain were found
+V2.5.04- Add domain forward check. Should display an information message if a redirect using "Location" is found 
+V2.5.04- Skip displaying Protecting SAN's if SSL cert for parent domain is expired
+V2.5.04- Refactored email suspended/held check within --mail
+V2.5.04- Add /var/cpanel/quotawarned to cruft check
+V2.5.04- Add ea-tomcat85 output if shell is /bin/bash - displays current status and settings of ea-tomcat85 for account
+V2.5.04- Fix check for custom userdata files - could be needed/used for Tomcat settings  
+V2.5.04- Add date/timestamp to files found during --scan (could help indicate when compromise occurred)
+V2.5.04- Add default webmail client (if defined per email address) during --mail check
+V2.5.04- Add /var/cpanel/bwlimited/{username,domainname.tld} to cruft check
+V2.5.04- Add PHP-FPM Pool settings if PHP-FPM is enabled
+V2.5.04- Add check for dovecot-acl file during --mail check (can cause webmail issues if found)
+V2.5.04- Add check for dovecot-uidlist.lock file during --mail check (can cause mail to not display in webmail)
+V2.5.04- Add cPHulkd check for email addresses --mail check (easily see if an email account might be blocked)
+V2.5.04- Change [WARN] to [SECURITY WARNING] for .accesshash and .my.cnf files if they are found within an account
+V2.5.04- Add check if hostname begins with a service subdomain - CPANEL-23915
+V2.5.04- Add /etc/userips to --cruft check
+V2.5.04- Only show rcube.db status during --mail check if sqlite db is corrupted (skip if status is OK)
+V2.5.04- Add required_score to --mail output 
+V2.5.04- Change --skipClam to --useClam for --scan option (default is now to skip ClamAV check unless --useClam is passed)
+
+V2.5.03- Fix GRANTS output if not ALL PRIVILEGES in --listdb 
+V2.5.03- Add PHP Handler to EA4 output.
+V2.5.03- Add ADDON domain check to cruft check which uses the subdomain.  
+V2.5.03- Add message about using predef if shadow.roottn exploit is found in --mail check - Suggested by Jack S. 
+
+V2.5.02- Bug Fix - Feature list containing spaces caused acctinfo to hang indefinitely. Reported by Ryland R.
+V2.5.02- Add SpamAssassin required spam score to --mail output
+V2.5.02- Bug Fix - Ignore DNS= check if /var/cpanel/userdata/username/main file is missing
+V2.5.02- Add SSL Provider to output (behind AutoSSL Enabled:)
+V2.5.02- Add Security check to output and display if user .my.cnf or user .accesshash files were found.
+
+V2.5.01- Bug Fix - cruft check was missing the MySQL users data in certain conditions. Also added mysql.db table check.
+
+V2.4.99- Bug Fix - In rare cases the wrong username was returned for some alias/sub/addon domains. Fixed anchor. - Reported by Rex H.
+V2.4.99- Improved scan. Much faster now and also runs a clamscan (if ClamAV installed) - ideas provided by Bill B.
+
+V2.4.98- Bug Fix - old_fpm_flag was sometimes returning true even though no fpm.conf file was found.
+V2.4.98- Add - check for existence of shadow.roottn.bak file during --mail check (possible compromise) - Thanks Hans B.
+V2.4.98- Fix - Spelling error during --cruft check "MySQL users in myaql.user table" - Thanks Joshua B. 
+
+V2.4.97- Bug Fix - Add check for UID_MIN/GID_MIN to cruft check.  If /etc/passwd file exists and username is known.  
+
+V2.4.96- Bug Fix - SSL output, displaying multiple title lines
+V2.4.96- Bug Fix - anchored username during search so it would only return the correct match.
+V2.4.96- Bug Fix - Don't grep DNS lines for missing /v/c/u/username during cruft check if account was terminated.  
+V2.4.96- Bug Fix - Fix Can't return outside subroutine error when checking for CAA records.
+V2.4.96- Add MySQL Database size next to databases during --listdbs check. Nothing printed if size is 0 bytes or can't be determined.
+
 V2.4.95- Add check for DNS= vs main_domain line and warn if different (causes MISSING IP address).
 V2.4.95- Add check for MAX_DEFER_FAIL_PERCENTAGE > 100 and warn if found CPANEL-20909.
 V2.4.95- Add check for misisng/blank documentroot and warn if found.
