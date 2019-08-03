@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.09";
+my $VERSION = "2.5.10";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -3026,13 +3026,18 @@ sub checkperms2 {
         return;
     }
     else {
-        my $FProtectEnabled = !-e "/var/cpanel/fileprotect" ? 1 : 0;
+        my $FProtectEnabled = -e "/var/cpanel/fileprotect" ? 1 : 0;
         my $suExecEnabled = grep( /suexec/, @InstalledMods ) ? 1 : 0;
         my $RUID2Enabled  = grep( /ruid/,   @InstalledMods ) ? 1 : 0;
         my $ITKEnabled    = grep( /itk/,    @InstalledMods ) ? 1 : 0;
         my $PHPHandlerJSON = get_uapi("--user=$username", 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN" );
 		my $PHPHandler = $PHPHandlerJSON->{result}->{data}->{php_handler};
         chomp($PHPHandler);
+		#print "DEBUG: FileProtect Enabed: $FProtectEnabled\n";
+		#print "DEBUG: SuExec Enabed: $suExecEnabled\n";
+		#print "DEBUG: RUID2 Enabed: $RUID2Enabled\n";
+		#print "DEBUG: ITK Enabed: $ITKEnabled\n";
+		#print "DEBUG: PHP Handler $PHPHandler\n";
         if ($ACLSEnabled) {
             getPerms( "$RealHome", "0750", "$username", "$username" );
         }
