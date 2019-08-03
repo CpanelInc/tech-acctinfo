@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.10";
+my $VERSION = "2.5.11";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -3158,7 +3158,8 @@ sub chk_mail_hold {
 }
 
 sub chk_tomcat {
-    my @TCEnabledUsers = timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list');
+    my $TCEnabledUsers = timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list');
+	my @TCEnabledUsers = split "\n", $TCEnabledUsers;
 	my $TCEnabled=0;
 	my $TCEnabledUser;
 	foreach $TCEnabledUser(@TCEnabledUsers) { 
@@ -3168,7 +3169,10 @@ sub chk_tomcat {
 			last;
 		}
 	}
-    return unless ($TCEnabled);
+	if (!$TCEnabled) { 
+		print YELLOW "[INFO] - Tomcat not configured for $username\n";
+		return;
+	}
     my $TCDispStatus = 1;
     if ( $RealShell ne "/bin/bash" ) {
         print RED "[WARN] - $username\'s shell is not Normal (/bin/bash) - unable to obtain a valid status for ea-tomcat85.\n";
