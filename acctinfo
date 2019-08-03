@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.08";
+my $VERSION = "2.5.09";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -679,9 +679,9 @@ if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" ) 
     $clPHPVer = alltrim($clPHPVer);
     if ($clPHPVer) {
         print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . MAGENTA " CloudLinux PHP Selector version has precedence\n";
-        my $PHPiniFile = timed_run( 2, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"');
-        my $PHPiniLoad = timed_run( 2, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"');
-        my $PHPiniScan = timed_run( 2, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"');
+        my $PHPiniFile = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"');
+        my $PHPiniLoad = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"');
+        my $PHPiniScan = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"');
         chomp($PHPiniFile);
         chomp($PHPiniLoad);
         chomp($PHPiniScan);
@@ -740,14 +740,14 @@ if ( $isEA4 and !$skipEA4 ) {
     }
     if ( -e ("/etc/scl/conf/$PHPversion")
         or ( -e ("/etc/scl/prefixes/$PHPversion") ) ) {
-        my $PHPiniFile = timed_run( 2, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"');
-        my $PHPiniLoad = timed_run( 2, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"');
-        my $PHPiniScan = timed_run( 2, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"');
+        my $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"');
+        my $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"');
+        my $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"');
 
         if ($suPHPConfPathFound) {
-            print YELLOW "[NOTE]" . WHITE . " - suPHP_ConfigPath found in .htaccess file: " . CYAN . $suPHPConfPathFound . "/.htaccess";
-            my ($UsersuPHPConfPath) =
-              ( split( /\s+/, $suPHPConfPathFound ) )[1];
+			chomp($suPHPConfPathFound);
+            print YELLOW "[NOTE]" . WHITE . " - suPHP_ConfigPath found in .htaccess file: " . CYAN . $suPHPConfPathFound . "/.htaccess\n";
+            my ($UsersuPHPConfPath) = ( split( /\s+/, $suPHPConfPathFound ) )[1];
             $PHPiniFile = "Configuration File (php.ini) Path => $UsersuPHPConfPath";
             $PHPiniLoad = "Loaded Configuration File => $UsersuPHPConfPath";
             $PHPiniScan = "Scan this dir for additional .ini files => None";
@@ -829,7 +829,7 @@ sub custom_UD {
         }
     }
 	else { 
-        print expand( YELLOW "[INFO] No custom userdata (std) directory found under $userdataSTDPath/ for $username\n" );
+        print expand( YELLOW "[INFO] No custom userdata (std) directory found under $userdataSTDPath/ for $username\n" ) unless($userdataSTDPath eq "");
 	}
     if ( -e "$userdataSSLPath/$username/$MAINDOMAIN" ) {
         print expand( YELLOW "[INFO] Found a custom userdata (ssl) directory: " . GREEN . "$userdataSSLPath/$username/$MAINDOMAIN\n" );
@@ -847,7 +847,7 @@ sub custom_UD {
         }
     }
 	else { 
-        print expand( YELLOW "[INFO] No custom userdata (ssl) directory found under $userdataSSLPath/ for $username\n" );
+        print expand( YELLOW "[INFO] No custom userdata (ssl) directory found under $userdataSSLPath/ for $username\n" ) unless($userdataSSLPath eq "");
 	}
     print "\n";
 }
@@ -1146,12 +1146,12 @@ if ( $listdbs or $all ) {
 }
 
 if ( $listssls or $all ) {
+    print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
     $sslsyscertdir = "/var/cpanel/ssl/apache_tls";
     if ( -e ("$sslsyscertdir/$MAINDOMAIN/certificates") ) {
         $sslsubject   = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-subject', '-noout');
         $startdate    = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-startdate', '-noout');
         $expiredate   = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-enddate', '-noout');
-        print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
         dispSSLdata($MAINDOMAIN);
         if ( !$isExpired ) {
             print WHITE "Protecting the following Subject Alternative Names:\n";
@@ -1168,9 +1168,10 @@ if ( $listssls or $all ) {
 				}
             }
         }
+	}
         else {
             print YELLOW $MAINDOMAIN . "\n";
-            print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
+            print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
         }
 
         foreach $SUB (@SUBDOMAINS) {
@@ -1194,7 +1195,7 @@ if ( $listssls or $all ) {
             }
             else {
                 print YELLOW $SUB . "\n";
-                print expand( WHITE "\t \\_ " . CYAN . "No SSL found.\n" );
+                print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
             }
         }
 
@@ -1297,7 +1298,7 @@ if ( $listssls or $all ) {
             print expand( GREEN "\t \\_ None\n" );
         }
         border();
-    }
+    #}
 }
 
 print "</c>\n" unless ($nocodeblock);
@@ -1667,6 +1668,7 @@ sub cruft_check {
       /etc/ssldomains
     );
 
+	my $skipMySQLCruft=0;
     my $file2searchu;
     if ($username) {
         if ( $username ne "nobody" ) {
@@ -1688,6 +1690,7 @@ sub cruft_check {
     }
     else {
         print "No Username detected for $QUERY - skipping some checks!\n\n";
+		$skipMySQLCruft=1;
     }
     if ( $QUERY ne "" ) {
         if ( $MAINDOMAIN eq "" ) {
@@ -1990,7 +1993,6 @@ sub cruft_check {
     }
 
     # Check MySQL users table.
-    my $skipMySQLCruft = 0;
     if ( $skipMySQLCruft == 0 ) {
         if ( $username eq "" or $QUERY eq "" ) {
             print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
@@ -2002,54 +2004,54 @@ sub cruft_check {
 			for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
           		print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
     		}
+		}
+	}
+	print YELLOW "Checking for any MySQL users in mysql.user table\n";
+	my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'" );
+	$DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User = '$username'" );
+	my @DBusernames = split( '\n', $DBusername );
+	my $DBUserCnt = @DBusernames;
+	if ( $DBUserCnt >= 1 ) {
+		my $NewDBUser;
+		foreach $NewDBUser (@DBusernames) {
+			chomp($NewDBUser);
+			print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+		}
+	}
+	else {
+		print expand( WHITE "\t \\_ None\n" );
+	}
 
-            print YELLOW "Checking for any MySQL users in mysql.user table\n";
-			my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'" );
-            $DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User = '$username'" );
-            my @DBusernames = split( '\n', $DBusername );
-            my $DBUserCnt = @DBusernames;
-            if ( $DBUserCnt >= 1 ) {
-                my $NewDBUser;
-                foreach $NewDBUser (@DBusernames) {
-                    chomp($NewDBUser);
-                    print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
-                }
-            }
-            else {
-                print expand( WHITE "\t \\_ None\n" );
-            }
+	print YELLOW "Checking for any MySQL users and databases in mysql.db table\n";
+	my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'" );
+	$DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User = '$username'" );
+	my @DBusernames = split( '\n', $DBusername );
+	my $DBUserCnt = @DBusernames;
+	if ( $DBUserCnt >= 1 ) {
+		my $NewDBUser;
+		foreach $NewDBUser (@DBusernames) {
+			chomp($NewDBUser);
+			print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+		}
+	}
+	else {
+		print expand( WHITE "\t \\_ None\n" );
+	}
 
-            print YELLOW "Checking for any MySQL users and databases in mysql.db table\n";
-			my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'" );
-            $DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User = '$username'" );
-            my @DBusernames = split( '\n', $DBusername );
-            my $DBUserCnt = @DBusernames;
-            if ( $DBUserCnt >= 1 ) {
-                my $NewDBUser;
-                foreach $NewDBUser (@DBusernames) {
-                    chomp($NewDBUser);
-                    print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
-                }
-            }
-            else {
-                print expand( WHITE "\t \\_ None\n" );
-            }
-
-        }
-    }
-
-    # Check postgres
-   	my $UserDbsJSON = get_cpapi2('Postgres','listdbs', "--user=$username");
-	my $UserDb;
-    print YELLOW "PostGreSQL Databases Found:\n";
-	for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
-       	for my $DbUser ( @{$UserDb->{userlist}} ) {
-           	print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
-       	}
+	    # Check postgres
+	if ( $skipMySQLCruft == 0 ) {
+		my $UserDbsJSON = get_cpapi2('Postgres','listdbs', "--user=$username");
+		my $UserDb;
+		print YELLOW "PostGreSQL Databases Found:\n";
+		for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
+       		for my $DbUser ( @{$UserDb->{userlist}} ) {
+           		print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
+       		}
+  		}
    	}
-    border();
-    print "</c>\n" unless ($nocodeblock);
-    exit;
+   	border();
+   	print "</c>\n" unless ($nocodeblock);
+   	exit;
 }
 
 sub check_file_existance {
@@ -2899,11 +2901,6 @@ sub ChkForIntegration {
 
 sub dispSSLdata {
     my $tcDomain = $_[0];
-    my $CNloc    = index( $sslsubject, "CN=" );
-    my $CN       = substr( $sslsubject, $CNloc );
-    my ( $domain, $crap ) = ( split( /\//, $CN ) )[0];
-    $domain = substr( $domain, 3 );
-    chomp($domain);
     chomp($startdate);
     chomp($expiredate);
     ($startdate)  = ( split( /=/, $startdate ) )[1];
@@ -2920,10 +2917,10 @@ sub dispSSLdata {
             $isExpired = RED "[EXPIRED]";
         }
     }
-    print YELLOW . $domain . "\n";
+    print YELLOW . $tcDomain . "\n";
     print expand( WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n" );
     print expand( WHITE "\t \\_ Not After : " . GREEN . $expiredate . " " . $isExpired . "\n" );
-    $isSelfSigned = timed_run( 3, 'openssl', 'verify', "$sslsyscertdir/$MAINDOMAIN/certificates");
+    $isSelfSigned = timed_run( 3, 'openssl', 'verify', "$sslsyscertdir/$tcDomain/certificates");
 	if ($isSelfSigned =~ m/self signed certificate/) { 
         print expand( RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate\n" );
     }
@@ -2957,12 +2954,9 @@ sub isUserReserved {
     }
     if ( $IS_USERNAME == 0 ) {
         print "Looking for username for $QUERY... - ";
-        my $part1 = timed_run ( 2, "egrep '^$QUERY:' /etc/userdatadomains");
-		my ($part2) = (split(/\s+/,$part1))[1];
-		my ($part2) = (split(/=/,$part2))[0];
-        chomp($part2);
-        if ($part2) {
-            $lcUser = $part2;
+		my $lcUserJSON = get_whmapi1 ( 'getdomainowner', "domain=$QUERY" );
+		$lcUser=$lcUserJSON->{data}->{user};
+        if ($lcUser) {
             print "Found ($lcUser)\n";
         }
         else {
