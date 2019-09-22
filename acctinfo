@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.11";
+my $VERSION = "2.5.12";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -46,14 +46,25 @@ use Cpanel::Config::Users           ();
 use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::SafeRun::Timed          ();
-use Cpanel::JSON;					();
-use Cpanel::ResellerFunctions       ();
-use Cpanel::Usage                   ();
-use Cpanel::Version                 ();
+use Cpanel::JSON;
+();
+use Cpanel::ResellerFunctions ();
+use Cpanel::Usage             ();
+use Cpanel::Validate::IP      ();
+use Cpanel::Version           ();
+use Cpanel::PwCache           ();
+use Cpanel::LoginDefs         ();
+use Cpanel::Config::CpUser    ();
+use Cpanel::PwCache           ();
+use Cpanel::PwCache::Get      ();
 use Time::Piece;
 use Time::Seconds;
 use String::Random;
+use Path::Iterator::Rule;
 use Math::Round;
+use NetAddr::IP;
+use DateTime;
+use Date::Parse;
 use Text::Tabs;
 $tabstop = 4;
 use Net::DNS;
@@ -64,7 +75,7 @@ use integer;
 our $sslsyscertdir;
 our $stderr;
 our $stdout;
-our $OPT_TIMEOUT; 
+our $OPT_TIMEOUT;
 our $success;
 our $command;
 our $sslsubject;
@@ -74,13 +85,7 @@ our $isExpired;
 our $isSelfSigned;
 our $result;
 our @FilesToScan;
-our @InstalledMods = timed_run( 2, 'httpd', '-M');
-
-my $noDateManip = 0;
-eval("use Date::Manip");
-if ($@) {
-    $noDateManip = 1;
-}
+our @InstalledMods = timed_run_noerr( 0, 'httpd', '-M' );
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -102,10 +107,9 @@ my $SearchFor      = undef;
 my $useDig         = undef;
 my $cruft          = undef;
 my $mail           = undef;
-my $tomcat		   = undef;
+my $tomcat         = undef;
 my $scan           = undef;
 my $nocodeblock    = undef;
-my $skipfind       = 0;
 our $isInNamedConf = 0;
 our $spincounter;
 our $CAADOMAIN;
@@ -127,16 +131,11 @@ GetOptions(
     'cphulkblocks'  => \$chk_cph_blocks,
     'tomcat'        => \$tomcat,
     'scan'          => \$scan,
-    'skipfind'      => \$skipfind,
     'q'             => \$clearscreen,
     'nocode'        => \$nocodeblock,
     'useDig'        => \$useDig,
     'useClam'       => \$useClam,
 );
-
-if ($skipfind) {
-    $skipfind = 1;
-}
 
 if ($clearscreen) {
     system("clear");
@@ -201,12 +200,20 @@ else {
     $UserIsReserved = isUserReserved($QUERY);
 }
 if ($UserIsReserved) {
-    print RED "\n[WARN] - " . YELLOW $username . WHITE " is a reserved username! " . BOLD CYAN "(some info may be missing from some files)\n";
+    if ( $username eq "" and $IS_USERNAME ) {
+        $username = $QUERY;
+    }
+    print RED "\n[WARN] - " . YELLOW $QUERY . WHITE " is tied to a reserved username! " . BOLD CYAN "(some info may be missing from some files)\n";
     if ($username) {
         my $RandomString  = new String::Random;
         my $SuggestedUser = $RandomString->randpattern("cccccc");
         print YELLOW "You can use the following API call to change $username to for example: $username$SuggestedUser\n";
         print BOLD MAGENTA "/usr/sbin/whmapi1 modifyacct user=$username newuser=$username$SuggestedUser\n";
+        if ( !$cruft ) {
+            print BOLD YELLOW "Use --cruft to check for cruft\n";
+            print "</c>\n" unless ($nocodeblock);
+            exit;
+        }
     }
 }
 
@@ -324,70 +331,67 @@ my $PACKAGE       = $user_conf->{'PLAN'};
 my $THEME         = $user_conf->{'RS'};
 my $IPADDR        = $user_conf->{'IP'};
 my $BACKUPENABLED = $user_conf->{'BACKUP'};
+
 #my $LEGACYBACKUP  = $user_conf->{'LEGACY_BACKUP'};
-my $MAXADDON      = $user_conf->{'MAXADDON'};
-my $MAXPARK       = $user_conf->{'MAXPARK'};
-my $MAXSUB        = $user_conf->{'MAXSUB'};
-my $MAXFTP        = $user_conf->{'MAXFTP'};
-my $MAXSQL        = $user_conf->{'MAXSQL'};
-my $MAXLST        = $user_conf->{'MAXLST'};
-my $SUSPEND_TIME  = $user_conf->{'SUSPENDTIME'};
-my $FEATURELIST   = $user_conf->{'FEATURELIST'};
-my $STARTDATE     = scalar localtime( $user_conf->{'STARTDATE'} );
+my $MAXADDON     = $user_conf->{'MAXADDON'};
+my $MAXPARK      = $user_conf->{'MAXPARK'};
+my $MAXSUB       = $user_conf->{'MAXSUB'};
+my $MAXFTP       = $user_conf->{'MAXFTP'};
+my $MAXSQL       = $user_conf->{'MAXSQL'};
+my $MAXLST       = $user_conf->{'MAXLST'};
+my $SUSPEND_TIME = $user_conf->{'SUSPENDTIME'};
+my $FEATURELIST  = $user_conf->{'FEATURELIST'};
+my $STARTDATE    = scalar localtime( $user_conf->{'STARTDATE'} );
 my @ResolvedIP;
 my $ResolvedIP;
 
-my $HAS_AUTOSSL = "No";
-my $HAS_AUTOSSLFEATURE = get_whmapi1( 'verify_user_has_feature', "user=$username", 'feature=autossl');
-if ($HAS_AUTOSSLFEATURE->{data}->{has_feature}) { 
-	$HAS_AUTOSSL = "Yes";
-} 
-
-my $HAS_AUTOSSL_TEXT;
-
-# Check disabled feature list to see if autossl=0 exists
-my $AutoSSL_Disabled = qx[ grep 'autossl=0' "/var/cpanel/features/disabled" ];
-if ($AutoSSL_Disabled) {
-    $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in feature list)";
+my $HAS_AUTOSSL        = "No";
+my $HAS_AUTOSSLFEATURE = get_whmapi1( 'verify_user_has_feature', "user=$username", 'feature=autossl' );
+if ( $HAS_AUTOSSLFEATURE->{data}->{has_feature} ) {
+    $HAS_AUTOSSL = "Yes";
 }
 
-# Check $FEATURELIST feature list to see if autossl=0 exists
+my $HAS_AUTOSSL_TEXT;
+my $AutoSSL_Disabled     = 0;
+my $AutoSSL_DisabledJSON = get_whmapi1( 'get_featurelist_data', 'featurelist=disabled' );
+for my $AutoSSL_DisabledID ( @{ $AutoSSL_DisabledJSON->{data}->{features} } ) {
+    if ( $AutoSSL_DisabledID->{id} eq "autossl" ) {
+        $AutoSSL_Disabled = $AutoSSL_DisabledID->{value};
+        last;
+    }
+}
+if ( !$AutoSSL_Disabled ) {
+    $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in the \"disabled\" feature list)";
+}
 my $AutoSSL_Disabled;
 if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
     $AutoSSL_Disabled = "$FEATURELIST not found in /var/cpanel/features!";
-    $HAS_AUTOSSL_TEXT = RED "[WARN] - Missing from /var/cpanel/features/";
+    $HAS_AUTOSSL_TEXT = RED "[WARN] - Missing from the /var/cpanel/features/ directory";
 }
 else {
-    $AutoSSL_Disabled = qx[ grep 'autossl=0' "/var/cpanel/features/$FEATURELIST" ];
-    if ($AutoSSL_Disabled) {
-        $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in $FEATURELIST)";
+    my $AutoSSL_DisabledJSON = get_whmapi1( 'get_featurelist_data', "featurelist=$FEATURELIST" );
+    for my $AutoSSL_DisabledID ( @{ $AutoSSL_DisabledJSON->{data}->{features} } ) {
+        if ( $AutoSSL_DisabledID->{id} eq "autossl" ) {
+            $AutoSSL_Disabled = $AutoSSL_DisabledID->{value};
+            last;
+        }
+    }
+    if ( !$AutoSSL_Disabled ) {
+        $HAS_AUTOSSL_TEXT = "(AutoSSL disabled in the \"$FEATURELIST\" feature list)";
     }
 }
 if ( $HAS_AUTOSSL_TEXT eq "" ) {
-    $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in \"$FEATURELIST\" feature list)";
+    $HAS_AUTOSSL_TEXT = "(AutoSSL enabled in the \"$FEATURELIST\" feature list)";
 }
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
-#$LEGACYBACKUP  = ($LEGACYBACKUP)  ? "Yes" : "No";
 if ($IS_USERNAME) {
-
-    # Resolve the ip address of $MAINDOMAIN to see if it is pointing somewhere else
-    if ($useDig) {
-        @ResolvedIP = qx[ dig +tries=2 +time=5 \@208.67.220.220 $MAINDOMAIN A +short ];
-    }
-    else {
-        @ResolvedIP = getArecords($MAINDOMAIN);
-    }
+    $ResolvedIP = timed_run( 4, 'dig', '@208.67.220.220', "$MAINDOMAIN", 'A', '+short' );
 }
 else {
-    # a domain name was entered so we should resolve the IP of that instead.
-    if ($useDig) {
-        @ResolvedIP = qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN A +short ];
-    }
-    else {
-        @ResolvedIP = getArecords($DOMAIN);
-    }
+    $ResolvedIP = timed_run( 4, 'dig', '@208.67.222.222', "$DOMAIN", 'A', '+short' );
 }
+@ResolvedIP = split "\n", $ResolvedIP;
 my $IPTYPE = "";
 if ( $IPADDR eq $SERVER_IP ) {
     $IPTYPE = "shared";
@@ -426,7 +430,7 @@ foreach $RESELLER (@ALL_RESELLERS) {
 
         # Grab resellers shared IP (if configured) from /var/cpanel/mainips/$RESELLER.
         if ( -e ("/var/cpanel/mainips/$RESELLER") ) {
-            $ResellerSharedIP = qx[ cat /var/cpanel/mainips/$RESELLER ];
+            $ResellerSharedIP = timed_run( 2, 'cat', "/var/cpanel/mainips/$RESELLER" );
             chomp($ResellerSharedIP);
         }
         if ( -e ("/var/cpanel/dips/$RESELLER") ) {
@@ -435,24 +439,13 @@ foreach $RESELLER (@ALL_RESELLERS) {
             close(RESELLERIPS);
         }
 
-        # Read all accounts in /var/cpanel/users into array
-        opendir( ACCTS, "/var/cpanel/users" );
-        my @LISTOFACCTS = readdir(ACCTS);
-        closedir(ACCTS);
-        foreach $vcu_account (@LISTOFACCTS) {
-            chomp($vcu_account);
-            if (   $vcu_account =~ m/HASH/
-                or $vcu_account eq "."
-                or $vcu_account eq ".." ) {
-                next;
-            }
-
-            $FOUND = qx[ grep 'OWNER=$username' /var/cpanel/users/$vcu_account ];
-            if ($FOUND) {
-                $ResellersAcct = qx[ grep 'DNS=' /var/cpanel/users/$vcu_account ];
-                $ResellerDomain = substr( $ResellersAcct, 4 );
-                chomp($ResellerDomain);
-                push( @ACCTSOWNEDBYRESELLER, "$ResellerDomain ($vcu_account)" );
+        my $ResellerAcctsJSON = get_uapi( "--user=$username", 'Resellers', 'list_accounts' );
+        for my $ResellerAccts ( @{ $ResellerAcctsJSON->{result}->{data} } ) {
+            my $ResellerAcctMaster = $ResellerAccts->{select};
+            if ( !$ResellerAcctMaster ) {
+                my $ResellerAcctDomain = $ResellerAccts->{domain};
+                my $ResellerAcctUser   = $ResellerAccts->{user};
+                push( @ACCTSOWNEDBYRESELLER, "$ResellerAcctDomain ($ResellerAcctUser)" );
             }
         }
         $ResellerAcctsCnt = @ACCTSOWNEDBYRESELLER;
@@ -461,8 +454,8 @@ foreach $RESELLER (@ALL_RESELLERS) {
     }
 }
 
-my $userowners = Cpanel::Config::LoadUserOwners::loadtrueuserowners( undef, 1, 1 );
-my $TOTAL_DOMAINS=%{$userowners};
+my $userowners    = Cpanel::Config::LoadUserOwners::loadtrueuserowners( undef, 1, 1 );
+my $TOTAL_DOMAINS = %{$userowners};
 chomp($TOTAL_DOMAINS);
 print WHITE "There are " . YELLOW $TOTAL_DOMAINS . WHITE " total accounts on (" . GREEN ON_BLACK $HOSTNAME . WHITE ")\n";
 if ($IS_USERNAME) {
@@ -473,49 +466,27 @@ else {
 }
 
 # Get home directory from /etc/passwd
-my @PASSWDS = undef;
-our $RealHome    = "";
 our $SSLProvider = getSSLProvider();
-our $passline    = "";
-my $RealShell = "";
-my $UID       = "";
-my $GID       = "";
-
-open( PASSWD, "/etc/passwd" );
-@PASSWDS = <PASSWD>;
-close(PASSWD);
-
-foreach $passline (@PASSWDS) {
-    chomp($passline);
-    if ( $passline =~ m/\b$username\b/ ) {
-        ($UID)       = ( split( /:/, $passline ) )[2];
-        ($GID)       = ( split( /:/, $passline ) )[3];
-        ($RealHome)  = ( split( /:/, $passline ) )[5];
-        ($RealShell) = ( split( /:/, $passline ) )[6];
-        last;
-    }
-}
-
-# Check UID/GID against UID_MIN and GID_MIN in /etc/login.defs
-my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
-my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
-($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
-($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
-$UID_MIN = alltrim($UID_MIN);
-$GID_MIN = alltrim($GID_MIN);
+our $RealHome    = Cpanel::PwCache::gethomedir($username);
+my $RealShell = Cpanel::PwCache::Get::getshell($username);
+my $UID       = Cpanel::PwCache::Get::getuid($username);
+my $GID       = Cpanel::Config::CpUser::get_cpgid($username);
+my $UID_MIN   = Cpanel::LoginDefs::get_uid_min();
+my $GID_MIN   = Cpanel::LoginDefs::get_gid_min();
 
 if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
     print RED "[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n";
 }
 
 # Check for missing hash in /etc/shadow
-my ($PWHash) = ( split( /:/, qx[ grep $username /etc/shadow ] ) )[1];
+my $PWHashLine = timed_run( 2, 'grep', "^$username", '/etc/shadow' );
+my ($PWHash) = ( split( /:/, $PWHashLine ) )[1];
 if ( $PWHash eq "" ) {
     print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
 }
 
-my $LastLoginIPdata = get_uapi( 'LastLogin', 'get_last_or_current_logged_in_ip', "--user=$username");
-my $LastLoginIP=$LastLoginIPdata->{result}->{data};
+my $LastLoginIPdata = get_uapi( 'LastLogin', 'get_last_or_current_logged_in_ip', "--user=$username" );
+my $LastLoginIP     = $LastLoginIPdata->{result}->{data};
 chomp($LastLoginIP);
 if ( $LastLoginIP eq "''" ) {
     $LastLoginIP = "";
@@ -546,9 +517,16 @@ checkperms2();
 securitychk();
 
 # Check if user is in demo mode
-my $InDemo = qx[ grep $username /etc/demousers /etc/demodomains];
-if ($InDemo) {
-    print RED "[WARN] - $username is in demo mode!\n";
+open( DEMO, "/etc/demousers" );
+my @DEMOUSERS = <DEMO>;
+close(DEMO);
+my $demouser;
+foreach $demouser (@DEMOUSERS) {
+    chomp($demouser);
+    if ( $demouser eq $username ) {
+        print RED "[WARN] - $username is in demo mode!\n";
+        last;
+    }
 }
 
 # Check if bandwidth limit exceeded
@@ -588,18 +566,25 @@ ChkForIntegration();
 # check if user is in /etc/ftpusers
 my $ftpblock = "";
 if ( -e ("/etc/ftpusers") ) {
-    $ftpblock = qx[ grep $username /etc/ftpusers ];
-    if ($ftpblock) {
-        print RED "[WARN] - $username found in /etc/ftpusers file (FTP authentication will fail!\n";
+    open( FTPUSERS, "/etc/ftpusers" );
+    my @FTPUSERS = <FTPUSERS>;
+    close(FTPUSERS);
+    my $ftpblock;
+    foreach $ftpblock (@FTPUSERS) {
+        chomp($ftpblock);
+        if ( $ftpblock eq $username ) {
+            print RED "[WARN] - $username found in /etc/ftpusers file (FTP authentication will fail!\n";
+            last;
+        }
     }
 }
 
 # Check to make sure UID/GID is greater than what is defined in /etc/login.defs
 print WHITE "UID/GID: " . CYAN $UID . "/" . $GID . "\n";
 
-my $quotaJSON = get_whmapi1( 'accountsummary', "user=$username");
-my $quotaused=$quotaJSON->{data}->{acct}->[0]->{diskused};
-my $maxquota=$quotaJSON->{data}->{acct}->[0]->{disklimit};
+my $quotaJSON = get_whmapi1( 'accountsummary', "user=$username" );
+my $quotaused = $quotaJSON->{data}->{acct}->[0]->{diskused};
+my $maxquota  = $quotaJSON->{data}->{acct}->[0]->{disklimit};
 print "Disk Quota: $quotaused used of $maxquota allowed ";
 
 if ( $quotaused > $maxquota ) {
@@ -612,9 +597,9 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
     print YELLOW "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
 }
 else {
-    my $bwdataJSON = get_uapi( 'StatsBar', 'get_stats', 'display=bandwidthusage', "--user=$username");
-    my $bwused=$bwdataJSON->{result}->{data}->[0]->{count};
-    my $bwmax=$bwdataJSON->{result}->{data}->[0]->{max}; 
+    my $bwdataJSON = get_uapi( 'StatsBar', 'get_stats', 'display=bandwidthusage', "--user=$username" );
+    my $bwused     = $bwdataJSON->{result}->{data}->[0]->{count};
+    my $bwmax      = $bwdataJSON->{result}->{data}->[0]->{max};
     print "Bandwidth: $bwused used of $bwmax allowed\n"
       unless ( $bwused eq "" or $bwmax eq "" );
 }
@@ -653,8 +638,8 @@ my $PHPDefaultVersion;
 my $PHPversion;
 my $isEA4 = 0;
 
-if ($tomcat) { 
-	chk_tomcat();
+if ($tomcat) {
+    chk_tomcat();
 }
 
 custom_UD();
@@ -672,19 +657,23 @@ $isEA4 = isEA4();
 my $skipEA4  = 0;
 my $clPHPVer = 0;
 if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" ) {
-    my $clPHP = timed_run( 2, 'grep', '^php', "$RealHome/.cl.selector/defaults.cfg");
+    my $clPHP = timed_run( 2, 'grep', '^php', "$RealHome/.cl.selector/defaults.cfg" );
     $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
     $clPHPVer = alltrim($clPHPVer);
     if ($clPHPVer) {
+        if ( $clPHPVer eq "native" ) {
+            my $clPHPVer = timed_run( 4, '/usr/bin/selectorctl', '--current', '--show-native-version', "| awk '{print $2}'" );
+        }
         print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . MAGENTA " CloudLinux PHP Selector version has precedence\n";
-        my $PHPiniFile = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"');
-        my $PHPiniLoad = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"');
-        my $PHPiniScan = timed_run( 5, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"');
+        my $PHPiniFile = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"' );
+        my $PHPiniLoad = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"' );
+        my $PHPiniScan = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"' );
         chomp($PHPiniFile);
         chomp($PHPiniLoad);
         chomp($PHPiniScan);
+
         if ( $cageFSStats and $cageFSStats eq "Enabled" ) {
             print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless ( $PHPiniFile eq "" );
             print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless ( $PHPiniLoad eq "" );
@@ -713,7 +702,7 @@ if ( $isEA4 and !$skipEA4 ) {
 
     my $suPHPConfPathFound;
     if ( -e ("$RealHome/public_html/.htaccess") ) {
-        $suPHPConfPathFound = timed_run( 2, "egrep -i ^suPHP_ConfigPath $RealHome/public_html/.htaccess");
+        $suPHPConfPathFound = timed_run( 2, "egrep -i ^suPHP_ConfigPath $RealHome/public_html/.htaccess" );
     }
 
     if ( $clPHPActive and $cageFSStats eq "Enabled" ) {
@@ -722,17 +711,18 @@ if ( $isEA4 and !$skipEA4 ) {
     else {
         print MAGENTA "cPanel EA4 PHP version has precedence\n";
     }
-    my $PHPHandlerJSON = get_uapi( 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN", "--user=$username");
-	my $PHPHandler=$PHPHandlerJSON->{result}->{data}->{php_handler};
+    my $PHPHandlerJSON = get_uapi( 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN", "--user=$username" );
+    my $PHPHandler     = $PHPHandlerJSON->{result}->{data}->{php_handler};
     print WHITE "PHP Handler: " . YELLOW $PHPHandler . "\n";
 
-    my $old_fpm_flagJSON = get_whmapi1('php_get_old_fpm_flag');
-	my $old_fpm_flag=$old_fpm_flagJSON->{data}->{old_fpm_flag};
-    if ( $old_fpm_flag
-        and ( -e ("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/") ) ) {
-        print RED "[WARN] Old PHP-FPM flags found!\n";
-        print "Look in /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/ for an fpm.conf file.\n";
-    }
+    # NOT SURE THIS IS NECESSARY ANY LONGER!
+    #    my $old_fpm_flagJSON = get_whmapi1('php_get_old_fpm_flag');
+    #	my $old_fpm_flag=$old_fpm_flagJSON->{data}->{old_fpm_flag};
+    #    if ( $old_fpm_flag
+    #        and ( -e ("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/") ) ) {
+    #        print RED "[WARN] Old PHP-FPM flags found!\n";
+    #        print "Look in /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/ for an fpm.conf file.\n";
+    #    }
 
     # Get php.ini config info
     if ( $PHPversion eq "inherit" and $cageFSStats ne "Enabled" ) {
@@ -740,12 +730,12 @@ if ( $isEA4 and !$skipEA4 ) {
     }
     if ( -e ("/etc/scl/conf/$PHPversion")
         or ( -e ("/etc/scl/prefixes/$PHPversion") ) ) {
-        my $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"');
-        my $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"');
-        my $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"');
+        my $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"' );
+        my $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"' );
+        my $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"' );
 
         if ($suPHPConfPathFound) {
-			chomp($suPHPConfPathFound);
+            chomp($suPHPConfPathFound);
             print YELLOW "[NOTE]" . WHITE . " - suPHP_ConfigPath found in .htaccess file: " . CYAN . $suPHPConfPathFound . "/.htaccess\n";
             my ($UsersuPHPConfPath) = ( split( /\s+/, $suPHPConfPathFound ) )[1];
             $PHPiniFile = "Configuration File (php.ini) Path => $UsersuPHPConfPath";
@@ -755,9 +745,9 @@ if ( $isEA4 and !$skipEA4 ) {
         chomp($PHPiniFile);
         chomp($PHPiniLoad);
         chomp($PHPiniScan);
-        print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless( $PHPiniFile eq "");
-        print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless( $PHPiniLoad eq "");
-        print expand( YELLOW "\t \\_ $PHPiniScan\n" ) unless( $PHPiniScan eq "");
+        print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless ( $PHPiniFile eq "" );
+        print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless ( $PHPiniLoad eq "" );
+        print expand( YELLOW "\t \\_ $PHPiniScan\n" ) unless ( $PHPiniScan eq "" );
     }
 
     if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
@@ -778,41 +768,37 @@ if ( $isEA4 and !$skipEA4 ) {
         }
     }
 
-    if ( !( -e ("$RealHome/public_html") ) ) {
-        $skipfind = 1;
+    use Path::Iterator::Rule;
+    my $rule        = Path::Iterator::Rule->new;
+    my $it          = $rule->iter("$RealHome/public_html");
+    my $headPrinted = 0;
+    while ( my $file = $it->() ) {
+        next if ( $file eq "." or $file eq ".." );
+        next unless ( $file =~ m/\.ini$/ );
+        print CYAN "\nFound some custom *.ini files: \n" unless ($headPrinted);
+        $headPrinted = 1;
+        print expand( YELLOW "\t \\_ $file\n" );
     }
-
-    # Search /home/username for any php.ini files (unless --skipfind)
-    if ( $skipfind == 0 ) {
-        my @anyINI = qx [ find $RealHome -maxdepth 3 -name '*.ini' | grep -v '.trash' ];
-        my $anyINIfile;
-        if (@anyINI) {
-            print GREEN "Custom *.ini files found in: \n";
-            foreach $anyINIfile (@anyINI) {
-                chomp($anyINIfile);
-                print expand( YELLOW "\t \\_ $anyINIfile\n" );
-            }
-        }
-        print "\n";
-    }
+    print "\n";
 }
 
 sub custom_UD {
     my $userdataSTDPath = "";
     my $userdataSSLPath = "";
-    #if ( -d ("/etc/apache2/conf.d/userdata/std/2/") ) {
-    #    $userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2";
-    #}
-    #if ( -d ("/etc/apache2/conf.d/userdata/ssl/2/") ) {
-    #    $userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2";
-    #}
+    if ( -d ("/etc/apache2/conf.d/userdata/std/2/") ) {
+        $userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2";
+    }
+    if ( -d ("/etc/apache2/conf.d/userdata/ssl/2/") ) {
+        $userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2";
+    }
     if ( -d ("/etc/apache2/conf.d/userdata/std/2_4/") ) {
         $userdataSTDPath = "/etc/apache2/conf.d/userdata/std/2_4";
     }
     if ( -d ("/etc/apache2/conf.d/userdata/ssl/2_4/") ) {
         $userdataSSLPath = "/etc/apache2/conf.d/userdata/ssl/2_4";
     }
-	# Might want to change $MAINDOMAIN to $QUERY (unless they entered a username)
+
+    # Might want to change $MAINDOMAIN to $QUERY (unless they entered a username)
     if ( -e "$userdataSTDPath/$username/$MAINDOMAIN" ) {
         print expand( YELLOW "[INFO] Found a custom userdata (std) directory: " . GREEN . "$userdataSTDPath/$username/$MAINDOMAIN\n" );
         my $confFile;
@@ -828,9 +814,9 @@ sub custom_UD {
             print expand("\t \\_ $confFile\n");
         }
     }
-	else { 
-        print expand( YELLOW "[INFO] No custom userdata (std) directory found under $userdataSTDPath/ for $username\n" ) unless($userdataSTDPath eq "");
-	}
+    else {
+        print expand( YELLOW "[INFO] No custom userdata (std) directory found under $userdataSTDPath/ for $username\n" ) unless ( $userdataSTDPath eq "" );
+    }
     if ( -e "$userdataSSLPath/$username/$MAINDOMAIN" ) {
         print expand( YELLOW "[INFO] Found a custom userdata (ssl) directory: " . GREEN . "$userdataSSLPath/$username/$MAINDOMAIN\n" );
         my $confFile;
@@ -846,50 +832,44 @@ sub custom_UD {
             print expand("\t \\_ $confFile\n");
         }
     }
-	else { 
-        print expand( YELLOW "[INFO] No custom userdata (ssl) directory found under $userdataSSLPath/ for $username\n" ) unless($userdataSSLPath eq "");
-	}
+    else {
+        print expand( YELLOW "[INFO] No custom userdata (ssl) directory found under $userdataSSLPath/ for $username\n" ) unless ( $userdataSSLPath eq "" );
+    }
     print "\n";
 }
 
-my $IS_IP_ON_SERVER = qx[ ip addr | grep $IPADDR ];
-my $NOTONSERVER     = "[ Is configured on this server ] ";
-if ( $IS_IP_ON_SERVER eq "" ) {
-    $NOTONSERVER = "[ Not configured on this server ]";
+my $ListIPsJSON     = get_whmapi1('listips');
+my $IS_IP_ON_SERVER = 0;
+my $NOTONSERVER     = "[ Not configured on this server ]";
+for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
+    if ( $ListOfIPs->{ip} eq $IPADDR ) {
+        $IS_IP_ON_SERVER = 1;
+        $NOTONSERVER     = "[ Is configured on this server ] ";
+        last;
+    }
 }
-print WHITE "IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") - $NOTONSERVER\n";
-my $defaultsite       = 0;
-my $TotalARecords     = @ResolvedIP;
-my $ConnectionTimeout = 0;
-if ( @ResolvedIP[4] =~ m/no servers could be reached/ ) {
-    $TotalARecords     = 0;
-    $ConnectionTimeout = 1;
-}
+
+print WHITE "Configured IP address: " . CYAN $IPADDR . WHITE " (" . CYAN $IPTYPE . WHITE ") - $NOTONSERVER\n";
+my $defaultsite      = 0;
+my $TotalARecords    = @ResolvedIP;
 my $ResolvesToDetail = "";
-print WHITE "Resolves to IP: ";
-if ( $TotalARecords > 1 ) {
-    print "(multiple A records found) \n";
-    foreach $ResolvedIP (@ResolvedIP) {
-        chomp($ResolvedIP);
-        $ResolvesToDetail = check_resolved_ip($ResolvedIP);
-        print expand( CYAN "\t \\_ " . $ResolvedIP . " " . RED $ResolvesToDetail . "\n" );
-    }
-}
-else {    ##  ONLY 1 A RECORED RETURNED.
-    $ResolvedIP = @ResolvedIP[0];
+my @multipleIPs      = undef;
+foreach $ResolvedIP (@ResolvedIP) {
     chomp($ResolvedIP);
-    if ($ConnectionTimeout) {
-        $ResolvedIP = "";
+    next if !Cpanel::Validate::IP::is_valid_ip($ResolvedIP);
+    $ResolvesToDetail = check_resolved_ip($ResolvedIP);
+    push @multipleIPs, CYAN "\t \\_ " . $ResolvedIP . " " . RED $ResolvesToDetail . "\n";
+}
+print WHITE "Resolves to the following IPs:\n";
+if ( $TotalARecords == 0 ) {
+    print CYAN "\t \\_ DOES NOT RESOLVE [NXDOMAIN]\n";
+}
+else {
+    my $multiIP = "";
+    foreach $multiIP (@multipleIPs) {
+        chomp($multiIP);
+        print $multiIP;
     }
-    if ( $TotalARecords == 0 and $ResolvedIP eq "" ) {
-        print "DOES NOT RESOLVE!\n";
-        $defaultsite = 1;
-    }
-    else {
-        $ResolvesToDetail = check_resolved_ip($ResolvedIP);
-        print CYAN $ResolvedIP . " " . RED $ResolvesToDetail;
-    }
-    print "\n";
 }
 
 # Check to see if domain name is in httpd.conf
@@ -898,18 +878,18 @@ my $FoundInHTTPDconf;
 # NEED TO REVIEW THIS.  SHOULD I JUST CHECK FOR $QUERY (regardless if it's a username or not?)
 if ($isEA4) {
     if ($IS_USERNAME) {
-        $FoundInHTTPDconf = qx[ grep -w '$QUERY' /etc/apache2/conf/httpd.conf ];
+        $FoundInHTTPDconf = timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
     }
     else {
-        $FoundInHTTPDconf = qx[ grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf ];
+        $FoundInHTTPDconf = timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
     }
 }
 else {
     if ($IS_USERNAME) {
-        $FoundInHTTPDconf = qx[ grep -w '$QUERY' /usr/local/apache/conf/httpd.conf ];
+        $FoundInHTTPDconf = timed_run( 3, "grep -w '$QUERY' /usr/local/apache/conf/httpd.conf" );
     }
     else {
-        $FoundInHTTPDconf = qx[ grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf ];
+        $FoundInHTTPDconf = timed_run( 3, "grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf" );
     }
 }
 if ( !($FoundInHTTPDconf) ) {
@@ -922,16 +902,39 @@ if ( !($FoundInHTTPDconf) ) {
     $defaultsite = 1;
 }
 
-my $MainDNSLine    = qx[ grep 'DNS=' /var/cpanel/users/$username | cut -d = -f2 ];
-my $MainDomainLine = qx[ grep 'main_domain: ' /var/cpanel/userdata/$username/main | cut -d ' ' -f2 ]
-  unless ( !-e ("/var/cpanel/userdata/$username/main") );
-chomp($MainDNSLine);
-chomp($MainDomainLine);
-if ( $MainDNSLine ne $MainDomainLine ) {
-    print MAGENTA "$MAINDOMAIN\n";
-    print expand ( CYAN "\t \\_ DNS=" . YELLOW $MainDNSLine . "\n" );
-    print expand ( CYAN "\t \\_ main_domain: " . YELLOW $MainDomainLine . "\n" );
-    print expand ( RED "\t \\_ [WARN]: DNS= line in users file does not match main_domain in userdata!\n\t\\_ Can cause IP Address to show up as MISSING in List Accounts! [CPANEL-20670]\n" );
+if ( -e "/var/cpanel/userdata/$username/main" ) {
+    open( USER, "/var/cpanel/users/$username" );
+    my @USERFILE = <USER>;
+    close(USER);
+    my $userline;
+    my $MainDNSLine;
+    foreach $userline (@USERFILE) {
+        chomp($userline);
+        if ( substr( $userline, 0, 4 ) eq "DNS=" ) {
+            ($MainDNSLine) = ( split( /=/, $userline ) )[1];
+            last;
+        }
+    }
+    chomp($MainDNSLine);
+    open( USER, "/var/cpanel/userdata/$username/main" );
+    my @USERFILE = <USER>;
+    close(USER);
+    my $userline;
+    my $MainDomainLine;
+    foreach $userline (@USERFILE) {
+        chomp($userline);
+        if ( $userline =~ "main_domain:" ) {
+            ($MainDomainLine) = ( split( /\s+/, $userline ) )[1];
+            last;
+        }
+    }
+    chomp($MainDomainLine);
+    if ( $MainDNSLine ne $MainDomainLine ) {
+        print MAGENTA "$MAINDOMAIN\n";
+        print expand ( CYAN "\t \\_ DNS=" . YELLOW $MainDNSLine . "\n" );
+        print expand ( CYAN "\t \\_ main_domain: " . YELLOW $MainDomainLine . "\n" );
+        print expand ( RED "\t \\_ [WARN]: DNS= line in users file does not match main_domain in userdata!\n\t\\_ Can cause IP Address to show up as MISSING in List Accounts! [CPANEL-20670]\n" );
+    }
 }
 
 if ($defaultsite) {
@@ -973,7 +976,17 @@ print "\n";
 print WHITE "Count of other domains: [" . YELLOW "SUB: " . GREEN $subcnt . WHITE "] - [" . YELLOW "ALIASES " . GREEN $parkcnt . WHITE "] - [" . YELLOW "ADDONS: " . GREEN $addoncnt . WHITE "]\n";
 
 my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
-my $DNSLinesCnt    = qx[ grep -c '^DNS' /var/cpanel/users/$username ];
+open( USERS, "/var/cpanel/users/$username" );
+my @USERFILE = <USERS>;
+close(USERS);
+my $DNSLinesCnt = 0;
+my $userline;
+foreach $userline (@USERFILE) {
+    chomp($userline);
+    next unless ( $userline =~ m/^DNS/ );
+    $DNSLinesCnt++;
+}
+
 if ($IS_USERNAME) {
     $isInNamedConf = 1;
 }
@@ -1104,40 +1117,40 @@ if ( $resellerperms or $all ) {
 
 # MySQL INFO
 if ( $listdbs or $all ) {
-    my $UserDbsJSON = get_cpapi2('MysqlFE','listdbs', "--user=$username");
+    my $UserDbsJSON = get_cpapi2( 'MysqlFE', 'listdbs', "--user=$username" );
     print WHITE "The following MySQL databases can be found under: " . GREEN $username . "\n";
-	my $DBCnt=0;
-	for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
-		$DBCnt++;
-        for my $DbUser ( @{$UserDb->{userlist}} ) {
-            my $dbPrivsJSON=get_cpapi2('MysqlFE', 'getdbuserprivileges', "--user=$username", "dbuser=$DbUser->{user}", "db=$UserDb->{db}");
+    my $DBCnt = 0;
+    for my $UserDb ( @{ $UserDbsJSON->{cpanelresult}->{data} } ) {
+        $DBCnt++;
+        for my $DbUser ( @{ $UserDb->{userlist} } ) {
+            my $dbPrivsJSON = get_cpapi2( 'MysqlFE', 'getdbuserprivileges', "--user=$username", "dbuser=$DbUser->{user}", "db=$UserDb->{db}" );
             print BOLD GREEN "Database: " . $UserDb->{db} . " [Size: " . $UserDb->{sizemeg} . " MB]\n";
-            print expand( BOLD YELLOW "\t\\_ User: " . $DbUser->{user} . "\n");
-            for my $dbPrivs ( @{$dbPrivsJSON->{cpanelresult}->{data}} ) {
-                print expand( BOLD MAGENTA "\t\t\\_ ". $dbPrivs . "\n" );
+            print expand( BOLD YELLOW "\t\\_ User: " . $DbUser->{user} . "\n" );
+            for my $dbPrivs ( @{ $dbPrivsJSON->{cpanelresult}->{data} } ) {
+                print expand( BOLD MAGENTA "\t\t\\_ " . $dbPrivs . "\n" );
             }
         }
     }
-	print BOLD CYAN "\nTotal MySQL Databases: $DBCnt\n";
+    print BOLD CYAN "\nTotal MySQL Databases: $DBCnt\n";
 
     smborder();
 
     # PostGreSQL INFO
     my $psql_running = 0;
-    if (qx[ ps ax | grep postgres | grep -v grep ]) { $psql_running = 1; }
+    if ( timed_run( 3, "lsof -i:5432" ) ) { $psql_running = 1; }
     if ( -e ("/usr/bin/psql") and $psql_running ) {    ## PostGreSQL is installed and running
-    	my $UserDbsJSON = get_cpapi2('Postgres','listdbs', "--user=$username");
-		my $UserDb;
-    	print WHITE "The following PostGreSQL databases can be found under: " . GREEN $username . "\n";
-		my $DBCnt=0;
-		for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
-			$DBCnt++;
-        	for my $DbUser ( @{$UserDb->{userlist}} ) {
-            	print BOLD GREEN "Database: " . $UserDb->{db} . " [Size: " . $UserDb->{sizemeg} . " MB]\n";
-            	print expand( BOLD YELLOW "\t\\_ User: " . $DbUser->{user} . "\n");
-        	}
-    	}
-		print BOLD CYAN "\nTotal PostGreSQL Databases: $DBCnt\n";
+        my $UserDbsJSON = get_cpapi2( 'Postgres', 'listdbs', "--user=$username" );
+        my $UserDb;
+        print WHITE "The following PostGreSQL databases can be found under: " . GREEN $username . "\n";
+        my $DBCnt = 0;
+        for my $UserDb ( @{ $UserDbsJSON->{cpanelresult}->{data} } ) {
+            $DBCnt++;
+            for my $DbUser ( @{ $UserDb->{userlist} } ) {
+                print BOLD GREEN "Database: " . $UserDb->{db} . " [Size: " . $UserDb->{sizemeg} . " MB]\n";
+                print expand( BOLD YELLOW "\t\\_ User: " . $DbUser->{user} . "\n" );
+            }
+        }
+        print BOLD CYAN "\nTotal PostGreSQL Databases: $DBCnt\n";
     }
     else {
         print RED "PostGreSQL server is not installed (or running) on " . MAGENTA $HOSTNAME . "\n";
@@ -1149,156 +1162,164 @@ if ( $listssls or $all ) {
     print WHITE "SSL Certificates installed under " . CYAN $MAINDOMAIN . WHITE " (" . GREEN $username . WHITE ")\n";
     $sslsyscertdir = "/var/cpanel/ssl/apache_tls";
     if ( -e ("$sslsyscertdir/$MAINDOMAIN/certificates") ) {
-        $sslsubject   = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-subject', '-noout');
-        $startdate    = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-startdate', '-noout');
-        $expiredate   = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-enddate', '-noout');
+        $sslsubject = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-subject',   '-noout' );
+        $startdate  = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-startdate', '-noout' );
+        $expiredate = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-enddate',   '-noout' );
         dispSSLdata($MAINDOMAIN);
         if ( !$isExpired ) {
             print WHITE "Protecting the following Subject Alternative Names:\n";
             my $SAN;
-            my $getSANS = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-noout', '-text');
-			my @getSANS = split "\n", $getSANS;	
+            my $getSANS = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$MAINDOMAIN/certificates", '-noout', '-text' );
+            my @getSANS = split "\n", $getSANS;
             foreach $SAN (@getSANS) {
                 chomp($SAN);
-				if ($SAN =~ m/DNS:/) { 
-					$SAN =~ s/DNS://g;
-					$SAN=alltrim($SAN);
-					$SAN =~ s/, /\n\t\\_ /g;
-                   	print expand( CYAN "\t \\_ " . CYAN $SAN . "\n" );
-				}
+                if ( $SAN =~ m/DNS:/ ) {
+                    $SAN =~ s/DNS://g;
+                    $SAN = alltrim($SAN);
+                    $SAN =~ s/, /\n\t\\_ /g;
+                    print expand( CYAN "\t \\_ " . CYAN $SAN . "\n" );
+                }
             }
         }
-	}
-        else {
-            print YELLOW $MAINDOMAIN . "\n";
-            print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
-        }
+    }
+    else {
+        print YELLOW $MAINDOMAIN . "\n";
+        print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
+    }
 
-        foreach $SUB (@SUBDOMAINS) {
-            chomp($SUB);
-            if ( -e ("$sslsyscertdir/$SUB/certificates") ) {
-                $sslsubject   = qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -subject -noout ];
-                $startdate    = qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -startdate -noout ];
-                $expiredate   = qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -enddate -noout ];
-                $isSelfSigned = qx[ openssl verify "$sslsyscertdir/$SUB/certificates" | grep 'self signed certificate' ];
-                dispSSLdata($SUB);
-                if ( !$isExpired ) {
-                    print WHITE "Protecting the following Subject Alternative Names:\n";
-                    my $SAN;
-                    my @getSANS = qx[ openssl x509 -in "$sslsyscertdir/$SUB/certificates" -noout -text | grep -oP '(?<=DNS:)[a-z0-9.-]+' ];
-
-                    foreach $SAN (@getSANS) {
-                        chomp($SAN);
-                        print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+    foreach $SUB (@SUBDOMAINS) {
+        chomp($SUB);
+        if ( -e ("$sslsyscertdir/$SUB/certificates") ) {
+            $sslsubject = timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$SUB/certificates", '-subject',   '-noout' );
+            $startdate  = timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$SUB/certificates", '-startdate', '-noout' );
+            $expiredate = timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$SUB/certificates", '-enddate',   '-noout' );
+            $isSelfSigned = timed_run( 4, 'openssl', 'verify', "$sslsyscertdir/$SUB/certificates" );
+            if ( $isSelfSigned =~ m/self signed certificate/ ) {
+                $isSelfSigned = 1;
+            }
+            dispSSLdata($SUB);
+            if ( !$isExpired ) {
+                print WHITE "Protecting the following Subject Alternative Names:\n";
+                my $SAN;
+                my $getSANS = timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$SUB/certificates", '-text', '-noout' );
+                my @getSANS = split "\n", $getSANS;
+                foreach $SAN (@getSANS) {
+                    chomp($SAN);
+                    if ( $SAN =~ m/DNS:/ ) {
+                        $SAN =~ s/\s+//;
+                        $SAN =~ s/DNS://g;
+                        $SAN =~ s/, /\n/g;
+                        my @AllSans = split "\n", $SAN;
+                        foreach $SAN (@AllSans) {
+                            print expand( YELLOW "\t \\_ " . CYAN $SAN . "\n" );
+                        }
                     }
                 }
             }
-            else {
-                print YELLOW $SUB . "\n";
-                print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
-            }
         }
+        else {
+            print YELLOW $SUB . "\n";
+            print expand( WHITE "\t \\_ " . CYAN . "No SSL certificates found.\n" );
+        }
+    }
 
-        my $isExcludedJSON = get_uapi( 'SSL', 'get_autossl_excluded_domains', "--user=$username");
-		my $ExcludedDomain;
-		my $ExcludedCnt=0;
-		for my $ExcludedDomains ( @{$isExcludedJSON->{result}->{data}} ) {
-			for $ExcludedDomain ( $ExcludedDomains->{excluded_domain} ) {
-				if ($ExcludedDomain and $ExcludedCnt == 0) { 
-        			print BOLD MAGENTA "\n*** The following domains are excluded from AutoSSL ***\n";
-					$ExcludedCnt=1;
-				}
-        		print expand( YELLOW "\t \\_ " . BRIGHT_CYAN $ExcludedDomain . "\n" );
-			}
-		}
-
-        # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
-        print "\nChecking for pending AutoSSL orders: \n";
-        my $SSL_PENDINGJSON = get_whmapi1( 'get_autossl_pending_queue' );
-		my $SSLPendingCnt=0;
-		for my $SSL_Pending ( @{$SSL_PENDINGJSON->{data}->{pending_certificates}} ) {
-			if ($SSL_Pending->{user} eq $username) { 
-				$SSLPendingCnt=1;
-				my $SSLPending_domain=$SSL_Pending->{domain};
-				my $SSLPending_ordernum=$SSL_Pending->{order_item_id};
-				my $SSLPending_URL="https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=$SSLPending_ordernum";
-				my $SSLPending_time=$SSL_Pending->{request_time};
-            	print expand( GREEN "\t \\_ Domain: " . CYAN "$SSLPending_domain\n" );
-            	print expand( GREEN "\t\t \\_ Request Time: " . CYAN "$SSLPending_time\n" );
-            	print expand( GREEN "\t\t \\_ Order Number " . CYAN $SSLPending_ordernum . GREEN " [ " . BOLD MAGENTA $SSLPending_URL . GREEN " ]\n" );
-			}
-		}	
-		if ($SSLPendingCnt == 0) { 
-           	print expand( GREEN "\t \\_ None\n" );
-		}
-
-        # Check for purchased SSL's
-        print "Checking for pending SSL Orders (non-autossl): \n";
-        if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
-            my ($PendingSSLOrder) = (
-                split(
-                    /\s+/,
-                    qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]
-                )
-            )[3];
-            $PendingSSLOrder =~ s/\"//g;
-            $PendingSSLOrder =~ s/,//g;
-            $PendingSSLOrder =~ s/://g;
-            if ($PendingSSLOrder) {
-                print expand( CYAN "\t \\_ Pending order number: " . GREEN . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n" );
+    my $isExcludedJSON = get_uapi( 'SSL', 'get_autossl_excluded_domains', "--user=$username" );
+    my $ExcludedDomain;
+    my $ExcludedCnt = 0;
+    for my $ExcludedDomains ( @{ $isExcludedJSON->{result}->{data} } ) {
+        for $ExcludedDomain ( $ExcludedDomains->{excluded_domain} ) {
+            if ( $ExcludedDomain and $ExcludedCnt == 0 ) {
+                print BOLD MAGENTA "\n*** The following domains are excluded from AutoSSL ***\n";
+                $ExcludedCnt = 1;
             }
-            else {
-                print expand( GREEN "\t \\_ None\n" );
-            }
+            print expand( YELLOW "\t \\_ " . BRIGHT_CYAN $ExcludedDomain . "\n" );
+        }
+    }
+
+    # Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
+    print "\nChecking for pending AutoSSL orders: \n";
+    my $SSL_PENDINGJSON = get_whmapi1('get_autossl_pending_queue');
+    my $SSLPendingCnt   = 0;
+    for my $SSL_Pending ( @{ $SSL_PENDINGJSON->{data}->{pending_certificates} } ) {
+        if ( $SSL_Pending->{user} eq $username ) {
+            $SSLPendingCnt = 1;
+            my $SSLPending_domain   = $SSL_Pending->{domain};
+            my $SSLPending_ordernum = $SSL_Pending->{order_item_id};
+            my $SSLPending_URL      = "https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=$SSLPending_ordernum";
+            my $SSLPending_time     = $SSL_Pending->{request_time};
+            print expand( GREEN "\t \\_ Domain: " . CYAN "$SSLPending_domain\n" );
+            print expand( GREEN "\t\t \\_ Request Time: " . CYAN "$SSLPending_time\n" );
+            print expand( GREEN "\t\t \\_ Order Number " . CYAN $SSLPending_ordernum . GREEN " [ " . BOLD MAGENTA $SSLPending_URL . GREEN " ]\n" );
+        }
+    }
+    if ( $SSLPendingCnt == 0 ) {
+        print expand( GREEN "\t \\_ None\n" );
+    }
+
+    # Check for purchased SSL's
+    print "Checking for pending SSL Orders (non-autossl): \n";
+    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
+        my ($PendingSSLOrder) = (
+            split(
+                /\s+/,
+                qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]
+            )
+        )[3];
+        $PendingSSLOrder =~ s/\"//g;
+        $PendingSSLOrder =~ s/,//g;
+        $PendingSSLOrder =~ s/://g;
+        if ($PendingSSLOrder) {
+            print expand( CYAN "\t \\_ Pending order number: " . GREEN . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n" );
         }
         else {
             print expand( GREEN "\t \\_ None\n" );
         }
+    }
+    else {
+        print expand( GREEN "\t \\_ None\n" );
+    }
 
-        # Check for CAA records here.
-        my @HasCAA;
-        print "Checking for CAA records: \n";
-        my $TLD;
-        my $CAARecord;
-        if ($IS_USERNAME) {
-            $TLD = substr( $MAINDOMAIN, rindex( $MAINDOMAIN, "." ) + 1 );
-            $CAADOMAIN = $MAINDOMAIN;
+    # Check for CAA records here.
+    my @HasCAA;
+    print "Checking for CAA records: \n";
+    my $TLD;
+    my $CAARecord;
+    if ($IS_USERNAME) {
+        $TLD       = substr( $MAINDOMAIN, rindex( $MAINDOMAIN, "." ) + 1 );
+        $CAADOMAIN = $MAINDOMAIN;
+    }
+    else {
+        $TLD       = substr( $QUERY, rindex( $QUERY, "." ) + 1 );
+        $CAADOMAIN = $QUERY;
+    }
+    chomp($TLD);
+    my $CAAFound = 0;
+    while ( $CAADOMAIN ne $TLD ) {
+        my $DNSSEC_error = qx[ dig +tries=2 +time=5 $DOMAIN CAA | grep 'status: SERVFAIL' ];
+        if ($DNSSEC_error) {
+            print RED "[WARN] " . WHITE "CAA record check failed with DNSSEC error on $DOMAIN\n";
+            $CAAFound = 1;
+            last;
         }
-        else {
-            $TLD = substr( $QUERY, rindex( $QUERY, "." ) + 1 );
-            $CAADOMAIN = $QUERY;
-        }
-        chomp($TLD);
-        my $CAAFound = 0;
-        while ( $CAADOMAIN ne $TLD ) {
-            #my $DNSSEC_error = qx[ dig +tries=2 +time=5 \@208.67.222.222 $DOMAIN CAA | grep 'status: SERVFAIL' ];
-            my $DNSSEC_error = qx[ dig +tries=2 +time=5 $DOMAIN CAA | grep 'status: SERVFAIL' ];
-            if ($DNSSEC_error) {
-                print RED "[WARN] " . WHITE "CAA record check failed with DNSSEC error on $DOMAIN\n";
-                $CAAFound = 1;
-                last;
+        @HasCAA = qx[ dig +tries=2 +time=5 +noall +answer $CAADOMAIN CAA ];
+        if (@HasCAA) {
+            print YELLOW "[NOTE] * CAA records were found for $CAADOMAIN\n";
+            print GREEN "SSL Certificates can only be issued from the following CA's:\n";
+            my ( $CAARecord1, $CAARecord2, $CAARecord3 );
+            foreach $CAARecord (@HasCAA) {
+                chomp($CAARecord);
+                ( $CAARecord1, $CAARecord2, $CAARecord3 ) =
+                  ( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
+                print expand( CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n" );
             }
-            #@HasCAA = qx[ dig +tries=2 +time=5 \@208.67.220.220 +noall +answer $CAADOMAIN CAA ];
-            @HasCAA = qx[ dig +tries=2 +time=5 +noall +answer $CAADOMAIN CAA ];
-            if (@HasCAA) {
-                print YELLOW "[NOTE] * CAA records were found for $CAADOMAIN\n";
-                print GREEN "SSL Certificates can only be issued from the following CA's:\n";
-                my ( $CAARecord1, $CAARecord2, $CAARecord3 );
-                foreach $CAARecord (@HasCAA) {
-                    chomp($CAARecord);
-                    ( $CAARecord1, $CAARecord2, $CAARecord3 ) =
-                      ( split( /\s+/, $CAARecord ) )[ 4, 5, 6 ];
-                    print expand( CYAN "\t \\_ $CAARecord1 $CAARecord2 $CAARecord3\n" );
-                }
-                $CAAFound = 1;
-            }
-            parsedomain($CAADOMAIN);
+            $CAAFound = 1;
         }
-        if ( $CAAFound == 0 ) {
-            print expand( GREEN "\t \\_ None\n" );
-        }
-        border();
-    #}
+        parsedomain($CAADOMAIN);
+    }
+    if ( $CAAFound == 0 ) {
+        print expand( GREEN "\t \\_ None\n" );
+    }
+    border();
 }
 
 print "</c>\n" unless ($nocodeblock);
@@ -1306,29 +1327,29 @@ exit;
 
 sub Usage {
     print WHITE "\nUsage: " . CYAN "acctinfo" . WHITE " {domainname.tld,cPUsername} ACTION [ADDITIONAL OPTIONS]\n\n";
-    print YELLOW "Examples: \n" . CYAN "acctinfo" . WHITE " --listdbs somedomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print YELLOW "Examples: \n" . CYAN "acctinfo" . WHITE " --listdbs somedomain.net [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists any MySQL databases (and their sizes) as well as any PostGreSQL databases for somedomain.net\n" );
-    print CYAN "acctinfo" . WHITE " --listsubs cptestdo [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --listsubs cptestdo [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists all sub domains under the cptestdo user name.\n" );
-    print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists all addon domains under the cptestdomain.net domain name.\n" );
-    print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists all alias (parked) domains under the cptestdomain.net domain name.\n" );
-    print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists reseller information and domains under the cptestdo user name.\n" );
-    print CYAN "acctinfo" . WHITE " --resellerperms cptestdo [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --resellerperms cptestdo [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists reseller permissions under the cptestdo user name.\n" );
-    print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --listssls cptestdomain.net [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists any SSL's under the cptestdomain.net domain name.\n" );
     print CYAN "acctinfo" . WHITE " --cruft cptestdomain.net\n";
     print expand( GREEN "\t Perform a cruft check on cptestdomain.net.\n" );
-    print CYAN "acctinfo" . WHITE " --mail cptestdomain.net [--skipfind | --useDig | -q | --nocode | --cphulkblocks]\n";
+    print CYAN "acctinfo" . WHITE " --mail cptestdomain.net [--useDig | -q | --nocode | --cphulkblocks]\n";
     print expand( GREEN "\t Display mail information for cptestdomain.net.\n" );
-    print CYAN "acctinfo" . WHITE " --tomcat cptestdo [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --tomcat cptestdo [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Display Tomcat 8.5 configuration information for the cptestdo user.\n" );
     print CYAN "acctinfo" . WHITE " --scan cptest [--useClam]\n";
     print expand( GREEN "\t Scan users home directory for known infection strings.\n" );
-    print CYAN "acctinfo" . WHITE " --all cptestdomain.net [--skipfind | --useDig | -q | --nocode]\n";
+    print CYAN "acctinfo" . WHITE " --all cptestdomain.net [--useDig | -q | --nocode]\n";
     print expand( GREEN "\t Lists everything for the cptestdomain.net domain name.\n" );
     print CYAN "acctinfo" . WHITE " --help\n";
     print expand( GREEN "\t Shows this usage information. (NOTE: ACTION can go before or after domain/username).\n\n" );
@@ -1336,7 +1357,6 @@ sub Usage {
     print BOLD BLUE "\t--useDig - Uses dig command to resolve A and MX records\n";
     print BOLD BLUE "\t--nocode - Do not display ticket code blocks before/after output.\n";
     print BOLD BLUE "\t--useClam - Use ClamAV when scanning for infections --scan ACTION.\n";
-    print BOLD BLUE "\t--skipfind - Skip find command for additional *.ini files.\n";
     print BOLD BLUE "\t--q - Clear the screen before output.\n";
     exit;
 }
@@ -1391,30 +1411,18 @@ sub FindUser() {
 
 sub check_cloudflare_ips {
     my $chkIP = $_[0];
-
-    # Below IP's obtained from: https://www.cloudflare.com/ips
+    chomp($chkIP);
     my @cf_subnets   = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
     my $cloudflareIP = 0;
     my $cf_subnet    = "";
-    my @a            = split /\./, $chkIP;
-    my $di           = getIp(@a);
     foreach $cf_subnet (@cf_subnets) {
-        ( $a, $b ) = getNetwork($cf_subnet);
-        if ( ( $di >= $a ) && ( $di <= $b ) ) { $cloudflareIP = 1; }
+        chomp($cf_subnet);
+        my $network = NetAddr::IP->new($cf_subnet);
+        my $ip      = NetAddr::IP->new($chkIP);
+        if ( $ip->within($network) ) {
+            return 1;
+        }
     }
-
-    sub getIp {
-        return ( $_[0] * 256 * 256 * 256 ) + ( $_[1] * 256 * 256 ) + ( $_[2] * 256 ) + $_[3];
-    }
-
-    sub getNetwork {
-        @a = split( /[\/|\.]/, +shift );
-        return (
-            getIp( @a[ 0 .. 3 ] ),
-            ( getIp( @a[ 0 .. 3 ] ) + ( 2**( 32 - $a[4] ) ) )
-        );
-    }
-    return $cloudflareIP;
 }
 
 sub check_for_nat {
@@ -1439,37 +1447,41 @@ sub check_for_nat {
 }
 
 sub check_resolved_ip {
-    my $IP2CHK = $_[0];
-    my $RetVal = "";
-    if ( $IP2CHK eq $IPADDR ) {
-        $RetVal = GREEN . " [SAME]";
-    }
-    else {
-        $defaultsite = 1;
-    }
-    my $Is_IP_OnServer = qx[ ip addr | grep '$IP2CHK' ];
-    if ( !($Is_IP_OnServer) ) {
-        $RetVal = $RetVal .= RED . " [Not on this server]";
-        $defaultsite = 1;
-    }
+    my $IP2CHK        = $_[0];
+    my $RetVal        = "";
     my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
     if ($IS_CLOUDFLARE) {
-        $RetVal      = " <-- CloudFlare DNS";
+        $RetVal      = $RetVal .= " <<--- CloudFlare IP Address";
         $defaultsite = 1;
+        return $RetVal;
     }
-    my $IS_NAT = check_for_nat($IP2CHK);
-    if ($IS_NAT) {
-        $RetVal = GREEN " NAT detected ($IS_NAT => $IP2CHK)";
-        if ( $IS_NAT eq $IPADDR ) {
-            $RetVal = $RetVal .= GREEN . " [SAME]";
-            $defaultsite = 0;
+    my $ListIPsJSON     = get_whmapi1('listips');
+    my $IS_IP_ON_SERVER = 0;
+    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
+        if ( $ListOfIPs->{public_ip} eq $IP2CHK ) {
+            $IS_IP_ON_SERVER = 1;
         }
     }
-    my $Is_IP_OnServer = qx[ ip addr | grep '$IS_NAT' ];
-    if ( !($Is_IP_OnServer) ) {
-        $RetVal = $RetVal .= RED . " [Not on this server]";
+    if ( !$IS_IP_ON_SERVER ) {
+        $RetVal      = $RetVal .= "[Not on this server]";
         $defaultsite = 1;
+        return $RetVal;
     }
+    my $isNATJSON = get_whmapi1('listips');
+    my $IS_NAT    = 0;
+    for my $ListOfIPs ( @{ $isNATJSON->{data}->{ip} } ) {
+        my $public_ip  = $ListOfIPs->{public_ip};
+        my $private_ip = $ListOfIPs->{ip};
+        if ( $public_ip eq $IP2CHK and $private_ip ne $public_ip ) {
+            $RetVal = " Routed via 1:1 NAT ($public_ip => $private_ip)" . GREEN " [SAME]";
+            last;
+        }
+        else {
+            $RetVal = " Direct Route ($public_ip => $public_ip)" . GREEN " [SAME]";
+            last;
+        }
+    }
+    $defaultsite = 0;
     return $RetVal;
 }
 
@@ -1490,6 +1502,7 @@ sub cruft_check {
     my @temp           = undef;
     my $DNSLineCnt     = 0;
     my $TotalDomainCnt = 0;
+    my $skipMySQLCruft = 0;
 
     if ( substr( $QUERY, 0, 5 ) eq "cptkt" ) {
         print BOLD RED "[WARN] - cruft check for cPanel Support temporary reseller accounts are unpredictable!\n";
@@ -1538,7 +1551,8 @@ sub cruft_check {
     my $NOGrep = 0;
     if ($isTerminated) {    ## $is_acct is true if this is the main account/domain
         print "$MAINDOMAIN ($username) was terminated on $termdate\n";
-        $NOGrep = 1;
+        $NOGrep         = 1;
+        $skipMySQLCruft = 1;
     }
     if ($isActive) {
         if ( $MAINDOMAIN eq $HOSTNAME or $MAINDOMAIN eq "root" ) {
@@ -1557,26 +1571,10 @@ sub cruft_check {
     }
 
     if ( $username and -e "/etc/passwd" ) {
-        open( PASSWD, "/etc/passwd" );
-        @PASSWDS = <PASSWD>;
-        close(PASSWD);
-        foreach $passline (@PASSWDS) {
-            chomp($passline);
-            if ( $passline =~ m/\b$username\b/ ) {
-                ($UID) = ( split( /:/, $passline ) )[2];
-                ($GID) = ( split( /:/, $passline ) )[3];
-                last;
-            }
-        }
-
-        # Check UID/GID against UID_MIN and GID_MIN in /etc/login.defs
-        my $UID_MIN = qx[ grep 'UID_MIN' /etc/login.defs ];
-        my $GID_MIN = qx[ grep 'GID_MIN' /etc/login.defs ];
-        ($UID_MIN) = ( split( /\s+/, $UID_MIN ) )[1];
-        ($GID_MIN) = ( split( /\s+/, $GID_MIN ) )[1];
-        $UID_MIN = alltrim($UID_MIN);
-        $GID_MIN = alltrim($GID_MIN);
-
+        my $UID     = Cpanel::PwCache::Get::getuid($username);
+        my $GID     = Cpanel::Config::CpUser::get_cpgid($username);
+        my $UID_MIN = Cpanel::LoginDefs::get_uid_min();
+        my $GID_MIN = Cpanel::LoginDefs::get_gid_min();
         if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
             print RED "[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n"
               unless ( $UID == 0 or $GID == 0 );
@@ -1587,8 +1585,15 @@ sub cruft_check {
 
     $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
     $TotalDomainCnt++;
-    $DNSLineCnt = qx[ grep -c '^DNS' /var/cpanel/users/$username ]
-      unless ( $username eq "" or $NOGrep );
+    open( USERS, "/var/cpanel/users/ats" );
+    my @USERS = <USERS>;
+    close(USERS);
+    my $userLine   = "";
+    my $DNSLineCnt = 0;
+    foreach $userLine (@USERS) {
+        chomp($userLine);
+        $DNSLineCnt++ if ( substr( $userLine, 0, 3 ) eq "DNS" );
+    }
 
     my $useQuery = 0;
     if (    !$isActive
@@ -1668,7 +1673,6 @@ sub cruft_check {
       /etc/ssldomains
     );
 
-	my $skipMySQLCruft=0;
     my $file2searchu;
     if ($username) {
         if ( $username ne "nobody" ) {
@@ -1690,7 +1694,7 @@ sub cruft_check {
     }
     else {
         print "No Username detected for $QUERY - skipping some checks!\n\n";
-		$skipMySQLCruft=1;
+        $skipMySQLCruft = 1;
     }
     if ( $QUERY ne "" ) {
         if ( $MAINDOMAIN eq "" ) {
@@ -1798,7 +1802,7 @@ sub cruft_check {
             "/var/cpanel/databases/$username.$yaml_json",
             $dirstatus
         );
-        my $dbindex = ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '<', '11.50' ) ) ? "/var/cpanel/databases/dbindex.db" : "/var/cpanel/databases/dbindex.db.json";
+        my $dbindex   = ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '<', '11.50' ) ) ? "/var/cpanel/databases/dbindex.db" : "/var/cpanel/databases/dbindex.db.json";
         my $dirstatus = check_file_existance( $dbindex, $username, 0 );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
@@ -1998,67 +2002,67 @@ sub cruft_check {
             print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
         }
         else {
-    		my $UserDbsJSON = get_cpapi2( 'MysqlFE','listdbs', "--user=$username" );
+            my $UserDbsJSON = get_cpapi2( 'MysqlFE', 'listdbs', "--user=$username" );
             print YELLOW "MySQL Databases Found\n";
-			my $DBCnt=0;
-			for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
-          		print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
-    		}
-		}
-	}
-	print YELLOW "Checking for any MySQL users in mysql.user table\n";
-	my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'" );
-	$DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User = '$username'" );
-	my @DBusernames = split( '\n', $DBusername );
-	my $DBUserCnt = @DBusernames;
-	if ( $DBUserCnt >= 1 ) {
-		my $NewDBUser;
-		foreach $NewDBUser (@DBusernames) {
-			chomp($NewDBUser);
-			print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
-		}
-	}
-	else {
-		print expand( WHITE "\t \\_ None\n" );
-	}
+            my $DBCnt = 0;
+            for my $UserDb ( @{ $UserDbsJSON->{cpanelresult}->{data} } ) {
+                print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
+            }
+        }
+    }
+    print YELLOW "Checking for any MySQL users in mysql.user table\n";
+    my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'" );
+    $DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User = '$username'" );
+    my @DBusernames = split( '\n', $DBusername );
+    my $DBUserCnt   = @DBusernames;
+    if ( $DBUserCnt >= 1 ) {
+        my $NewDBUser;
+        foreach $NewDBUser (@DBusernames) {
+            chomp($NewDBUser);
+            print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+        }
+    }
+    else {
+        print expand( WHITE "\t \\_ None\n" );
+    }
 
-	print YELLOW "Checking for any MySQL users and databases in mysql.db table\n";
-	my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'" );
-	$DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User = '$username'" );
-	my @DBusernames = split( '\n', $DBusername );
-	my $DBUserCnt = @DBusernames;
-	if ( $DBUserCnt >= 1 ) {
-		my $NewDBUser;
-		foreach $NewDBUser (@DBusernames) {
-			chomp($NewDBUser);
-			print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
-		}
-	}
-	else {
-		print expand( WHITE "\t \\_ None\n" );
-	}
+    print YELLOW "Checking for any MySQL users and databases in mysql.db table\n";
+    my $DBusername = timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'" );
+    $DBusername .= timed_run( 3, 'mysql', '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User = '$username'" );
+    my @DBusernames = split( '\n', $DBusername );
+    my $DBUserCnt   = @DBusernames;
+    if ( $DBUserCnt >= 1 ) {
+        my $NewDBUser;
+        foreach $NewDBUser (@DBusernames) {
+            chomp($NewDBUser);
+            print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+        }
+    }
+    else {
+        print expand( WHITE "\t \\_ None\n" );
+    }
 
-	    # Check postgres
-	if ( $skipMySQLCruft == 0 ) {
-		my $UserDbsJSON = get_cpapi2('Postgres','listdbs', "--user=$username");
-		my $UserDb;
-		print YELLOW "PostGreSQL Databases Found:\n";
-		for my $UserDb ( @{$UserDbsJSON->{cpanelresult}->{data}} ) {
-       		for my $DbUser ( @{$UserDb->{userlist}} ) {
-           		print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
-       		}
-  		}
-   	}
-   	border();
-   	print "</c>\n" unless ($nocodeblock);
-   	exit;
+    # Check postgres
+    if ( $skipMySQLCruft == 0 ) {
+        my $UserDbsJSON = get_cpapi2( 'Postgres', 'listdbs', "--user=$username" );
+        my $UserDb;
+        print YELLOW "PostGreSQL Databases Found:\n";
+        for my $UserDb ( @{ $UserDbsJSON->{cpanelresult}->{data} } ) {
+            for my $DbUser ( @{ $UserDb->{userlist} } ) {
+                print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
+            }
+        }
+    }
+    border();
+    print "</c>\n" unless ($nocodeblock);
+    exit;
 }
 
 sub check_file_existance {
     my $TheFile         = $_[0];
     my $TheSearchString = $_[1];
     my $SearchAtStart   = $_[2];
-	
+
     my $FoundLine = "";
     if ( -e ($TheFile) ) {
 
@@ -2204,8 +2208,8 @@ sub get_php_version() {
 
 sub get_system_php_version() {
     return unless ($isEA4);
-    my $phpDefaultJSON = get_whmapi1( 'php_get_system_default_version' );
-	my $phpDefault=$phpDefaultJSON->{data}->{version};
+    my $phpDefaultJSON = get_whmapi1('php_get_system_default_version');
+    my $phpDefault     = $phpDefaultJSON->{data}->{version};
     return $phpDefault;
 }
 
@@ -2264,7 +2268,7 @@ sub display_mail_info {
 
         # If v58+, get quota via doveadm command.
         if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>', '11.58' ) ) {
-            my $quotaline = qx[ doveadm -f tab quota get -u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE' ];
+            my $quotaline = timed_run_noerr( 5, 'doveadm', '-f', 'tab', 'quota', 'get', "-u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE'" );
             if ( $quotaline =~ m/Error: User doesn't exist/ ) {
                 print "[Quota cannot be determined]\n";
             }
@@ -2358,8 +2362,8 @@ sub display_mail_info {
         # Check for default webmail app
         my $DefWebMailApp;
         if ( -e ("$RealHome/.cpanel/nvdata/$emailacctline\@$DOMAIN\_default_webmail_app") ) {
-			$DefWebMailApp = qx[ cat "$RealHome/.cpanel/nvdata/$emailacctline\@$DOMAIN\_default_webmail_app" ];
-            $DefWebMailApp = ucfirst( $DefWebMailApp );
+            $DefWebMailApp = qx[ cat "$RealHome/.cpanel/nvdata/$emailacctline\@$DOMAIN\_default_webmail_app" ];
+            $DefWebMailApp = ucfirst($DefWebMailApp);
             print expand( YELLOW "\t \t \\_ Default Webmail Client $DefWebMailApp\n" );
         }
 
@@ -2393,7 +2397,7 @@ sub display_mail_info {
         }
 
         # Check for dovecot-acl file
-		my $dovecotACL = timed_run( 2, 'find', "$RealHome/mail/$DOMAIN/$emailacctline", '-name', 'dovecot-acl' );
+        my $dovecotACL = timed_run( 2, 'find', "$RealHome/mail/$DOMAIN/$emailacctline", '-name', 'dovecot-acl' );
         chomp($dovecotACL);
         if ($dovecotACL) {
             print expand( RED "\t\t \\_ [WARN] - Found $dovecotACL - can cause odd permission issues.\n" ) unless ( !-s $dovecotACL );
@@ -2405,19 +2409,19 @@ sub display_mail_info {
         }
 
         # Check for cphulkd blocks
-		my $BlockCnt=0;
+        my $BlockCnt            = 0;
         my $isCPHulkEnabledJSON = get_whmapi1('cphulk_status');
-		my $isCPHulkEnabled=$isCPHulkEnabledJSON->{data}->{is_enabled};
+        my $isCPHulkEnabled     = $isCPHulkEnabledJSON->{data}->{is_enabled};
         if ( $isCPHulkEnabled and $chk_cph_blocks ) {
-            my $cPHBlock = timed_run( 2, 'whmapi1', 'get_cphulk_failed_logins' );
-			my @cPHBlocks = split(/ /,$cPHBlock);
-			my $cPHBlockLine = "";
-			foreach $cPHBlockLine (@cPHBlocks) { 
-				if ($cPHBlockLine =~ m/$emailacctline\@$DOMAIN/) { 
-					$BlockCnt++;
-				}
-			}
-			if ($BlockCnt > 0) { 
+            my $cPHBlock     = timed_run( 2, 'whmapi1', 'get_cphulk_failed_logins' );
+            my @cPHBlocks    = split( / /, $cPHBlock );
+            my $cPHBlockLine = "";
+            foreach $cPHBlockLine (@cPHBlocks) {
+                if ( $cPHBlockLine =~ m/$emailacctline\@$DOMAIN/ ) {
+                    $BlockCnt++;
+                }
+            }
+            if ( $BlockCnt > 0 ) {
                 print expand( RED "\t\t  \\_ [WARN] - $emailacctline\@$DOMAIN has at least $BlockCnt brute force blocks detected via cPHulkd\n" );
             }
         }
@@ -2751,7 +2755,7 @@ sub getMXrecord {
     my $rr;
     my @NEWMX;
     my $res = Net::DNS::Resolver->new;
-    my @mx = mx( $res, $tcDomain );
+    my @mx  = mx( $res, $tcDomain );
     if (@mx) {
         foreach $rr (@mx) {
             push( @NEWMX, $rr->exchange );
@@ -2766,7 +2770,7 @@ sub getMXrecord {
 sub getptr() {
     my $ip = $_[0];
     chomp($ip);
-    my $ipaddr = inet_aton($ip);
+    my $ipaddr  = inet_aton($ip);
     my $ptrname = gethostbyaddr( $ipaddr, AF_INET );
     return $ptrname;
 }
@@ -2779,23 +2783,12 @@ sub getArecords {
 }
 
 sub scan {
-    my $SuspiciousItems = 0;
-    my $URL             = "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
-    my @DEFINITIONS     = qx[ curl -s $URL ];
-    my $StringCnt       = @DEFINITIONS;
-    open( PASSWD, "/etc/passwd" );
-    @PASSWDS = <PASSWD>;
-    close(PASSWD);
-    foreach $passline (@PASSWDS) {
-        chomp($passline);
-        if ( $passline =~ m/\b$username\b/ ) {
-            ($UID)       = ( split( /:/, $passline ) )[2];
-            ($GID)       = ( split( /:/, $passline ) )[3];
-            ($RealHome)  = ( split( /:/, $passline ) )[5];
-            ($RealShell) = ( split( /:/, $passline ) )[6];
-            last;
-        }
-    }
+    unlink("/root/ai_detections.txt") unless ( !-e "/root/ai_detections.txt" );
+    my $URL         = "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/strings.txt";
+    my @DEFINITIONS = qx[ curl -s $URL > "/root/ai_detections.txt" ];
+    @DEFINITIONS = qx[ curl -s $URL ];
+    my $StringCnt         = @DEFINITIONS;
+    my $RealHome          = Cpanel::PwCache::gethomedir($username);
     my $isClamAVInstalled = qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
     if ( $isClamAVInstalled and !$useClam ) {
         print "ClamAV installed - pass --useClam to include a ClamAV scan.\n";
@@ -2807,46 +2800,36 @@ sub scan {
         print $ClamScanResults . "\n";
     }
     print YELLOW "Scanning $RealHome/public_html for ($StringCnt) known infections:\n";
-    my @SEARCHSTRING    = sort(@DEFINITIONS);
-    my @SCANRESULTS     = undef;
-    my $SOMETHING_FOUND = 0;
-    my $SEARCHSTRING;
     my ( $sec, $min, $hour, $mday, $mon, $year );
     my $scanstarttime = Time::Piece->new;
-
     print YELLOW "Scan started on $scanstarttime\n";
-    foreach $SEARCHSTRING (@SEARCHSTRING) {
-        spin();
-        chomp($SEARCHSTRING);
-		my $SCAN_RESULT="";
-        my $SCAN = qx[ grep -srIl --exclude=*.png --exclude=*.svg -w "$SEARCHSTRING" $RealHome/public_html/* ];
-        if ($SCAN) {
-			my @SCAN = split(/\n/, $SCAN);
-			foreach $SCAN_RESULT(@SCAN) { 
-				chomp($SCAN_RESULT);  
-            	$SuspiciousItems++;
-            	my $ChangeDate = timed_run( 2, "stat $SCAN_RESULT | grep -i change");
-            	$ChangeDate =~ s/Change://g;
-            	$SOMETHING_FOUND = 1;
-            	$SEARCHSTRING =~ s/\\//g;
-            	print YELLOW "\n\n\bThe phrase " . CYAN . $SEARCHSTRING . YELLOW . " was found in file(s)\n";
-            	print GREEN "==================================================================\n";
-            	print RED "$SCAN_RESULT - " . YELLOW $ChangeDate . "\n";
-        	}
-		}
+    my $retval     = qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
+    my @retval     = split( /\n/, $retval );
+    my $TotalFound = @retval;
+    my $ItemFound;
+
+    foreach $ItemFound (@retval) {
+        chomp($ItemFound);
+        my ($FileOnly) = ( split( /:/, $ItemFound ) );
+        my $ChangeDate = timed_run( 3, "stat $FileOnly | grep -i change" );
+        ($ChangeDate) = ( split( /\./, $ChangeDate ) );
+        $ChangeDate =~ s/Change: //;
+        print expand( CYAN "\t \\_ File: " . WHITE "$FileOnly " . BOLD RED . "looks suspicious " . BOLD MAGENTA . " [ Modified: " . BOLD BLUE $ChangeDate . MAGENTA " ]\n" );
     }
-    if ( $SOMETHING_FOUND == 0 ) {
-        print GREEN "\bNothing suspicious found!\n";
+    if ( $TotalFound == 0 ) {
+        print GREEN "\nNothing suspicious found!\n";
     }
     else {
-        print RED "\bSuspicious Items Found: " . WHITE $SuspiciousItems . "\n";
+        print RED "\nSuspicious items found: " . WHITE $TotalFound . "\n";
+        print YELLOW "These should be investigated.\n";
     }
     print "\n";
     my $scanendtime = Time::Piece->new;
     print "Scan completed on $scanendtime\n";
     my $scantimediff = ( $scanendtime - $scanstarttime );
-    print "Elapsed Time: ", $scantimediff->pretty, "\n";
+    print "Elapsed time: ", $scantimediff->pretty, "\n";
     print "</c>\n" unless ($nocodeblock);
+    unlink("/root/ai_detections.txt") unless ( !-e "/root/ai_detections.txt" );
 }
 
 sub spin {
@@ -2856,44 +2839,31 @@ sub spin {
     print STDERR "\b";
 }
 
-sub traverse {
-    my ($thing) = @_;
-    push( @FilesToScan, $thing . "\n" );
-    return if not -d $thing;
-    opendir my $dh, $thing or die;
-    while ( my $sub = readdir $dh ) {
-        next if $sub eq '.' or $sub eq '..';
-        traverse("$thing/$sub");
-    }
-    close $dh;
-    return;
-}
-
 sub getSSLProvider {
-    my $RetVal    = "";
-	my $SSLmodule = "";
-    my $SSLmoduleJSON = get_whmapi1('get_autossl_providers'); 
-	for my $AutoSSL_Enabled ( @{$SSLmoduleJSON->{data}->{payload}} ) { 
-		if ($AutoSSL_Enabled->{enabled}) { 
-			$SSLmodule=$AutoSSL_Enabled->{display_name};
-			last;
-		}
-	}
-   	my $RetVal = "Disabled Globally";
-	if ($SSLmodule) { 
-    	$RetVal = $SSLmodule;
-	}
+    my $RetVal        = "";
+    my $SSLmodule     = "";
+    my $SSLmoduleJSON = get_whmapi1('get_autossl_providers');
+    for my $AutoSSL_Enabled ( @{ $SSLmoduleJSON->{data}->{payload} } ) {
+        if ( $AutoSSL_Enabled->{enabled} ) {
+            $SSLmodule = $AutoSSL_Enabled->{display_name};
+            last;
+        }
+    }
+    my $RetVal = "Disabled Globally";
+    if ($SSLmodule) {
+        $RetVal = $SSLmodule;
+    }
     return $RetVal;
 }
 
 sub ChkForIntegration {
-    my $IntegrationLinksJSON = get_whmapi1( 'list_integration_links', "user=$username");
-	my $LinkCnt=0;
-	for my $AppLink ( @{$IntegrationLinksJSON->{data}->{links}} ) { 
-		if ($AppLink->{app}) { 
-			$LinkCnt++;
-		}
-	}
+    my $IntegrationLinksJSON = get_whmapi1( 'list_integration_links', "user=$username" );
+    my $LinkCnt              = 0;
+    for my $AppLink ( @{ $IntegrationLinksJSON->{data}->{links} } ) {
+        if ( $AppLink->{app} ) {
+            $LinkCnt++;
+        }
+    }
     if ( $LinkCnt > 0 ) {
         print YELLOW "[NOTE] - $LinkCnt Integration links found under the " . GREEN . $username . YELLOW " account\n";
     }
@@ -2905,38 +2875,36 @@ sub dispSSLdata {
     chomp($expiredate);
     ($startdate)  = ( split( /=/, $startdate ) )[1];
     ($expiredate) = ( split( /=/, $expiredate ) )[1];
+    my $EpochExpire = str2time($expiredate);
     my $isExpired;
+    my $time_now = time;
+    my $timeDiff = $EpochExpire - $time_now;
+    $isExpired = GREEN "[VALID]";
 
-    if ( $noDateManip == 0 ) {
-        my $unix_time = UnixDate( ParseDate($expiredate), "%s" );
-        my $time_now = qx[ date -u ];
-        chomp($time_now);
-        my $unix_time_now = UnixDate( ParseDate($time_now), "%s" );
-        $isExpired = GREEN "[VALID]";
-        if ( $unix_time_now > $unix_time ) {
-            $isExpired = RED "[EXPIRED]";
-        }
+    if ( $timeDiff < 0 ) {
+        $isExpired = RED "[EXPIRED]";
     }
     print YELLOW . $tcDomain . "\n";
     print expand( WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n" );
     print expand( WHITE "\t \\_ Not After : " . GREEN . $expiredate . " " . $isExpired . "\n" );
-    $isSelfSigned = timed_run( 3, 'openssl', 'verify', "$sslsyscertdir/$tcDomain/certificates");
-	if ($isSelfSigned =~ m/self signed certificate/) { 
-        print expand( RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate\n" );
+    $isSelfSigned = timed_run( 3, 'openssl', 'verify', "$sslsyscertdir/$tcDomain/certificates" );
+    if ($isSelfSigned) {
+        print expand( RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate!\n" );
     }
     else {
         # Get Issuer and display it.
         my $SSLIssuer = qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
         my $Oloc      = index( $SSLIssuer, "O=" );
         my $O         = substr( $SSLIssuer, $Oloc );
-        my ( $SSLIssuer, $crap ) = ( split( /\//, $O ) )[0];
+        my ( $SSLIssuer, $ignore ) = ( split( /\//, $O ) )[0];
         $SSLIssuer = substr( $SSLIssuer, 2 );
         chomp($SSLIssuer);
         print expand( GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
-    }
-    my $OCSPstatus = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | egrep 'Cert Status:' ];
-    if ($OCSPstatus) {
-        print expand( BOLD CYAN "\t \\_ OCSP: " . BOLD MAGENTA substr( $OCSPstatus, 17 ) . "\n" );
+        my $OCSPstatus = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | egrep 'Cert Status:' ];
+
+        if ( $OCSPstatus and $isExpired ne "[EXPIRED]" ) {
+            print expand( BOLD CYAN "\t \\_ OCSP: " . BOLD MAGENTA substr( $OCSPstatus, 17 ) . "\n" );
+        }
     }
 }
 
@@ -2954,8 +2922,8 @@ sub isUserReserved {
     }
     if ( $IS_USERNAME == 0 ) {
         print "Looking for username for $QUERY... - ";
-		my $lcUserJSON = get_whmapi1 ( 'getdomainowner', "domain=$QUERY" );
-		$lcUser=$lcUserJSON->{data}->{user};
+        my $lcUserJSON = get_whmapi1( 'getdomainowner', "domain=$QUERY" );
+        $lcUser = $lcUserJSON->{data}->{user};
         if ($lcUser) {
             print "Found ($lcUser)\n";
         }
@@ -2964,9 +2932,9 @@ sub isUserReserved {
         }
     }
 
-	my $ValUserJSON=get_whmapi1( 'validate_system_user', "user=$lcUser" );
-	my $isReserved=$ValUserJSON->{data}->{reserved};
-	return $isReserved;
+    my $ValUserJSON = get_whmapi1( 'validate_system_user', "user=$lcUser" );
+    my $isReserved  = $ValUserJSON->{data}->{reserved};
+    return $isReserved;
 }
 
 sub SQLiteDBChk {
@@ -3005,22 +2973,25 @@ sub securitychk {
     if ( -e ("$RealHome/.my.cnf") ) {
         print RED "[SECURITY WARNING] - $RealHome/.my.cnf file found - No longer required nor recommended!\n";
     }
-	my @dirs = qw( .well-known/pki-validation .well-known/acme-challenge );
-	my @files = qw( error_log ins.htm msg.jpg msges.jpg reso.zip rolf.zip stroi-invest.zip thn.htm );
-	for my $dir (@dirs) { 
-		for my $file (@files) { 
-			my $fullpath = "$RealHome/public_html/$dir/$file";
-			stat $fullpath;
-			if ( -f _ and not -z _ ) { 
-        		print RED "[SECURITY WARNING] - $RealHome/public_html/$dir/$file found - possible Troldesh ransomware?!\n";
-			}
-		}
-	}
+    if ( -e ("$RealHome/.env") ) {
+        print RED "[SECURITY WARNING] - $RealHome/.env file found - Might store sensitive database information - Not recommended!\n";
+    }
+    my @dirs  = qw( .well-known/pki-validation .well-known/acme-challenge );
+    my @files = qw( error_log ins.htm msg.jpg msges.jpg reso.zip rolf.zip stroi-invest.zip thn.htm );
+    for my $dir (@dirs) {
+        for my $file (@files) {
+            my $fullpath = "$RealHome/public_html/$dir/$file";
+            stat $fullpath;
+            if ( -f _ and not -z _ ) {
+                print RED "[SECURITY WARNING] - $RealHome/public_html/$dir/$file found - possible Troldesh ransomware?!\n";
+            }
+        }
+    }
 }
 
 sub checkperms2 {
-	getPerms( "/etc/valiases/$MAINDOMAIN", "0640", "$username", "mail");
-	getPerms( "/etc/vfilters/$MAINDOMAIN", "0640", "$username", "mail");
+    getPerms( "/etc/valiases/$MAINDOMAIN", "0640", "$username", "mail" );
+    getPerms( "/etc/vfilters/$MAINDOMAIN", "0640", "$username", "mail" );
     if ( !-e ("$RealHome") ) {
         print expand( RED "\t \\_ [WARN] - $RealHome directory is missing!\n" );
         return;
@@ -3030,14 +3001,15 @@ sub checkperms2 {
         my $suExecEnabled = grep( /suexec/, @InstalledMods ) ? 1 : 0;
         my $RUID2Enabled  = grep( /ruid/,   @InstalledMods ) ? 1 : 0;
         my $ITKEnabled    = grep( /itk/,    @InstalledMods ) ? 1 : 0;
-        my $PHPHandlerJSON = get_uapi("--user=$username", 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN" );
-		my $PHPHandler = $PHPHandlerJSON->{result}->{data}->{php_handler};
+        my $PHPHandlerJSON = get_uapi( "--user=$username", 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN" );
+        my $PHPHandler     = $PHPHandlerJSON->{result}->{data}->{php_handler};
         chomp($PHPHandler);
-		#print "DEBUG: FileProtect Enabed: $FProtectEnabled\n";
-		#print "DEBUG: SuExec Enabed: $suExecEnabled\n";
-		#print "DEBUG: RUID2 Enabed: $RUID2Enabled\n";
-		#print "DEBUG: ITK Enabed: $ITKEnabled\n";
-		#print "DEBUG: PHP Handler $PHPHandler\n";
+
+        #print "DEBUG: FileProtect Enabed: $FProtectEnabled\n";
+        #print "DEBUG: SuExec Enabed: $suExecEnabled\n";
+        #print "DEBUG: RUID2 Enabed: $RUID2Enabled\n";
+        #print "DEBUG: ITK Enabed: $ITKEnabled\n";
+        #print "DEBUG: PHP Handler $PHPHandler\n";
         if ($ACLSEnabled) {
             getPerms( "$RealHome", "0750", "$username", "$username" );
         }
@@ -3107,6 +3079,10 @@ sub getPerms {
     my $DefPerm     = $_[1];
     my $DefPermUser = $_[2];
     my $DefPermGrp  = $_[3];
+    if ( !-e "$tcPermFile" ) {
+        print RED "[WARN] - $tcPermFile is missing!\n";
+        return;
+    }
     my $currentPerm = sprintf '%04o', ( stat $tcPermFile )[2] & 07777;
     my $curUserID   = ( stat $tcPermFile )[4];
     my $curGrpID    = ( stat $tcPermFile )[5];
@@ -3158,21 +3134,21 @@ sub chk_mail_hold {
 }
 
 sub chk_tomcat {
-    my $TCEnabledUsers = timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list');
-	my @TCEnabledUsers = split "\n", $TCEnabledUsers;
-	my $TCEnabled=0;
-	my $TCEnabledUser;
-	foreach $TCEnabledUser(@TCEnabledUsers) { 
-		chomp($TCEnabledUser);
-		if ($TCEnabledUser eq $username) { 
-			$TCEnabled=1;
-			last;
-		}
-	}
-	if (!$TCEnabled) { 
-		print YELLOW "[INFO] - Tomcat not configured for $username\n";
-		return;
-	}
+    my $TCEnabledUsers = timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list' );
+    my @TCEnabledUsers = split "\n", $TCEnabledUsers;
+    my $TCEnabled      = 0;
+    my $TCEnabledUser;
+    foreach $TCEnabledUser (@TCEnabledUsers) {
+        chomp($TCEnabledUser);
+        if ( $TCEnabledUser eq $username ) {
+            $TCEnabled = 1;
+            last;
+        }
+    }
+    if ( !$TCEnabled ) {
+        print YELLOW "[INFO] - Tomcat not configured for $username\n";
+        return;
+    }
     my $TCDispStatus = 1;
     if ( $RealShell ne "/bin/bash" ) {
         print RED "[WARN] - $username\'s shell is not Normal (/bin/bash) - unable to obtain a valid status for ea-tomcat85.\n";
@@ -3188,10 +3164,10 @@ sub chk_tomcat {
         my $PerlPath = qx[ readlink /usr/local/cpanel/3rdparty/bin/perl ];
         chomp($PerlPath);
         $PerlPath =~ s/\/bin\/perl/\/bin/;
-        my $ubicPathFound = timed_run( 2, "grep $PerlPath '$RealHome/.bashrc'");
+        my $ubicPathFound = timed_run( 2, "grep $PerlPath '$RealHome/.bashrc'" );
         chomp($ubicPathFound);
         if ($ubicPathFound) {
-            my $TCStatus = timed_run( 2, "su - $username -s /bin/bash -c 'ubic status ea-tomcat85'");
+            my $TCStatus = timed_run( 2, "su - $username -s /bin/bash -c 'ubic status ea-tomcat85'" );
             chomp($TCStatus);
             my ($TCStatus1) = ( split( /\s+/, $TCStatus ) )[1];
             print YELLOW "ea-tomcat85 is: ";
@@ -3207,19 +3183,19 @@ sub chk_tomcat {
         }
     }
     print YELLOW "Checking $RealHome/ea-tomcat85/conf/server.xml:\n";
-    my $TCConnPort = timed_run( 2, "egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    my $TCConnPort = timed_run( 2, "egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2" );
     ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
     $TCConnPort =~ s/\"//g;
     print expand( CYAN "\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
-    my $TCAJPPort = timed_run( 2, "egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    my $TCAJPPort = timed_run( 2, "egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2" );
     ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
     $TCAJPPort =~ s/\"//g;
     print expand( CYAN "\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
-    my $TCHost = timed_run( 2, "grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2");
+    my $TCHost = timed_run( 2, "grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2" );
     ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
     $TCHost =~ s/\"//g;
     print expand( CYAN "\t \\_ Host: " . GREEN . $TCHost . "\n" );
-    my $TCunpackWARs = timed_run( 2, "grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'");
+    my $TCunpackWARs = timed_run( 2, "grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'" );
     ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
     $TCunpackWARs =~ s/\"//g;
 
@@ -3229,7 +3205,7 @@ sub chk_tomcat {
     else {
         print expand( CYAN "\t \\_ unpackWARs: " . RED . $TCunpackWARs . " [ SHOULD BE TRUE ]\n" );
     }
-    my $TCautoDeploy = timed_run( 2, "grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'");
+    my $TCautoDeploy = timed_run( 2, "grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'" );
     ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
     $TCautoDeploy =~ s/\"//g;
     if ( $TCautoDeploy =~ m/false/ ) {
@@ -3238,7 +3214,7 @@ sub chk_tomcat {
     else {
         print expand( CYAN "\t \\_ autoDeploy: " . RED . $TCautoDeploy . " [ SHOULD BE FALSE ]\n" );
     }
-    my $TCDeployStartup = timed_run( 2, "grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'");
+    my $TCDeployStartup = timed_run( 2, "grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'" );
     ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
     $TCDeployStartup =~ s/\"//g;
     if ( $TCDeployStartup =~ m/false/ ) {
@@ -3247,7 +3223,7 @@ sub chk_tomcat {
     else {
         print expand( CYAN "\t \\_ deployOnStartup: " . RED . $TCDeployStartup . " [ SHOULD BE FALSE ]\n" );
     }
-    my $TCDeployXML = timed_run( 2, "grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'");
+    my $TCDeployXML = timed_run( 2, "grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'" );
     ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
     $TCDeployXML =~ s/\"//g;
     $TCDeployXML =~ s/>//g;
@@ -3271,7 +3247,7 @@ sub chk_tomcat {
                 next unless ( $jspFile =~ m/\.jsp/ );
                 print expand("\t \\_ $jspFile\n");
                 if ( $jspFile eq "test.jsp" ) {
-                    my $TJP = timed_run( 2, "lynx --dump http://$MAINDOMAIN/test.jsp | head -1");
+                    my $TJP = timed_run( 2, "lynx --dump http://$MAINDOMAIN/test.jsp | head -1" );
                     if ( $TJP =~ m/Test JSP Page/ ) {
                         print GREEN "\t \\_ Success: " . WHITE "http://$MAINDOMAIN/test.jsp" . CYAN " Works!\n";
                     }
@@ -3292,10 +3268,10 @@ sub get_json_href {
         'modules'      => [qw{Cpanel::JSON::XS JSON::XS JSON::PP}],
         'fail_warning' => $fail_warning,
     );
-    return {} unless $json; 
+    return {} unless $json;
     my $href;
     local $@;
-    eval { $href = $json->new->utf8->decode($raw); }; 
+    eval { $href = $json->new->utf8->decode($raw); };
     return {} if !$href;
     return $href;
 }
@@ -3336,21 +3312,29 @@ sub load_module_with_fallbacks {
     return $namespace_loaded;
 }
 
-sub get_json_from_command { 
-	my @cmd = @_; 
-	return Cpanel::JSON::Load( Cpanel::SafeRun::Timed::timedsaferun(30, @cmd) ); 
+sub get_json_from_command {
+    my @cmd = @_;
+    return Cpanel::JSON::Load( Cpanel::SafeRun::Timed::timedsaferun( 30, @cmd ) );
 }
 
-sub get_whmapi1 { 
-	return get_json_from_command( 'whmapi1', '--output=json', @_); 
+sub get_whmapi1 {
+    return get_json_from_command( 'whmapi1', '--output=json', @_ );
 }
-sub get_uapi { 
-	return get_json_from_command( 'uapi', '--output=json', @_); 
+
+sub get_uapi {
+    return get_json_from_command( 'uapi', '--output=json', @_ );
 }
-sub get_cpapi2 { 
-	return get_json_from_command( 'cpapi2', '--output=json', @_); 
+
+sub get_cpapi2 {
+    return get_json_from_command( 'cpapi2', '--output=json', @_ );
 }
-sub timed_run { 
-	my ( $timer, @PROGA ) = @_;
-	return Cpanel::SafeRun::Timed::timedsaferun( $timer, @PROGA );
+
+sub timed_run {
+    my ( $timer, @PROGA ) = @_;
+    return Cpanel::SafeRun::Timed::timedsaferun( $timer, @PROGA );
+}
+
+sub timed_run_noerr {
+    my ( $timer, @PROGA ) = @_;
+    return Cpanel::SafeRun::Timed::_timedsaferun( $timer, @PROGA );
 }
