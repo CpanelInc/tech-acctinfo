@@ -2888,7 +2888,7 @@ sub dispSSLdata {
     print expand( WHITE "\t \\_ Not Before: " . GREEN . $startdate . "\n" );
     print expand( WHITE "\t \\_ Not After : " . GREEN . $expiredate . " " . $isExpired . "\n" );
     $isSelfSigned = timed_run( 3, 'openssl', 'verify', "$sslsyscertdir/$tcDomain/certificates" );
-    if ($isSelfSigned) {
+    if ( $isSelfSigned =~ m/self signed certificate/ ) {
         print expand( RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate!\n" );
     }
     else {
