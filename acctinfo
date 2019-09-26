@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.12";
+my $VERSION = "2.5.13";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2105,7 +2105,7 @@ sub uniq {
     grep !$seen{$_}++, @_;
 }
 
-# Taken from ssp - Thanks to Chris Dillon!
+# Taken from ssp - 
 sub version_cmp {    # should only be used by version_compare()
     no warnings 'uninitialized';    # Prevent uninitialized value warnings when not using all 4 values
     my ( $a1, $b1, $c1, $d1 ) = split /[\._]/, $_[0];
@@ -2254,9 +2254,12 @@ sub display_mail_info {
 
     print "There are $TotalEmails Email accounts for $DOMAIN: \n";
 
-    if ( -e ("$RealHome/etc/$DOMAIN/shadow.roottn.bak") ) {
-        print expand( RED "\t \\_ [WARN] - $RealHome/etc/$DOMAIN/shadow.roottn.bak file exists. Account may have been compromised! [Use [SECURITY] - shadow.roottn.bak exploit predef]" );
-        print "\n";
+    my $shadow_roottn_baks = qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ];
+    if ($shadow_roottn_baks) {
+        chomp($shadow_roottn_baks);
+        print expand( RED "\t \\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n" );
+        print expand( YELLOW "\t\t \\_ $shadow_roottn_baks\n" );
+        print expand( RED "\t \\_ Account may have been compromised! [Use [SECURITY] - shadow.roottn.bak exploit predef]\n" );
     }
 
     foreach $emailacctline (@EMAILACCTS) {
@@ -2805,22 +2808,29 @@ sub scan {
     print YELLOW "Scan started on $scanstarttime\n";
     my $retval     = qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
     my @retval     = split( /\n/, $retval );
-    my $TotalFound = @retval;
+    my $TotalItemsFound = @retval;
     my $ItemFound;
-
+	my @FileNamesOnly;
+	my $FileOnly;
     foreach $ItemFound (@retval) {
         chomp($ItemFound);
-        my ($FileOnly) = ( split( /:/, $ItemFound ) );
+        ($FileOnly) = ( split( /:/, $ItemFound ) );
+		push(@FileNamesOnly,$FileOnly);
+	}
+	my @newRetVal=uniq(@FileNamesOnly);
+	my $TotalFilesFound=@newRetVal;
+    foreach $FileOnly (@newRetVal) {
         my $ChangeDate = timed_run( 3, "stat $FileOnly | grep -i change" );
         ($ChangeDate) = ( split( /\./, $ChangeDate ) );
         $ChangeDate =~ s/Change: //;
         print expand( CYAN "\t \\_ File: " . WHITE "$FileOnly " . BOLD RED . "looks suspicious " . BOLD MAGENTA . " [ Modified: " . BOLD BLUE $ChangeDate . MAGENTA " ]\n" );
     }
-    if ( $TotalFound == 0 ) {
-        print GREEN "\nNothing suspicious found!\n";
+	print "\n";
+    if ( $TotalItemsFound == 0 ) {
+        print GREEN "Result: Nothing suspicious found!\n";
     }
     else {
-        print RED "\nSuspicious items found: " . WHITE $TotalFound . "\n";
+        print RED "Result: " . WHITE $TotalItemsFound . RED " suspicious items found in " . WHITE $TotalFilesFound . RED " files.\n";
         print YELLOW "These should be investigated.\n";
     }
     print "\n";
