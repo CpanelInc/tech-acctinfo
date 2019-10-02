@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.13";
+my $VERSION = "2.5.14";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -649,138 +649,115 @@ if ($cageFSStats) {
     print WHITE "CageFS: " . CYAN $cageFSStats . "\n";
 }
 else {
-    print WHITE "CageFS: " . CYAN . "Not installed!\n";
+    print WHITE "CageFS: " . CYAN . "Not installed/enabled!\n";
 }
 
 # Check for php-selector (CloudLinux)
 $isEA4 = isEA4();
-my $skipEA4  = 0;
-my $clPHPVer = 0;
-if ( -e ("$RealHome/.cl.selector/defaults.cfg") and $cageFSStats eq "Enabled" ) {
+my $clPHPVer = "";
+$PHPDefaultVersion = get_system_php_version();
+if ( $PHPDefaultVersion eq "" ) {
+    $PHPDefaultVersion = "UNKNOWN";
+}
+print "Default System PHP Version: " . CYAN $PHPDefaultVersion . "\n";
+my $HasPrecedence = MAGENTA " cPanel EA4 PHP version has precednece";
+$PHPversion = get_php_version();
+my $PHPiniFile;
+my $PHPiniLoad;
+my $PHPiniScan;
+my $skipEA4 = 0;
+
+if ( $PHPversion eq "" or $PHPversion eq "inherit" ) {
+    $PHPversion    = "inherit";
+    $HasPrecedence = MAGENTA " CloudLinux PHP Selector has precedence" unless ( !$cageFSStats );
     my $clPHP = timed_run( 2, 'grep', '^php', "$RealHome/.cl.selector/defaults.cfg" );
     $clPHPVer =~ s/\s+//g;
     ($clPHPVer) = ( split( /=/, $clPHP ) )[1];
     chomp($clPHPVer);
     $clPHPVer = alltrim($clPHPVer);
-    if ($clPHPVer) {
-        if ( $clPHPVer eq "native" ) {
-            my $clPHPVer = timed_run( 4, '/usr/bin/selectorctl', '--current', '--show-native-version', "| awk '{print $2}'" );
-        }
-        print WHITE "CloudLinux PHP Version: " . CYAN $clPHPVer . MAGENTA " CloudLinux PHP Selector version has precedence\n";
-        my $PHPiniFile = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"' );
-        my $PHPiniLoad = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"' );
-        my $PHPiniScan = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"' );
-        chomp($PHPiniFile);
-        chomp($PHPiniLoad);
-        chomp($PHPiniScan);
+    my $clPHPVer1;
+    my $clPHPVer2;
 
-        if ( $cageFSStats and $cageFSStats eq "Enabled" ) {
-            print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless ( $PHPiniFile eq "" );
-            print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless ( $PHPiniLoad eq "" );
-            print expand( YELLOW "\t \\_ $PHPiniScan\n" ) unless ( $PHPiniScan eq "" );
-        }
-        $skipEA4 = 1;
+    if ( $clPHPVer eq "native" ) {
+        my $clPHPVerLine = timed_run_noerr( 4, '/usr/bin/selectorctl', '--current', '--show-native-version' );
+        ( $clPHPVer1, $clPHPVer2 ) = ( split( /\s+/, $clPHPVerLine ) )[ 0, 1 ];
+        $clPHPVer = $clPHPVer1 . " " . $clPHPVer2;
+    }
+    $PHPiniFile = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Configuration File"' );
+    $PHPiniLoad = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i| grep "^Loaded Configuration File"' );
+    $PHPiniScan = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c', 'php -i|grep "^Scan this dir"' );
+    $skipEA4    = 1;
+}
+print "EA4 PHP Version: " . CYAN $PHPversion;
+
+#print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless($PHPversion eq "inherit");
+print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless ( !$clPHPVer );
+print MAGENTA $HasPrecedence . "\n";
+if ( !$skipEA4 ) {
+    if ( $PHPversion eq "inherit" and ( -e ("/etc/scl/conf/$PHPDefaultVersion") or ( -e ("/etc/scl/prefixes/$PHPDefaultVersion") ) ) ) {
+        $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Configuration File"' );
+        $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Loaded Configuration File"' );
+        $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Scan this dir"' );
+    }
+    if ( $PHPversion ne "inherit" and ( -e ("/etc/scl/conf/$PHPversion") or ( -e ("/etc/scl/prefixes/$PHPversion") ) ) ) {
+        $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"' );
+        $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"' );
+        $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"' );
     }
 }
-
-my $clPHPActive = 0;
-if ( $isEA4 and !$skipEA4 ) {
-    $PHPDefaultVersion = get_system_php_version();
-    if ( $PHPDefaultVersion eq "" ) {
-        $PHPDefaultVersion = "UNKNOWN";
-    }
-    $PHPversion = get_php_version();
-    if ( $PHPversion eq "" ) {
-        $PHPversion = "inherit";
-    }
-    if ( $PHPversion eq "inherit" ) { $clPHPActive = 1; }
-    print WHITE "[EA4] PHP Version: " . CYAN $PHPversion . " (System Default: $PHPDefaultVersion) ";
-
-    if ( $PHPversion eq $PHPDefaultVersion and -e "/usr/bin/selectorctl" ) {
-        $clPHPActive = 1;
-    }
-
-    my $suPHPConfPathFound;
-    if ( -e ("$RealHome/public_html/.htaccess") ) {
-        $suPHPConfPathFound = timed_run( 2, "egrep -i ^suPHP_ConfigPath $RealHome/public_html/.htaccess" );
-    }
-
-    if ( $clPHPActive and $cageFSStats eq "Enabled" ) {
-        print MAGENTA "CloudLinux PHP Selector version has precedence\n";
-    }
-    else {
-        print MAGENTA "cPanel EA4 PHP version has precedence\n";
-    }
-    my $PHPHandlerJSON = get_uapi( 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN", "--user=$username" );
-    my $PHPHandler     = $PHPHandlerJSON->{result}->{data}->{php_handler};
-    print WHITE "PHP Handler: " . YELLOW $PHPHandler . "\n";
-
-    # NOT SURE THIS IS NECESSARY ANY LONGER!
-    #    my $old_fpm_flagJSON = get_whmapi1('php_get_old_fpm_flag');
-    #	my $old_fpm_flag=$old_fpm_flagJSON->{data}->{old_fpm_flag};
-    #    if ( $old_fpm_flag
-    #        and ( -e ("/etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/") ) ) {
-    #        print RED "[WARN] Old PHP-FPM flags found!\n";
-    #        print "Look in /etc/apache2/conf.d/userdata/std/2_4/$username/$MAINDOMAIN/ for an fpm.conf file.\n";
-    #    }
-
-    # Get php.ini config info
-    if ( $PHPversion eq "inherit" and $cageFSStats ne "Enabled" ) {
-        $PHPversion = $PHPDefaultVersion;
-    }
-    if ( -e ("/etc/scl/conf/$PHPversion")
-        or ( -e ("/etc/scl/prefixes/$PHPversion") ) ) {
-        my $PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Configuration File"' );
-        my $PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Loaded Configuration File"' );
-        my $PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPversion", 'php -i|grep "^Scan this dir"' );
-
-        if ($suPHPConfPathFound) {
-            chomp($suPHPConfPathFound);
-            print YELLOW "[NOTE]" . WHITE . " - suPHP_ConfigPath found in .htaccess file: " . CYAN . $suPHPConfPathFound . "/.htaccess\n";
-            my ($UsersuPHPConfPath) = ( split( /\s+/, $suPHPConfPathFound ) )[1];
-            $PHPiniFile = "Configuration File (php.ini) Path => $UsersuPHPConfPath";
-            $PHPiniLoad = "Loaded Configuration File => $UsersuPHPConfPath";
-            $PHPiniScan = "Scan this dir for additional .ini files => None";
-        }
-        chomp($PHPiniFile);
-        chomp($PHPiniLoad);
-        chomp($PHPiniScan);
-        print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless ( $PHPiniFile eq "" );
-        print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless ( $PHPiniLoad eq "" );
-        print expand( YELLOW "\t \\_ $PHPiniScan\n" ) unless ( $PHPiniScan eq "" );
-    }
-
-    if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
-        print CYAN "\nPHP-FPM pool detected\n";
-        my $FPMPoolSet;
-        open( POOL,
-            "/opt/cpanel/$PHPversion/root/etc/php-fpm.d/$MAINDOMAIN.conf"
-        );
-        my @PHPFPMPOOLSettings = <POOL>;
-        close(POOL);
-        foreach $FPMPoolSet (@PHPFPMPOOLSettings) {
-            chomp($FPMPoolSet);
-            if ( substr( $FPMPoolSet, 0, 3 ) eq "pm\." ) {
-                next
-                  if ( $FPMPoolSet =~ m/spare_servers|start_servers|status_path/ );
-                print expand( GREEN "\t \\_ $FPMPoolSet\n" );
-            }
-        }
-    }
-
-    use Path::Iterator::Rule;
-    my $rule        = Path::Iterator::Rule->new;
-    my $it          = $rule->iter("$RealHome/public_html");
-    my $headPrinted = 0;
-    while ( my $file = $it->() ) {
-        next if ( $file eq "." or $file eq ".." );
-        next unless ( $file =~ m/\.ini$/ );
-        print CYAN "\nFound some custom *.ini files: \n" unless ($headPrinted);
-        $headPrinted = 1;
-        print expand( YELLOW "\t \\_ $file\n" );
-    }
-    print "\n";
+chomp($PHPiniFile);
+chomp($PHPiniLoad);
+chomp($PHPiniScan);
+my $suPHPConfPathFound;
+if ( -e ("$RealHome/public_html/.htaccess") ) {
+    $suPHPConfPathFound = timed_run( 2, "egrep -i ^suPHP_ConfigPath $RealHome/public_html/.htaccess" );
 }
+if ($suPHPConfPathFound) {
+    chomp($suPHPConfPathFound);
+    print YELLOW "[NOTE]" . WHITE . " - suPHP_ConfigPath found in .htaccess file: " . CYAN . $suPHPConfPathFound . "/.htaccess\n";
+    my ($UsersuPHPConfPath) = ( split( /\s+/, $suPHPConfPathFound ) )[1];
+    $PHPiniFile = "Configuration File (php.ini) Path => $UsersuPHPConfPath";
+    $PHPiniLoad = "Loaded Configuration File => $UsersuPHPConfPath";
+    $PHPiniScan = "Scan this dir for additional .ini files => None";
+}
+print expand( YELLOW "\t \\_ $PHPiniFile\n" ) unless ( $PHPiniFile eq "" );
+print expand( YELLOW "\t \\_ $PHPiniLoad\n" ) unless ( $PHPiniLoad eq "" );
+print expand( YELLOW "\t \\_ $PHPiniScan\n" ) unless ( $PHPiniScan eq "" );
+my $PHPHandlerJSON = get_uapi( 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN", "--user=$username" );
+my $PHPHandler     = $PHPHandlerJSON->{result}->{data}->{php_handler};
+print WHITE "PHP Handler: " . YELLOW $PHPHandler . "\n";
+if ( -e ("/var/cpanel/userdata/$username/$MAINDOMAIN.php-fpm.yaml") ) {
+    print CYAN "\nPHP-FPM pool detected\n";
+    my $FPMPoolSet;
+    open( POOL,
+        "/opt/cpanel/$PHPversion/root/etc/php-fpm.d/$MAINDOMAIN.conf"
+    );
+    my @PHPFPMPOOLSettings = <POOL>;
+    close(POOL);
+    foreach $FPMPoolSet (@PHPFPMPOOLSettings) {
+        chomp($FPMPoolSet);
+        if ( substr( $FPMPoolSet, 0, 3 ) eq "pm\." ) {
+            next
+              if ( $FPMPoolSet =~ m/spare_servers|start_servers|status_path/ );
+            print expand( GREEN "\t \\_ $FPMPoolSet\n" );
+        }
+    }
+}
+use Path::Iterator::Rule;
+my $rule        = Path::Iterator::Rule->new;
+my $it          = $rule->iter("$RealHome/public_html");
+my $headPrinted = 0;
+my $stopAfter   = 0;
+while ( my $file = $it->() ) {
+    next if ( $file eq "." or $file eq ".." );
+    next unless ( $file =~ m/\.ini$/ );
+    print CYAN "\nFound some custom *.ini files: \n" unless ($headPrinted);
+    $headPrinted = 1;
+    $stopAfter++;
+    print expand( YELLOW "\t \\_ $file\n" );
+    last if ( $stopAfter == 5 );
+}
+print "\n";
 
 sub custom_UD {
     my $userdataSTDPath = "";
@@ -2105,7 +2082,7 @@ sub uniq {
     grep !$seen{$_}++, @_;
 }
 
-# Taken from ssp - 
+# Taken from ssp -
 sub version_cmp {    # should only be used by version_compare()
     no warnings 'uninitialized';    # Prevent uninitialized value warnings when not using all 4 values
     my ( $a1, $b1, $c1, $d1 ) = split /[\._]/, $_[0];
@@ -2806,26 +2783,27 @@ sub scan {
     my ( $sec, $min, $hour, $mday, $mon, $year );
     my $scanstarttime = Time::Piece->new;
     print YELLOW "Scan started on $scanstarttime\n";
-    my $retval     = qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
-    my @retval     = split( /\n/, $retval );
+    my $retval          = qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
+    my @retval          = split( /\n/, $retval );
     my $TotalItemsFound = @retval;
     my $ItemFound;
-	my @FileNamesOnly;
-	my $FileOnly;
+    my @FileNamesOnly;
+    my $FileOnly;
+
     foreach $ItemFound (@retval) {
         chomp($ItemFound);
         ($FileOnly) = ( split( /:/, $ItemFound ) );
-		push(@FileNamesOnly,$FileOnly);
-	}
-	my @newRetVal=uniq(@FileNamesOnly);
-	my $TotalFilesFound=@newRetVal;
+        push( @FileNamesOnly, $FileOnly );
+    }
+    my @newRetVal       = uniq(@FileNamesOnly);
+    my $TotalFilesFound = @newRetVal;
     foreach $FileOnly (@newRetVal) {
         my $ChangeDate = timed_run( 3, "stat $FileOnly | grep -i change" );
         ($ChangeDate) = ( split( /\./, $ChangeDate ) );
         $ChangeDate =~ s/Change: //;
         print expand( CYAN "\t \\_ File: " . WHITE "$FileOnly " . BOLD RED . "looks suspicious " . BOLD MAGENTA . " [ Modified: " . BOLD BLUE $ChangeDate . MAGENTA " ]\n" );
     }
-	print "\n";
+    print "\n";
     if ( $TotalItemsFound == 0 ) {
         print GREEN "Result: Nothing suspicious found!\n";
     }
@@ -3341,10 +3319,56 @@ sub get_cpapi2 {
 
 sub timed_run {
     my ( $timer, @PROGA ) = @_;
-    return Cpanel::SafeRun::Timed::timedsaferun( $timer, @PROGA );
+    return _timedsaferun( $timer, 0, @PROGA );
 }
 
 sub timed_run_noerr {
     my ( $timer, @PROGA ) = @_;
-    return Cpanel::SafeRun::Timed::_timedsaferun( $timer, @PROGA );
+    return _timedsaferun( $timer, 1, @PROGA );
 }
+
+sub _timedsaferun {
+    my ( $timer, $stderr_to_stdout, @PROGA ) = @_;
+    return '' if ( substr( $PROGA[0], 0, 1 ) eq '/' && !-x $PROGA[0] );
+    $timer = $timer       ? $timer       : 25;
+    $timer = $OPT_TIMEOUT ? $OPT_TIMEOUT : $timer;
+    my $output;
+    my $complete = 0;
+    my $pid;
+    my $fh;
+    eval {
+        local $SIG{'__DIE__'} = 'DEFAULT';
+        local $SIG{'ALRM'}    = sub { $output = ''; print RED ON_BLACK 'Timeout while executing: ' . join( ' ', @PROGA ) . "\n"; die; };
+        alarm($timer);
+        if ( $pid = open( $fh, '-|' ) ) {
+            local $/;
+            $output = readline($fh);
+            close($fh);
+        }
+        elsif ( defined $pid ) {
+            open( STDIN, '<', '/dev/null' );
+            if ($stderr_to_stdout) {
+                open( STDERR, '>&', 'STDOUT' );
+            }
+            else {
+                open( STDERR, '>', '/dev/null' );
+            }
+            exec(@PROGA) or exit 1;
+        }
+        else {
+            print RED ON_BLACK 'Error while executing: [ ' . join( ' ', @PROGA ) . ' ]: ' . $! . "\n";
+            alarm 0;
+            die;
+        }
+        $complete = 1;
+        alarm 0;
+    };
+    alarm 0;
+    if ( !$complete && $pid && $pid > 0 ) {
+        kill( 15, $pid );
+        sleep(2);
+        kill( 9, $pid );
+    }
+    return defined $output ? $output : '';
+}
+
