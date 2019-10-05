@@ -35,7 +35,7 @@
 
 use strict;
 
-my $VERSION = "2.5.14";
+my $VERSION = "2.5.15";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -46,8 +46,7 @@ use Cpanel::Config::Users           ();
 use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::SafeRun::Timed          ();
-use Cpanel::JSON;
-();
+use Cpanel::JSON 					();
 use Cpanel::ResellerFunctions ();
 use Cpanel::Usage             ();
 use Cpanel::Validate::IP      ();
@@ -2246,15 +2245,15 @@ sub display_mail_info {
         $emailacctline =~ s/\///g;    ## Strip trailing /
         print expand( CYAN "\t \\_ " . $emailacctline . "\@" . $DOMAIN . " " );
 
-        # If v58+, get quota via doveadm command.
         if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>', '11.58' ) ) {
-            my $quotaline = timed_run_noerr( 5, 'doveadm', '-f', 'tab', 'quota', 'get', "-u $emailacctline\@$DOMAIN | grep 'Mailbox' | grep -v 'MESSAGE'" );
-            if ( $quotaline =~ m/Error: User doesn't exist/ ) {
-                print "[Quota cannot be determined]\n";
-            }
-            else {
-                my ( $qused, $qlimit, $qpercent ) =
-                  ( split( /\s+/, $quotaline ) )[ 2, 3, 4 ];
+            my $quotaLine = timed_run_noerr( 5, 'doveadm', '-f', 'tab', 'quota', 'get', '-u', "$emailacctline\@$DOMAIN" );
+			my @quotaLine = split( /\n/, $quotaLine );
+			my $quotaline;
+			foreach $quotaline(@quotaLine) { 
+				chomp($quotaline);
+				next unless($quotaline =~ m/STORAGE/);
+				next if($quotaline =~ m/cPanel/);
+                my ( $qused, $qlimit, $qpercent ) = ( split( /\s+/, $quotaline ) )[ 2, 3, 4 ];
                 if ( $qused == 0 ) {
                     $qused = 0;
                 }
@@ -2264,11 +2263,8 @@ sub display_mail_info {
                 if ( $qlimit eq "-" ) {
                     $qlimit = "Unlimited";
                 }
-                else {
-                    $qlimit = ( $qlimit / 1024 );
-                }
                 print "[Quota Used " . $qused . " MB of " . $qlimit . " MB (" . $qpercent . "%)]\n";
-            }
+			}
         }
         else {
             print "\n";
@@ -2389,6 +2385,7 @@ sub display_mail_info {
         }
 
         # Check for cphulkd blocks
+	# NEED TO FINISH --cphulkblocks here!!!
         my $BlockCnt            = 0;
         my $isCPHulkEnabledJSON = get_whmapi1('cphulk_status');
         my $isCPHulkEnabled     = $isCPHulkEnabledJSON->{data}->{is_enabled};
