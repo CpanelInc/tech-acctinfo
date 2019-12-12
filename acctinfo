@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.16";
+my $VERSION = "2.5.17";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -176,6 +176,15 @@ if ( $IS_USERNAME == 0 ) {
     my $DataJSON = get_whmapi1( 'getdomainowner', "domain=$QUERY" );
     $username = $DataJSON->{data}->{user};
 }
+# RIGHT HERE
+my $DataJSON   = get_whmapi1( 'accountsummary', "user=$username" );
+my $ASreason   = $DataJSON->{metadata}->{reason};
+if ($ASreason ne "OK") {
+    print "*" x90 . "\n";
+    print "system user ($username) not found.  Running cruft check automatically!\n"; 
+    print "*" x90 . "\n";
+    cruft_check();
+}
 my $ValUserJSON = get_whmapi1( 'validate_system_user', "user=$username" );
 my $UserExists  = $ValUserJSON->{data}->{exists};
 my $isReserved  = $ValUserJSON->{data}->{reserved};
@@ -204,7 +213,6 @@ if ($isReserved) {
     }
 }
 
-my $DataJSON   = get_whmapi1( 'accountsummary', "user=$username" );
 my $username   = $DataJSON->{data}->{acct}->[0]->{user};
 my $MAINDOMAIN = $DataJSON->{data}->{acct}->[0]->{domain};
 my $quotaused  = $DataJSON->{data}->{acct}->[0]->{diskused};
@@ -2217,7 +2225,7 @@ sub display_mail_info {
 
     print "There are $TotalEmails Email accounts for $DOMAIN: \n";
 
-    my $shadow_roottn_baks = qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ];
+    my $shadow_roottn_baks = qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ] unless (!-e("$RealHome/etc/$DOMAIN"));
     if ($shadow_roottn_baks) {
         chomp($shadow_roottn_baks);
         print expand( RED "\t \\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n" );
@@ -3055,8 +3063,16 @@ sub securitychk {
 }
 
 sub checkperms2 {
-    getPerms( "/etc/valiases/$MAINDOMAIN", "0640", "$username", "mail" );
-    getPerms( "/etc/vfilters/$MAINDOMAIN", "0640", "$username", "mail" );
+    #print "DEBUG: QUERY: $QUERY\n";
+    #print "DEBUG: MAINDOMAIN $MAINDOMAIN\n";
+    if ($IS_USERNAME) { 
+        getPerms( "/etc/valiases/$MAINDOMAIN", "0640", "$username", "mail" );
+        getPerms( "/etc/vfilters/$MAINDOMAIN", "0640", "$username", "mail" );
+    } 
+    else { 
+        getPerms( "/etc/valiases/$QUERY", "0640", "$username", "mail" );
+        getPerms( "/etc/vfilters/$QUERY", "0640", "$username", "mail" );
+    }
     if ( !-e ("$RealHome") ) {
         print expand( RED "\t \\_ [WARN] - $RealHome directory is missing!\n" );
         return;
@@ -3167,7 +3183,12 @@ sub getPerms {
         print RED "[WARN] - $tcPermFile has invalid permissions ($currentPerm) [Default: $DefPerm]\n";
     }
     if ( $DefPermUser ne $currentUser ) {
-        print RED "[WARN] - $tcPermFile has invalid user ($currentUser) [Default: $DefPermUser]\n";
+        if ($tcPermFile eq "/etc/valiases/$QUERY" or $tcPermFile eq "/etc/vfilters/$QUERY") { 
+            print RED "[WARN] - Check ownership on both /etc/valiases/$QUERY and /etc/vfilters/$QUERY as they maybe incorrect!\n";
+        }
+        else { 
+            print RED "[WARN] - $tcPermFile has invalid user ($currentUser) [Default: $DefPermUser]\n";
+        }
     }
     if ( $DefPermGrp ne $currentGrp ) {
         print RED "[WARN] - $tcPermFile has invalid group ($currentGrp) [Default: $DefPermGrp]\n";
