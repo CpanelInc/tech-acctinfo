@@ -176,19 +176,12 @@ if ( $IS_USERNAME == 0 ) {
     my $DataJSON = get_whmapi1( 'getdomainowner', "domain=$QUERY" );
     $username = $DataJSON->{data}->{user};
 }
-# RIGHT HERE
 my $DataJSON   = get_whmapi1( 'accountsummary', "user=$username" );
 my $ASreason   = $DataJSON->{metadata}->{reason};
-if ($ASreason ne "OK") {
-    print "*" x90 . "\n";
-    print "system user ($username) not found.  Running cruft check automatically!\n"; 
-    print "*" x90 . "\n";
-    cruft_check();
-}
 my $ValUserJSON = get_whmapi1( 'validate_system_user', "user=$username" );
 my $UserExists  = $ValUserJSON->{data}->{exists};
 my $isReserved  = $ValUserJSON->{data}->{reserved};
-if ( !$UserExists ) {
+if ( !$UserExists or $ASreason ne "OK" ) {
     if ($cruft) {
         cruft_check();
     }
@@ -3185,6 +3178,7 @@ sub getPerms {
     if ( $DefPermUser ne $currentUser ) {
         if ($tcPermFile eq "/etc/valiases/$QUERY" or $tcPermFile eq "/etc/vfilters/$QUERY") { 
             print RED "[WARN] - Check ownership on both /etc/valiases/$QUERY and /etc/vfilters/$QUERY as they maybe incorrect!\n";
+            print YELLOW "[NOTE] - Owner may be invalid - doublecheck those files!!!\n";
         }
         else { 
             print RED "[WARN] - $tcPermFile has invalid user ($currentUser) [Default: $DefPermUser]\n";
