@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.17";
+my $VERSION = "2.5.18";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -330,10 +330,10 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 if ($IS_USERNAME) {
-    $ResolvedIP = timed_run( 4, 'dig', '@208.67.220.220', "$MAINDOMAIN", 'A', '+short' );
+    $ResolvedIP = timed_run( 4, 'dig', '@1.0.0.1', "$MAINDOMAIN", 'A', '+short' );
 }
 else {
-    $ResolvedIP = timed_run( 4, 'dig', '@208.67.222.222', "$DOMAIN", 'A', '+short' );
+    $ResolvedIP = timed_run( 4, 'dig', '@1.1.1.1', "$QUERY", 'A', '+short' );
 }
 @ResolvedIP = split "\n", $ResolvedIP;
 my $IPTYPE = "";
@@ -2777,18 +2777,15 @@ sub scan {
       unless ( !-e "/root/suspicious_strings.yara" );
     my $RealHome = Cpanel::PwCache::gethomedir($username);
     if ( -e "/usr/local/cpanel/3rdparty/bin/clamscan" ) {
-
-        #    my $isClamAVInstalled = qx[ whmapi1 servicestatus service=clamd | grep 'installed: 1' ];
-        #    if ( $isClamAVInstalled ) {
         my $URL         = "https://raw.githubusercontent.com/cPanelPeter/infection_scanner/master/suspicious_strings.yara";
         my @DEFINITIONS = qx[ curl -s $URL > "/root/suspicious_strings.yara" ];
-        print CYAN "Scanning " . WHITE $RealHome . "... \n";
+        print CYAN "Scanning " . WHITE $RealHome . "/public_html... \n";
         open( RULES, "/root/suspicious_strings.yara" );
         my @RULEDATA = <RULES>;
         close(RULES);
         my $resultLine;
         my @FOUND   = undef;
-        my @results = qx[ /usr/local/cpanel/3rdparty/bin/clamscan --no-summary --infected --suppress-ok-results --log=/root/suspicious_strings_scan_results.log --recursive --exclude=".png" --exclude=".css" --exclude=".svg" --include=".php" --include=".*htm*" --include=".t*t" --database /root/suspicious_strings.yara "$RealHome/public_html" ];
+        my @results = qx[ /usr/local/cpanel/3rdparty/bin/clamscan --no-summary --infected --suppress-ok-results --log=/root/suspicious_strings_scan_results.log --recursive --exclude=".json" --exclude=".pdf"  --exclude=".png" --exclude=".css" --exclude=".svg" --include=".php" --include=".*htm*" --include=".t*t" --database /root/suspicious_strings.yara "$RealHome/public_html" ];
 
         foreach $resultLine (@results) {
             chomp($resultLine);
