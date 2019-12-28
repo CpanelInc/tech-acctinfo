@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.18";
+my $VERSION = "2.5.20";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -139,8 +139,7 @@ if ($clearscreen) {
     system("clear");
 }
 
-#print "<c>\n" unless ($nocodeblock);
-print "\n```\n" unless ($nocodeblock);
+#print "\n```\n" unless ($nocodeblock);
 print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
     Usage();
@@ -188,8 +187,7 @@ if ( !$UserExists or $ASreason ne "OK" ) {
     print RED "Error - $QUERY not found on $HOSTNAME (or missing from /etc/userdomains file)\n";
     print YELLOW "Try using the --cruft switch (acctinfo $QUERY --cruft)\n";
 
-    #print "</c>\n" unless ($nocodeblock);
-    print "```\n" unless ($nocodeblock);
+    #print "```\n" unless ($nocodeblock);
     exit;
 }
 my $isReserved = $ValUserJSON->{data}->{reserved};
@@ -1269,8 +1267,7 @@ if ( $listssls or $all ) {
 }
 border();
 
-#print "</c>\n" unless ($nocodeblock);
-print "```\n" unless ($nocodeblock);
+#print "```\n" unless ($nocodeblock);
 exit;
 
 sub Usage {
@@ -1413,7 +1410,7 @@ sub cruft_check {
 
     if ( substr( $QUERY, 0, 5 ) eq "cptkt" ) {
         print BOLD RED "[WARN] - cruft check for cPanel Support temporary reseller accounts are unpredictable!\n";
-        print "</c>\n";
+        #print "```\n" unless ($nocodeblock);
         exit;
     }
 
@@ -2014,8 +2011,7 @@ sub cruft_check {
     }
     border();
 
-    #print "</c>\n" unless ($nocodeblock);
-    print "```\n" unless ($nocodeblock);
+    #print "```\n" unless ($nocodeblock);
     exit;
 }
 
@@ -2869,8 +2865,7 @@ sub scan {
         }
     }
 
-    #print "</c>\n" unless ($nocodeblock);
-    print "```\n" unless ($nocodeblock);
+    #print "```\n" unless ($nocodeblock);
     unlink("/root/ai_detections.txt") unless ( !-e "/root/ai_detections.txt" );
     unlink("/root/suspicious_strings.yara")
       unless ( !-e "/root/suspicious_strings.yara" );
