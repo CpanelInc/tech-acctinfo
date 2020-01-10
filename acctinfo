@@ -1,5 +1,5 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2019, cPanel, L.L.C.
+# Copyright 2020, cPanel, L.L.C.
 # All rights reserved.
 # http://cpanel.net
 #
@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.20";
+my $VERSION = "2.5.21";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2204,7 +2204,7 @@ sub display_mail_info {
     chk_mail_hold( $username, 0 );
 
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
-        print YELLOW "[INFO] - " . $DOMAIN . BOLD CYAN " listed in the /etc/vdomainaliases directory. " . YELLOW "\n\t\\_ Existing accounts/autoresponders\nwill NOT forward!\n";
+        print YELLOW "[INFO] - " . $DOMAIN . BOLD CYAN " is listed in the /etc/vdomainaliases/ directory. " . YELLOW "\n\t\\_ Existing accounts/autoresponders will NOT forward!\n";
     }
     my $TotalEmails = @EMAILACCTS;
     if ( $TotalEmails >= 2 ) {
@@ -2219,7 +2219,7 @@ sub display_mail_info {
         chomp($shadow_roottn_baks);
         print expand( RED "\t \\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n" );
         print expand( YELLOW "\t\t \\_ $shadow_roottn_baks\n" );
-        print expand( RED "\t \\_ Account may have been compromised! [Use [SECURITY] - shadow.roottn.bak exploit predef]\n" );
+        print expand( RED "\t \\_ Account may have been compromised! [Use [PREDEFS > SECURITY] - shadow.roottn.bak exploit macro]\n" );
     }
 
     foreach $emailacctline (@EMAILACCTS) {
@@ -2665,18 +2665,18 @@ sub display_mail_info {
     }
 
     # Email Deliverability (work in progress)
-    my $valSPF = get_uapi(
-        "--user=$username",      'EmailAuth',
-        'validate_current_spfs', "domain=$DOMAIN"
-    );
-    my $valDKIM = get_uapi(
-        "--user=$username",       'EmailAuth',
-        'validate_current_dkims', "domain=$DOMAIN"
-    );
-    my $valPTR = get_uapi(
-        "--user=$username",      'EmailAuth',
-        'validate_current_ptrs', "domain=$DOMAIN"
-    );
+#    my $valSPF = get_uapi(
+#        "--user=$username",      'EmailAuth',
+#        'validate_current_spfs', "domain=$DOMAIN"
+#    );
+#    my $valDKIM = get_uapi(
+#        "--user=$username",       'EmailAuth',
+#        'validate_current_dkims', "domain=$DOMAIN"
+#    );
+#    my $valPTR = get_uapi(
+#        "--user=$username",      'EmailAuth',
+#        'validate_current_ptrs', "domain=$DOMAIN"
+#    );
 
     # Add MAX_EMAIL_PER_HOUR, MAX_DEFER_FAIL_PERCENTAGE, MAILBOX_FORMAT
     my $MAILBOX_FORMAT = $DataJSON->{data}->{acct}->[0]->{'mailbox_format'};
@@ -2781,7 +2781,7 @@ sub scan {
         close(RULES);
         my $resultLine;
         my @FOUND   = undef;
-        my @results = qx[ /usr/local/cpanel/3rdparty/bin/clamscan --no-summary --infected --suppress-ok-results --log=/root/suspicious_strings_scan_results.log --recursive --exclude=".json" --exclude=".pdf"  --exclude=".png" --exclude=".css" --exclude=".svg" --include=".php" --include=".*htm*" --include=".t*t" --database /root/suspicious_strings.yara "$RealHome/public_html" ];
+        my @results = qx[ /usr/local/cpanel/3rdparty/bin/clamscan --no-summary --infected --suppress-ok-results --recursive --exclude=".json" --exclude=".pdf"  --exclude=".png" --exclude=".css" --exclude=".svg" --include=".php" --include=".*htm*" --include=".t*t" --database /root/suspicious_strings.yara "$RealHome/public_html" ];
 
         foreach $resultLine (@results) {
             chomp($resultLine);
