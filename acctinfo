@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.24";
+my $VERSION = "2.5.25";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -49,6 +49,7 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::SafeRun::Timed          ();
 use Cpanel::JSON                    ();
+use JSON::MaybeXS qw(encode_json decode_json);
 use Cpanel::ResellerFunctions       ();
 use Cpanel::Usage                   ();
 use Cpanel::Validate::IP            ();
@@ -136,6 +137,10 @@ GetOptions(
     'scan'          => \$scan,
 );
 
+if ( $> != 0 ) {
+    die "Sorry, acctinfo script can only be run as root\n";
+}
+
 my $debugHookJSON    = get_whmapi1( 'get_tweaksetting', 'key=debughooks' );
 my $debugHookVal     = $debugHookJSON->{data}->{tweaksetting}->{value};
 my $debugHookChanged = 0;
@@ -150,6 +155,7 @@ print BOLD BLUE "acctinfo - Version: " . YELLOW $VERSION . "\n";
 if ($helpME) {
     Usage();
 }
+getProfileNode();
 
 my $conf        = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
 my $HOMEDIR     = $conf->{'HOMEDIR'};
@@ -395,10 +401,10 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 if ($IS_USERNAME) {
     $ResolvedIP =
-      timed_run( 4, 'dig', '@1.1.1.1', "$MAINDOMAIN", 'A', '+short' );
+      timed_run( 4, 'dig', '@8.8.8.8', "$MAINDOMAIN", 'A', '+short' );
 }
 else {
-    $ResolvedIP = timed_run( 4, 'dig', '@1.1.1.1', "$QUERY", 'A', '+short' );
+    $ResolvedIP = timed_run( 4, 'dig', '@8.8.4.4', "$QUERY", 'A', '+short' );
 }
 @ResolvedIP = split "\n", $ResolvedIP;
 my $IPTYPE = "";
@@ -670,14 +676,14 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
 "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
 }
 else {
-    my $bwdataJSON = get_uapi(
-        'StatsBar',               'get_stats',
-        'display=bandwidthusage', "--user=$username"
-    );
-    my $bwused = $bwdataJSON->{result}->{data}->[0]->{count};
-    my $bwmax  = $bwdataJSON->{result}->{data}->[0]->{max};
-    print "Bandwidth: $bwused used of $bwmax allowed\n"
-      unless ( $bwused eq "" or $bwmax eq "" );
+   	my $bwdataJSON = get_uapi(
+       	'StatsBar',               'get_stats',
+       	'display=bandwidthusage', "--user=$username"
+   	);
+   	my $bwused = $bwdataJSON->{result}->{data}->[0]->{count};
+   	my $bwmax  = $bwdataJSON->{result}->{data}->[0]->{max};
+   	print "Bandwidth: $bwused used of $bwmax allowed\n"
+     	unless ( $bwused eq "" or $bwmax eq "" );
 }
 
 # Check for custom style (Paper Lantern Theme)
@@ -748,10 +754,11 @@ if ( -e "$RealHome/.jbm" ) {
     print " detected) " . $JBVersion;
 }
 print "\n";
+# RIGHT HERE
+nginx_caching();
 
 my $PHPDefaultVersion;
 
-#my $PHPversion;
 my $isEA4 = 0;
 
 if ($tomcat) {
@@ -773,10 +780,6 @@ $isEA4 = isEA4();
 my $clPHPVer = "";
 $PHPDefaultVersion = get_system_php_version();
 
-# I don't think it is possible for this to be empty any longer.
-#if ( $PHPDefaultVersion eq "" ) {
-#    $PHPDefaultVersion = "UNKNOWN";
-#}
 print "Default System PHP Version: " . CYAN $PHPDefaultVersion . "\n";
 my $HasPrecedence = MAGENTA " cPanel EA4 PHP version has precedence";
 my (
@@ -841,6 +844,8 @@ if ( !$skipEA4 ) {
           timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion",
             'php -i|grep "^Scan this dir"' );
     }
+    # HERE, we should add the above configuration data if NOT INHERIT!!!
+    # $PHPiniFIle, $PHPiniLoad and $PHPiniScan
 }
 chomp($PHPiniFile);
 chomp($PHPiniLoad);
@@ -920,9 +925,9 @@ sub custom_UD {
         my $NoShowHeader = 0;
         foreach $confFile (@CONFDATA) {
             chomp($confFile);
-            if ( $confFile =~ $username || $confFile =~ $DOMAIN ) {
+            if ( $confFile =~ m/$username/ ) {
                 print expand( YELLOW
-"[INFO] Found custom userdata directory for $username under /etc/apache2/conf.d/\n"
+"Found custom userdata directory for $username under /etc/apache2/conf.d/\n"
                 ) unless ($NoShowHeader);
                 $NoShowHeader = 1;
                 print expand("\t \\_ $confFile\n");
@@ -933,7 +938,7 @@ sub custom_UD {
 
 my $ListIPsJSON     = get_whmapi1('listips');
 my $IS_IP_ON_SERVER = 0;
-my $NOTONSERVER     = "[ Not configured on this server ]";
+my $NOTONSERVER     = "[ Not configured on this server ]" . YELLOW "\n\t\\_ Need to run IP Migration Wizard? [ https://support.cpanel.net/hc/en-us/articles/360048023693 ]";
 for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
     if ( $ListOfIPs->{ip} eq $IPADDR ) {
         $IS_IP_ON_SERVER = 1;
@@ -956,7 +961,7 @@ foreach $ResolvedIP (@ResolvedIP) {
     next if !Cpanel::Validate::IP::is_valid_ip($ResolvedIP);
     $ResolvesToDetail = check_resolved_ip($ResolvedIP);
     push @multipleIPs,
-      CYAN "\t \\_ " . $ResolvedIP . " " . RED $ResolvesToDetail . "\n";
+      CYAN "\t \\_ " . $ResolvedIP . " " . YELLOW $ResolvesToDetail . "\n";
 }
 print WHITE "Resolves to the following IPs:\n";
 if ( $TotalARecords == 0 ) {
@@ -2510,6 +2515,9 @@ sub display_mail_info {
         border();
         return;
     }
+    # ADD CHECK HERE FOR GETTING ProFileNode [ get_whmapi1('get_current_profile'); ] see if {data}->{name} is STANDARD or UNKKNOWN.
+    # IF MAILNODE or DNSNODE, limit the output below (where we check passwd/shadow files.  
+
     if ($IS_USERNAME) {
         $DOMAIN = $MAINDOMAIN;
     }
@@ -2536,35 +2544,34 @@ sub display_mail_info {
     smborder();
     print "Email accounts for $DOMAIN: \n";
 
-    # Check for variants of the shadow.roottn.bak hack
-    my $shadow_roottn_baks =
-      qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ]
-      unless ( !-e ("$RealHome/etc/$DOMAIN") );
-    if ($shadow_roottn_baks) {
-        chomp($shadow_roottn_baks);
-        print expand( RED
+  	# Check for variants of the shadow.roottn.bak hack
+   	my $shadow_roottn_baks =
+qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ] unless ( !-e ("$RealHome/etc/$DOMAIN") );
+   	if ($shadow_roottn_baks) {
+       	chomp($shadow_roottn_baks);
+       	print expand( RED
 "\t\\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n"
-        );
-        print expand( YELLOW "\t\t\\_ $shadow_roottn_baks\n" );
-        print expand( RED
+       	);
+       	print expand( YELLOW "\t\t\\_ $shadow_roottn_baks\n" );
+       	print expand( RED
 "\t\t\\_ Account may have been compromised! [Use [PREDEFS > SECURITY] - shadow.roottn.bak exploit macro]\n"
-        );
-    }
+       	);
+   	}
 
-    # Check for AnonymousF0x/smtpF0x hacks
-    my $hassmtpF0x =
+   	# Check for AnonymousF0x/smtpF0x hacks
+   	my $hassmtpF0x =
 qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|smtpf0x-|anonymousfox|smtpf' ];
-    chomp($hassmtpF0x);
-    my @hassmtpF0x = split "\n", $hassmtpF0x;
-    if (@hassmtpF0x) {
-        print expand( RED
+   	chomp($hassmtpF0x);
+   	my @hassmtpF0x = split "\n", $hassmtpF0x;
+   	if (@hassmtpF0x) {
+       	print expand( RED
 "\t\\_ [WARN] - Found evidence of the AnonymousF0x/smtpF0x hack in the following:\n"
-        );
-        my $foundsmtpF0x;
-        foreach $foundsmtpF0x (@hassmtpF0x) {
-            print expand( WHITE "\t\t\\_ $foundsmtpF0x\n" );
-        }
-    }
+       	);
+       	my $foundsmtpF0x;
+       	foreach $foundsmtpF0x (@hassmtpF0x) {
+           	print expand( WHITE "\t\t\\_ $foundsmtpF0x\n" );
+       	}
+   	}
 
     # Check for the domain being in /etc/vdomainaliases/ directory.
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
@@ -3442,14 +3449,19 @@ qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
             chomp($SSLIssuer);
             print expand(
                 GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
+            # Get OCSP and Certificate status
             my $OCSPstatus =
-qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | egrep 'Cert Status:' ];
+qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | grep 'Cert Status:' ];
 
             # It looks like if OCSPstatus is empty, the SSL may be revoked!
             if ( $OCSPstatus and $isExpired ne "[EXPIRED]" ) {
                 print expand( BOLD CYAN "\t \\_ OCSP: "
                       . BOLD MAGENTA substr( $OCSPstatus, 17 )
                       . "\n" );
+            }
+            my $SSLMatchesDomain = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -showcerts <<< q 2>/dev/null | openssl x509 -noout -subject | grep $tcDomain ];
+            if ( $SSLMatchesDomain eq "" ) {
+                print expand( BOLD RED "\t \\_ SSL Hostname Mismatch!\n");
             }
         }
         print WHITE "Protecting the following Subject Alternative Names:\n";
@@ -4096,5 +4108,43 @@ sub display_header {
             print "\t\\_ " . $line . "\n" unless ( $line eq $lastline );
             $lastline = $line;
         }
+    }
+}
+
+sub nginx_caching {
+    return unless( -e '/etc/nginx/conf.d/ea-nginx.conf' );
+    my ( $rawdata, $output );
+    my $user_nginx_caching_status = 0;
+    my $global_nginx_caching_status = 0;
+    if ( -e "/var/cpanel/userdata/$username/nginx-cache.json" ) {
+        $rawdata = Cpanel::SafeRun::Timed::timedsaferun( 4,'cat', "/var/cpanel/userdata/$username/nginx-cache.json" );
+        $output = decode_json $rawdata;
+        $user_nginx_caching_status = ( $output->{enabled} ) ? 1 : 0;
+    } 
+    if ( ! -e '/etc/nginx/ea-nginx/enable.standalone' && -e '/etc/nginx/ea-nginx/cache.json' ) {
+        $rawdata = Cpanel::SafeRun::Timed::timedsaferun( 4,'cat', '/etc/nginx/ea-nginx/cache.json' );
+        $output = decode_json $rawdata;
+        $global_nginx_caching_status = ( $output->{enabled} ) ? 1 : 0;
+    }
+    if ( $user_nginx_caching_status ) {
+        print "NginX Caching (user): " . CYAN "Active\n";
+        return;
+    }
+    if ( $global_nginx_caching_status ) {
+        print "NginX Caching (global): " . CYAN "Active\n";
+        return;
+    }
+    else {
+        print "NginX Caching: " . CYAN "Inactive\n";
+    }
+}
+
+sub getProfileNode {
+    my $ProfileNodeJSON = get_whmapi1('get_current_profile');
+    my $ProfileNode     = $ProfileNodeJSON->{data}->{name};
+    if ( $ProfileNode ne "Standard Node" ) {
+        print RED "This server is not running on a standard node " . CYAN "[ " . WHITE $ProfileNode . CYAN " ]\n";
+        print YELLOW "Please run acctinfo only on a Standard Node!\n";
+        exit;
     }
 }
