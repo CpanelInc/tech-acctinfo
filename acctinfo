@@ -3459,10 +3459,12 @@ qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<qui
                       . BOLD MAGENTA substr( $OCSPstatus, 17 )
                       . "\n" );
             }
-            my $SSLMatchesDomain = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -showcerts <<< q 2>/dev/null | openssl x509 -noout -subject | grep $tcDomain ];
-            if ( $SSLMatchesDomain eq "" ) {
-                print expand( BOLD RED "\t \\_ SSL Hostname Mismatch!\n");
-            }
+#            my $SSLMatchesDomain = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -showcerts <<< q 2>/dev/null | openssl x509 -noout -subject | grep $tcDomain ];
+#            if ( $SSLMatchesDomain eq "" ) {
+#                print expand( BOLD RED "\t \\_ SSL Hostname Mismatch!\n");
+#            }
+#           The above will only work if we also check the SANS at the same time and if the subject does not match and 
+#           the domain is not in the SAN, then we can say SSL Hostname Mismtach.
         }
         print WHITE "Protecting the following Subject Alternative Names:\n";
         my $SAN;
@@ -4141,8 +4143,8 @@ sub nginx_caching {
 
 sub getProfileNode {
     my $ProfileNodeJSON = get_whmapi1('get_current_profile');
-    my $ProfileNode     = $ProfileNodeJSON->{data}->{name};
-    if ( $ProfileNode ne "Standard Node" ) {
+    my $ProfileNode     = $ProfileNodeJSON->{data}->{code};
+    if ( $ProfileNode ne "STANDARD" ) {
         print RED "This server is not running on a standard node " . CYAN "[ " . WHITE $ProfileNode . CYAN " ]\n";
         print YELLOW "Please run acctinfo only on a Standard Node!\n";
         exit;
