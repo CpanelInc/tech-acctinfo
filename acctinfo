@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.25";
+my $VERSION = "2.5.26";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
