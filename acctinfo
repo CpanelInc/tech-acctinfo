@@ -92,6 +92,7 @@ our $result;
 our @FilesToScan;
 our @InstalledMods = timed_run_noerr( 0, 'httpd', '-M' );
 our $RUID2Enabled;
+our $ProfileNode;
 
 $Term::ANSIColor::AUTORESET = 1;
 
@@ -113,6 +114,7 @@ my $mail           = undef;
 my $showHeader     = undef;
 my $tomcat         = undef;
 my $scan           = undef;
+my $acct_over_quota = 0;
 our $isInNamedConf = 0;
 our $spincounter;
 our @HasCAA;
@@ -606,16 +608,19 @@ if ( $showHeader || $all ) {
       unless ($IS_USERNAME);
     print CYAN "Header information for " . GREEN $MAINDOMAIN . "\n"
       unless ( !$IS_USERNAME );
-    display_header( $QUERY,      'HTTP',         10 ) unless ($IS_USERNAME);
-    display_header( $QUERY,      'Location:',    10 ) unless ($IS_USERNAME);
-    display_header( $QUERY,      'Server:',      10 ) unless ($IS_USERNAME);
-    display_header( $QUERY,      'Powered-By:',  10 ) unless ($IS_USERNAME);
-    display_header( $QUERY,      'Redirect-By:', 10 ) unless ($IS_USERNAME);
-    display_header( $MAINDOMAIN, 'HTTP',         10 ) unless ( !$IS_USERNAME );
-    display_header( $MAINDOMAIN, 'Location:',    10 ) unless ( !$IS_USERNAME );
-    display_header( $MAINDOMAIN, 'Server:',      10 ) unless ( !$IS_USERNAME );
-    display_header( $MAINDOMAIN, 'Powered-By:',  10 ) unless ( !$IS_USERNAME );
-    display_header( $MAINDOMAIN, 'Redirect-By:', 10 ) unless ( !$IS_USERNAME );
+#    display_header( $QUERY,      'HTTP',         10 ) unless ($IS_USERNAME);
+#    display_header( $QUERY,      'Location:',    10 ) unless ($IS_USERNAME);
+#    display_header( $QUERY,      'Server:',      10 ) unless ($IS_USERNAME);
+#    display_header( $QUERY,      'Powered-By:',  10 ) unless ($IS_USERNAME);
+#    display_header( $QUERY,      'Redirect-By:', 10 ) unless ($IS_USERNAME);
+#    display_header( $MAINDOMAIN, 'HTTP',         10 ) unless ( !$IS_USERNAME );
+#    display_header( $MAINDOMAIN, 'Location:',    10 ) unless ( !$IS_USERNAME );
+#    display_header( $MAINDOMAIN, 'Server:',      10 ) unless ( !$IS_USERNAME );
+#    display_header( $MAINDOMAIN, 'Powered-By:',  10 ) unless ( !$IS_USERNAME );
+#    display_header( $MAINDOMAIN, 'Redirect-By:', 10 ) unless ( !$IS_USERNAME );
+
+    display_header( $QUERY ) unless ($IS_USERNAME);
+    display_header( $MAINDOMAIN ) unless ( !$IS_USERNAME );
 }
 print "\n";
 print WHITE "Shell: " . CYAN $RealShell . "\n";
@@ -666,6 +671,7 @@ my $maxquota  = $quotaJSON->{data}->{acct}->[0]->{disklimit};
 print "Disk Quota: $quotaused used of $maxquota allowed ";
 
 if ( $quotaused > $maxquota ) {
+    $acct_over_quota = 1 unless( $maxquota eq "unlimited" );;
     print RED "[WARN] - $username appears to be over quota!"
       unless ( $maxquota eq "unlimited" );
 }
@@ -2515,8 +2521,19 @@ sub display_mail_info {
         border();
         return;
     }
-    # ADD CHECK HERE FOR GETTING ProFileNode [ get_whmapi1('get_current_profile'); ] see if {data}->{name} is STANDARD or UNKKNOWN.
-    # IF MAILNODE or DNSNODE, limit the output below (where we check passwd/shadow files.  
+    if ($acct_over_quota) {
+        border();
+        print RED "Account $username is over quota - Cannot list email data!\n";
+        border();
+        return;
+    }
+    # CHECK $ProFileNode here
+    # If DNSNODE, return
+    # IF MAILNODE limit some of the output below (passwd/shadow files, smtpF0x/AnonymousF0x, shadow.roottn hacks, & any $RealHome path info).
+    if ( $ProfileNode eq "DNSNODE" ) {
+        print RED "$ProfileNode has no mail capabilities!\n";
+        return;
+    }
 
     if ($IS_USERNAME) {
         $DOMAIN = $MAINDOMAIN;
@@ -2544,34 +2561,30 @@ sub display_mail_info {
     smborder();
     print "Email accounts for $DOMAIN: \n";
 
-  	# Check for variants of the shadow.roottn.bak hack
-   	my $shadow_roottn_baks =
+    if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
+        #Check for variants of the shadow.roottn.bak hack
+        my $shadow_roottn_baks =
 qx[ find $RealHome/etc/$DOMAIN/ -name 'shadow\.*' -print ] unless ( !-e ("$RealHome/etc/$DOMAIN") );
-   	if ($shadow_roottn_baks) {
-       	chomp($shadow_roottn_baks);
-       	print expand( RED
-"\t\\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n"
-       	);
-       	print expand( YELLOW "\t\t\\_ $shadow_roottn_baks\n" );
-       	print expand( RED
-"\t\t\\_ Account may have been compromised! [Use [PREDEFS > SECURITY] - shadow.roottn.bak exploit macro]\n"
-       	);
-   	}
+        if ($shadow_roottn_baks) {
+            chomp($shadow_roottn_baks);
+            print expand( RED "\t\\_ [WARN] - Possible variant of the shadow.roottn.bak hack found in $RealHome/etc/$DOMAIN/\n");
+            print expand( YELLOW "\t\t\\_ $shadow_roottn_baks\n" );
+            print expand( RED "\t\t\\_ Account may have been compromised! [Use [PREDEFS > SECURITY] - shadow.roottn.bak exploit macro]\n");
+        }
 
-   	# Check for AnonymousF0x/smtpF0x hacks
-   	my $hassmtpF0x =
+        # Check for AnonymousF0x/smtpF0x hacks
+        my $hassmtpF0x =
 qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|smtpf0x-|anonymousfox|smtpf' ];
-   	chomp($hassmtpF0x);
-   	my @hassmtpF0x = split "\n", $hassmtpF0x;
-   	if (@hassmtpF0x) {
-       	print expand( RED
-"\t\\_ [WARN] - Found evidence of the AnonymousF0x/smtpF0x hack in the following:\n"
-       	);
-       	my $foundsmtpF0x;
-       	foreach $foundsmtpF0x (@hassmtpF0x) {
-           	print expand( WHITE "\t\t\\_ $foundsmtpF0x\n" );
-       	}
-   	}
+        chomp($hassmtpF0x);
+        my @hassmtpF0x = split "\n", $hassmtpF0x;
+        if (@hassmtpF0x) {
+            print expand( RED "\t\\_ [WARN] - Found evidence of the AnonymousF0x/smtpF0x hack in the following:\n");
+            my $foundsmtpF0x;
+            foreach $foundsmtpF0x (@hassmtpF0x) {
+                print expand( WHITE "\t\t\\_ $foundsmtpF0x\n" );
+            }
+        }
+    }
 
     # Check for the domain being in /etc/vdomainaliases/ directory.
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
@@ -2603,62 +2616,64 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
               . $qpercent
               . "%)]\n" );
 
-        # Check for .boxtrapperenable touch file - enabled if it exists.
-        if ( -e ("$RealHome/etc/$DOMAIN/$localpart/.boxtrapperenable") ) {
-            print expand( YELLOW "\t \\_ Spam Boxtrapper Enabled\n" );
-        }
+        if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
+            # Check for .boxtrapperenable touch file - enabled if it exists.
+            if ( -e ("$RealHome/etc/$DOMAIN/$localpart/.boxtrapperenable") ) {
+                print expand( YELLOW "\t \\_ Spam Boxtrapper Enabled\n" );
+            }
 
-        # Check for default webmail app
-        my $DefWebMailApp;
-        if ( -e ("$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app")
-          )
-        {
-            $DefWebMailApp =
+            # Check for default webmail app
+            my $DefWebMailApp;
+            if ( -e ("$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app")) {
+                $DefWebMailApp =
 qx[ cat "$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app" ];
-            $DefWebMailApp = ucfirst($DefWebMailApp);
-            print expand(
-                YELLOW "\t \\_ Default Webmail Client $DefWebMailApp\n" );
-        }
+                $DefWebMailApp = ucfirst($DefWebMailApp);
+                print expand(
+                    YELLOW "\t \\_ Default Webmail Client $DefWebMailApp\n" );
+            }
 
-        # Check for mailbox_format.cpanel file. Display contents if it exists
-        if ( -e ("$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel") ) {
-            my $mbformat =
+            # Check for mailbox_format.cpanel file. Display contents if it exists
+            if ( -e ("$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel") ) {
+                my $mbformat =
 qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
-            chomp($mbformat);
-            print expand(
-                YELLOW "\t \\_ Account is using the $mbformat format.\n" );
-        }
+                chomp($mbformat);
+                print expand(
+                    YELLOW "\t \\_ Account is using the $mbformat format.\n" );
+            }
 
+        }
         # check for mail hold/suspended
         chk_mail_suspend( "$emailacctline", 1 );
         chk_mail_hold( "$emailacctline", 1 );
 
-        # Check rcube.db for corruption
-        if ( -e ("$RealHome/etc/$DOMAIN/$localpart.rcube.db") ) {
-            my $rcubechk =
-              SQLiteDBChk("$RealHome/etc/$DOMAIN/$localpart.rcube.db");
-            print expand( RED
+        if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
+            # Check rcube.db for corruption
+            if ( -e ("$RealHome/etc/$DOMAIN/$localpart.rcube.db") ) {
+                my $rcubechk =
+                SQLiteDBChk("$RealHome/etc/$DOMAIN/$localpart.rcube.db");
+                print expand( RED
 "\t \\_ $RealHome/etc/$DOMAIN/$localpart.rcube.db might be corrupted.\n"
-            ) unless ( $rcubechk =~ m/ok/ );
-        }
+                ) unless ( $rcubechk =~ m/ok/ );
+            }
 
-        # Check for dovecot-acl file
-        my $dovecotACL =
-          timed_run( 4, 'find', "$RealHome/mail/$DOMAIN/$localpart",
-            '-name', 'dovecot-acl' );
-        chomp($dovecotACL);
-        if ($dovecotACL) {
-            print expand( RED
+            # Check for dovecot-acl file
+            my $dovecotACL =
+            timed_run( 4, 'find', "$RealHome/mail/$DOMAIN/$localpart",
+                '-name', 'dovecot-acl' );
+            chomp($dovecotACL);
+            if ($dovecotACL) {
+                print expand( RED
 "\t \\_ [WARN] - Found $dovecotACL - can cause odd permission issues.\n"
-            ) unless ( !-s $dovecotACL );
-        }
+                ) unless ( !-s $dovecotACL );
+            }
 
-        # Check for dovecot-uidlist.lock file
-        if ( -e ("$RealHome/mail/$DOMAIN/$emailacctline/dovecot-uidlist.lock") )
-        {
-            print expand( RED
+            # Check for dovecot-uidlist.lock file
+            if ( -e ("$RealHome/mail/$DOMAIN/$emailacctline/dovecot-uidlist.lock") )
+            {
+                print expand( RED
 "\t \\_ [WARN] - Found dovecot-uidlist.lock file in $RealHome/mail/$DOMAIN/$emailacctline/ \n\t\tWebmail acting strangely? - remove it and see if resolved.\n"
-            );
+                );
+            }
         }
 
         # Check for cphulkd blocks (if --cphulkblocks flag was passed)
@@ -2687,13 +2702,13 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
             'Email',            'list_filters',
             "--user=$username", "account=$localpart%40$DOMAIN"
         );
-        if ( -e ("$RealHome/etc/$DOMAIN/$localpart/filter") ) {
+        #if ( -e ("$RealHome/etc/$DOMAIN/$localpart/filter") ) {
             print expand(
                 YELLOW "\t \\_ has the following user level filters\n" );
             for my $UserFilter ( @{ $UserFilterJSON->{result}->{data} } ) {
                 print expand( WHITE "\t\t \\_ $UserFilter->{filtername}\n" );
             }
-        }
+        #}
     }
 
     print "\nTotal Accounts: ";
@@ -2706,34 +2721,36 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
     print "\n";
 
     # Check for missing passwd and/or shadow files
-    if ( !-e "$RealHome/etc/$DOMAIN/passwd" && $emailPopCnt > 0 ) {
-        print RED "[WARN] - $RealHome/etc/$DOMAIN/passwd file is missing!\n";
-    }
-    if ( !-e "$RealHome/etc/$DOMAIN/shadow" && $emailPopCnt > 0 ) {
-        print RED "[WARN] - $RealHome/etc/$DOMAIN/shadow file is missing!\n";
-    }
+    if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
+        if ( !-e "$RealHome/etc/$DOMAIN/passwd" && $emailPopCnt > 0 ) {
+            print RED "[WARN] - $RealHome/etc/$DOMAIN/passwd file is missing!\n";
+        }
+        if ( !-e "$RealHome/etc/$DOMAIN/shadow" && $emailPopCnt > 0 ) {
+            print RED "[WARN] - $RealHome/etc/$DOMAIN/shadow file is missing!\n";
+        }
 
-    my $passwdCnt = 0;
-    my $shadowCnt = 0;
-    if ( -e "$RealHome/etc/$DOMAIN/passwd" ) {
-        ($passwdCnt) =
-          ( split( /\s+/, qx[ wc -l $RealHome/etc/$DOMAIN/passwd ] ) )[0];
+        my $passwdCnt = 0;
+        my $shadowCnt = 0;
+        if ( -e "$RealHome/etc/$DOMAIN/passwd" ) {
+            ($passwdCnt) =
+            ( split( /\s+/, qx[ wc -l $RealHome/etc/$DOMAIN/passwd ] ) )[0];
+        }
+        if ( -e "$RealHome/etc/$DOMAIN/shadow" ) {
+            ($shadowCnt) =
+            ( split( /\s+/, qx[ wc -l $RealHome/etc/$DOMAIN/shadow ] ) )[0];
+        }
+        if (   $passwdCnt ne $shadowCnt
+            || $passwdCnt ne $emailPopCnt
+            || $shadowCnt ne $emailPopCnt )
+        {
+            print RED
+            "[WARN] - passwd/shadow count does not equal total Email accounts\n";
+            print expand( WHITE
+    "\t\\_ passwd: $passwdCnt / shadow: $shadowCnt / Email: $emailPopCnt\n"
+            );
+        }
+        smborder();
     }
-    if ( -e "$RealHome/etc/$DOMAIN/shadow" ) {
-        ($shadowCnt) =
-          ( split( /\s+/, qx[ wc -l $RealHome/etc/$DOMAIN/shadow ] ) )[0];
-    }
-    if (   $passwdCnt ne $shadowCnt
-        || $passwdCnt ne $emailPopCnt
-        || $shadowCnt ne $emailPopCnt )
-    {
-        print RED
-          "[WARN] - passwd/shadow count does not equal total Email accounts\n";
-        print expand( WHITE
-"\t\\_ passwd: $passwdCnt / shadow: $shadowCnt / Email: $emailPopCnt\n"
-        );
-    }
-    smborder();
 
 # Now let's get the MX record and make sure the A record for it points to this server.
     print "Checking MX records for $DOMAIN...\n";
@@ -2943,20 +2960,20 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
 
     # List any Mailing Lists
     my $MailmanJSON =
-      get_uapi( 'Email', 'list_lists', "--user=$username", "account=$DOMAIN" );
+    get_uapi( 'Email', 'list_lists', "--user=$username", "account=$DOMAIN" );
     print expand( YELLOW "Mailing Lists (Mailman)\n" );
     for my $mailmanlist ( @{ $MailmanJSON->{result}->{data} } ) {
         print expand( WHITE "\t\\_ List: "
-              . CYAN $mailmanlist->{list}
-              . WHITE " [ID: "
-              . CYAN $mailmanlist->{listid}
-              . WHITE "]\n\t\t\\_Type: "
-              . CYAN $mailmanlist->{accesstype}
-              . WHITE " Admin: "
-              . CYAN $mailmanlist->{listadmin}
-              . WHITE " Size: "
-              . CYAN $mailmanlist->{humandiskused}
-              . "\n" );
+            . CYAN $mailmanlist->{list}
+            . WHITE " [ID: "
+            . CYAN $mailmanlist->{listid}
+            . WHITE "]\n\t\t\\_Type: "
+            . CYAN $mailmanlist->{accesstype}
+            . WHITE " Admin: "
+            . CYAN $mailmanlist->{listadmin}
+            . WHITE " Size: "
+            . CYAN $mailmanlist->{humandiskused}
+            . "\n" );
     }
 
     smborder();
@@ -3459,12 +3476,6 @@ qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<qui
                       . BOLD MAGENTA substr( $OCSPstatus, 17 )
                       . "\n" );
             }
-#            my $SSLMatchesDomain = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -showcerts <<< q 2>/dev/null | openssl x509 -noout -subject | grep $tcDomain ];
-#            if ( $SSLMatchesDomain eq "" ) {
-#                print expand( BOLD RED "\t \\_ SSL Hostname Mismatch!\n");
-#            }
-#           The above will only work if we also check the SANS at the same time and if the subject does not match and 
-#           the domain is not in the SAN, then we can say SSL Hostname Mismtach.
         }
         print WHITE "Protecting the following Subject Alternative Names:\n";
         my $SAN;
@@ -3473,21 +3484,24 @@ qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<qui
             "$sslsyscertdir/$tcDomain/certificates",
             '-noout', '-text' );
         my @getSANS = split "\n", $getSANS;
+        my $SSLHostMismatch = 0;
         foreach $SAN (@getSANS) {
             chomp($SAN);
             if ( $SAN =~ m/DNS:/ ) {
                 $SAN =~ s/DNS://g;
                 $SAN =~ s/\s+//;
-
-                #$SAN =~ s/, /\n\t\\_ /g;
                 $SAN =~ s/, /\n/g;
                 my @SANS = split( /\s+/, $SAN );
                 foreach $SAN (@SANS) {
                     chomp($SAN);
                     print expand( CYAN "\t \\_ " . CYAN $SAN . "\n" );
                     checkCAA($SAN);
+                    $SSLHostMismatch = SSLHostMismatch_check($SAN) unless($SSLHostMismatch == 1);
                 }
             }
+        }
+        if ($SSLHostMismatch == 0) {
+            print expand( BOLD RED "\t \\_ SSL Hostname Mismatch! [ $tcDomain wasn't found in SAN ]\n");
         }
     }
     else {
@@ -4093,22 +4107,84 @@ sub checkCAA {
     return;
 }
 
-sub display_header {
-    my $tcDomain  = shift;
-    my $tcValue   = shift;
-    my $tnTimeout = shift;
+sub SSLHostMismatch_check {
+    my $tcDomain = shift;
+    return 0 if( !-e "$sslsyscertdir/$tcDomain/certificates" );
+    my $SSLMatchesDomain = Cpanel::SafeRun::Timed::timedsaferun( 4, "openssl x509 -in $sslsyscertdir/$tcDomain/certificates -noout -subject | grep $tcDomain" );
+    return 1 if $SSLMatchesDomain;
+    return 0;
+}
 
-#my $result = Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s', '--head', "https://$tcDomain" );
-    my $result =
-      Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s',
-        '--head', "http://$tcDomain" );
-    my @result   = split /\n/, $result;
-    my $lastline = "";
-    foreach my $line (@result) {
+#sub display_header {
+#    my $tcDomain  = shift;
+#    my $tcValue   = shift;
+#    my $tnTimeout = shift;
+#    my $result =
+#      Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s',
+#        '--head', "http://$tcDomain" );
+#    my @result   = split /\n/, $result;
+#    my $lastline = "";
+#    foreach my $line (@result) {
+#        chomp($line);
+#        if ( $line =~ $tcValue ) {
+#            print "\t\\_ " . $line . "\n" unless ( $line eq $lastline );
+#            $lastline = $line;
+#        }
+#    }
+#}
+
+sub display_header {
+    my $tcDomain = shift;
+    get_http_loc( $tcDomain );
+    get_data( $tcDomain, 'Server', 10 );
+    get_data( $tcDomain, 'Powered-By:', 10 );
+    get_data( $tcDomain, 'Redirect-By:', 10 );
+}
+
+sub get_data {
+    my $tcDomain = shift;
+    my $tcValue = shift;
+    my $tnTimeout = shift;
+    my $result = Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s', '--head', "http://$tcDomain" );
+    my @result = split /\n/, $result;
+    my $lastline ="";
+    foreach my $line(@result) {
         chomp($line);
-        if ( $line =~ $tcValue ) {
-            print "\t\\_ " . $line . "\n" unless ( $line eq $lastline );
+        if ( $line =~ $tcValue) {
+            print expand( CYAN "\t\\_ " . $line . "\n" ) unless( $line eq $lastline );
             $lastline = $line;
+        }
+    }
+}
+
+sub get_http_loc {
+    my $tcDomain = shift;
+    my $result = Cpanel::SafeRun::Timed::timedsaferun( 10, 'curl', '-L', '-s', '--head', "http://$tcDomain" );
+    my @result = split /\n/, $result;
+    my $lastline ="";
+    my $result2;
+    foreach my $line(@result) {
+        chomp($line);
+        if ( $line =~ m/301|302/ ) { 
+            print expand( YELLOW "\t\\_ $line\n" ) if( $line =~ m/HTTP/ );
+        }
+        elsif ( $line =~ m/200/ ) { 
+            print expand( GREEN "\t\\_ $line\n" ) if( $line =~ m/HTTP/ );
+        }
+        elsif ( $line =~ m/400|401|403|404|405|406|408|500|502|503|504|520|521|522|523|524|525|526/ ) { 
+            print expand( RED "\t\\_ $line\n" ) if( $line =~ m/HTTP/ );
+        }
+        else {
+            print expand( MAGENTA "\t\\_ $line\n" ) if( $line =~ m/HTTP/ );
+        }
+        while( $line =~ m/301|302/ ) {
+            $result2 = qx[ curl -sL --head "http://$tcDomain" | grep -i 'Location:' ];
+            my @result2 = split /\n/, $result2;
+            foreach my $line2(@result2) {
+                chomp($line2);
+                print expand( CYAN "\t\t\\_ $line2\n" );
+            }
+            last;
         }
     }
 }
@@ -4142,8 +4218,9 @@ sub nginx_caching {
 }
 
 sub getProfileNode {
+    # Note that if the license is invalid (activated too many times, expired, etc...) this will fail. 
     my $ProfileNodeJSON = get_whmapi1('get_current_profile');
-    my $ProfileNode     = $ProfileNodeJSON->{data}->{code};
+    $ProfileNode     = $ProfileNodeJSON->{data}->{code};
     if ( $ProfileNode ne "STANDARD" ) {
         print RED "This server is not running on a standard node " . CYAN "[ " . WHITE $ProfileNode . CYAN " ]\n";
         print YELLOW "Please run acctinfo only on a Standard Node!\n";
