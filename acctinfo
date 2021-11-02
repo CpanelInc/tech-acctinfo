@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.29";
+my $VERSION = "2.5.30";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -286,7 +286,6 @@ my @users_domains = (
     $user_conf->{'DOMAINS'} ? @{ $user_conf->{'DOMAINS'} } : ()
 );
 
-#push @OtherDomains, "MAIN: " . $MAINDOMAIN;
 push @OtherDomains, $MAINDOMAIN;
 
 my $DomainInfoJSON = get_whmapi1('get_domain_info');
@@ -295,7 +294,6 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
     if ( $DomainInfoLines->{user} eq $username ) {
         if ( $DomainInfoLines->{domain_type} eq "sub" ) {
 
-            #push( @OtherDomains, "SUB: " . $DomainInfoLines->{domain} );
             push( @OtherDomains, $DomainInfoLines->{domain} );
             push( @SUBDOMAINS,   $DomainInfoLines->{domain} );
             $IS_SUB = expand(
@@ -310,7 +308,6 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
         }
         if ( $DomainInfoLines->{domain_type} eq "addon" ) {
 
-            #push( @OtherDomains, "ADDON: " . $DomainInfoLines->{domain} );
             push( @OtherDomains, $DomainInfoLines->{domain} );
             push( @ADDONDOMAINS,
                     $DomainInfoLines->{domain}
@@ -331,7 +328,6 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
         }
         if ( $DomainInfoLines->{domain_type} eq "parked" ) {
 
-         #push( @OtherDomains, "PARKED/ALISED: " . $DomainInfoLines->{domain} );
             push( @OtherDomains,  $DomainInfoLines->{domain} );
             push( @PARKEDDOMAINS, $DomainInfoLines->{domain} );
             $IS_PARKED = expand(
@@ -366,18 +362,18 @@ if ($cruft) {
 my $PACKAGE = $DataJSON->{data}->{acct}->[0]->{plan};
 my $THEME   = $DataJSON->{data}->{acct}->[0]->{theme};
 
-my $IPADDR        = $user_conf->{'IP'};
+my $IPADDR          = $user_conf->{'IP'};
 my $CHILD_WORKLOADS = $user_conf->{'CHILD_WORKLOADS'};
-my $BACKUPENABLED = $DataJSON->{data}->{acct}->[0]->{backup};
-my $MAXADDON      = $DataJSON->{data}->{acct}->[0]->{maxaddons};
-my $MAXPARK       = $DataJSON->{data}->{acct}->[0]->{maxparked};
-my $MAXSUB        = $DataJSON->{data}->{acct}->[0]->{maxsub};
-my $MAXFTP        = $DataJSON->{data}->{acct}->[0]->{maxftp};
-my $MAXSQL        = $DataJSON->{data}->{acct}->[0]->{maxsql};
-my $MAXLST        = $DataJSON->{data}->{acct}->[0]->{maxlst};
-my $SUSPEND_TIME  = $DataJSON->{data}->{acct}->[0]->{suspendtime};
-my $FEATURELIST   = $user_conf->{'FEATURELIST'};
-my $STARTDATE     = $DataJSON->{data}->{acct}->[0]->{startdate};
+my $BACKUPENABLED   = $DataJSON->{data}->{acct}->[0]->{backup};
+my $MAXADDON        = $DataJSON->{data}->{acct}->[0]->{maxaddons};
+my $MAXPARK         = $DataJSON->{data}->{acct}->[0]->{maxparked};
+my $MAXSUB          = $DataJSON->{data}->{acct}->[0]->{maxsub};
+my $MAXFTP          = $DataJSON->{data}->{acct}->[0]->{maxftp};
+my $MAXSQL          = $DataJSON->{data}->{acct}->[0]->{maxsql};
+my $MAXLST          = $DataJSON->{data}->{acct}->[0]->{maxlst};
+my $SUSPEND_TIME    = $DataJSON->{data}->{acct}->[0]->{suspendtime};
+my $FEATURELIST     = $user_conf->{'FEATURELIST'};
+my $STARTDATE       = $DataJSON->{data}->{acct}->[0]->{startdate};
 my @ResolvedIP;
 my $ResolvedIP;
 
@@ -522,14 +518,21 @@ else {
 }
 
 if ( $CHILD_WORKLOADS ne "" ) {
-    print "$username is a child node on this server. Please run acctinfo on the parent server\n";
+    print
+"$username is a child node on this server. Please run acctinfo on the parent server\n";
     exit;
 }
-my $user_child_nodesJSON = get_whmapi1( 'list_user_child_nodes' );
+my $user_child_nodesJSON = get_whmapi1('list_user_child_nodes');
 my $linked_nodes;
 for my $child_nodes ( @{ $user_child_nodesJSON->{data}->{payload} } ) {
     if ( $child_nodes->{user} eq $username ) {
-        $linked_nodes = YELLOW "The " . CYAN $child_nodes->{user} . YELLOW " account is linked to the: " . CYAN $child_nodes->{alias} . YELLOW " server for type: " . CYAN $child_nodes->{type};
+        $linked_nodes =
+            YELLOW "The "
+          . CYAN $child_nodes->{user}
+          . YELLOW " account is linked to the: "
+          . CYAN $child_nodes->{alias}
+          . YELLOW " server for type: "
+          . CYAN $child_nodes->{type};
     }
 }
 
@@ -703,13 +706,13 @@ if ( $quotaused > $maxquota ) {
 }
 print "\n";
 
-my $skip_bwcheck=0;
+my $skip_bwcheck = 0;
 if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
     print YELLOW
 "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
-	$skip_bwcheck=1;
+    $skip_bwcheck = 1;
 }
-if ( $skip_bwcheck==0 ) {
+if ( $skip_bwcheck == 0 ) {
     my $bwdataJSON = get_uapi(
         'StatsBar',               'get_stats',
         'display=bandwidthusage', "--user=$username"
@@ -788,11 +791,25 @@ if ( -e "$RealHome/.jbm" ) {
     my $JB5Version;
     my $JBVersion;
     if ( -x $jb4Path ) {
-       my ($jb4_1,$jb4_2,$jb4_3) = ( split( /\s+/, Cpanel::SafeRun::Timed::timedsaferun( 4, "$jb4Path", '--version', "| head -1" ) ) )[1,2,3];
+        my ( $jb4_1, $jb4_2, $jb4_3 ) = (
+            split(
+                /\s+/,
+                Cpanel::SafeRun::Timed::timedsaferun(
+                    4, "$jb4Path", '--version', "| head -1"
+                )
+            )
+        )[ 1, 2, 3 ];
         $JB4Version = $jb4_1 . " " . $jb4_2 . " " . $jb4_3;
     }
     if ( -x $jb5Path ) {
-        my ($jb5_1,$jb5_2,$jb5_3,$jb5_4) = ( split( /\s+/, Cpanel::SafeRun::Timed::timedsaferun( 4, "$jb5Path", '--version' ) ) )[7,8,9,10];
+        my ( $jb5_1, $jb5_2, $jb5_3, $jb5_4 ) = (
+            split(
+                /\s+/,
+                Cpanel::SafeRun::Timed::timedsaferun(
+                    4, "$jb5Path", '--version'
+                )
+            )
+        )[ 7, 8, 9, 10 ];
         $JB5Version = $jb5_1 . " " . $jb5_2 . " " . $jb5_3 . " " . $jb5_4;
     }
     chomp($JB4Version);
@@ -800,8 +817,8 @@ if ( -e "$RealHome/.jbm" ) {
     if ( $JB4Version && $JB5Version ) {
         $JBVersion = $JB4Version . " / " . $JB5Version;
     }
-    $JBVersion = ( $JB4Version ) ? $JB4Version : "" unless( $JBVersion );
-    $JBVersion = ( $JB5Version ) ? $JB5Version : "" unless( $JBVersion );
+    $JBVersion = ($JB4Version) ? $JB4Version : "" unless ($JBVersion);
+    $JBVersion = ($JB5Version) ? $JB5Version : "" unless ($JBVersion);
     print " (" . BOLD GREEN "JetBackup Manager " . $JBVersion . " detected)";
 }
 print "\n";
@@ -883,22 +900,19 @@ print "EA4 PHP Version: " . CYAN $PHPversion;
 print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless ( !$clPHPVer );
 print MAGENTA $HasPrecedence . "\n";
 if ( !$skipEA4 ) {
-    # TECH-1289 - ZeroCool is getting rid of the scl command
-    if (
-        #$PHPversion eq "inherit" && ( -e ("/etc/scl/conf/$PHPDefaultVersion") || ( -e ("/etc/scl/prefixes/$PHPDefaultVersion") ) )
-        $PHPversion eq "inherit" 
-      )
-    {
-        #$PHPiniFile = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Configuration File"' );
-        #$PHPiniLoad = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Loaded Configuration File"' );
-        #$PHPiniScan = timed_run( 5, '/usr/bin/scl', 'enable', "$PHPDefaultVersion", 'php -i|grep "^Scan this dir"' );
-        $PHPiniFile = timed_run( 5, "$PHPDefaultVersion -i|grep '^Configuration File'" );
-        $PHPiniLoad = timed_run( 5, "$PHPDefaultVersion -i|grep '^Loaded Configuration File'" );
-        $PHPiniScan = timed_run( 5, "$PHPDefaultVersion -i|grep '^Scan this dir'" );
+    if ( $PHPversion eq "inherit" ) {
+        $PHPiniFile =
+          timed_run( 5, "$PHPDefaultVersion -i|grep '^Configuration File'" );
+        $PHPiniLoad = timed_run( 5,
+            "$PHPDefaultVersion -i|grep '^Loaded Configuration File'" );
+        $PHPiniScan =
+          timed_run( 5, "$PHPDefaultVersion -i|grep '^Scan this dir'" );
     }
     else {
-        $PHPiniFile = timed_run( 5, "$PHPversion -i|grep '^Configuration File'" );
-        $PHPiniLoad = timed_run( 5, "$PHPversion -i|grep '^Loaded Configuration File'" );
+        $PHPiniFile =
+          timed_run( 5, "$PHPversion -i|grep '^Configuration File'" );
+        $PHPiniLoad =
+          timed_run( 5, "$PHPversion -i|grep '^Loaded Configuration File'" );
         $PHPiniScan = timed_run( 5, "$PHPversion -i|grep '^Scan this dir'" );
     }
 }
@@ -1603,12 +1617,10 @@ sub smborder {
 }
 
 sub check_cloudflare_ips {
-    my $chkIP = $_[0];
+    my $chkIP = shift;
     chomp($chkIP);
-    my @cf_subnets   = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
-    my $cloudflareIP = 0;
-    my $cf_subnet    = "";
-    foreach $cf_subnet (@cf_subnets) {
+    my @cf_subnets = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
+    foreach my $cf_subnet (@cf_subnets) {
         chomp($cf_subnet);
         my $network = NetAddr::IP->new($cf_subnet);
         my $ip      = NetAddr::IP->new($chkIP);
@@ -1640,49 +1652,36 @@ sub check_for_nat {
 }
 
 sub check_resolved_ip {
-    my $IP2CHK        = $_[0];
-    my $RetVal        = "";
-    my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
-    if ($IS_CLOUDFLARE) {
+    my $resolved_ip      = shift;
+    my $RetVal           = "";
+    my $is_cloudflare_ip = check_cloudflare_ips($resolved_ip);
+    if ($is_cloudflare_ip) {
         $RetVal = $RetVal .= " <<--- CloudFlare IP Address";
         $defaultsite = 1;
         return $RetVal;
     }
-    my $ListIPsJSON     = get_whmapi1('listips');
-    my $IS_IP_ON_SERVER = 0;
+    my $ListIPsJSON  = get_whmapi1('listips');
+    my $ip_on_server = 0;
+    my $isNat        = 0;
     for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-        if ( $ListOfIPs->{public_ip} eq $IP2CHK ) {
-            $IS_IP_ON_SERVER = 1;
+        $ip_on_server = 1 if ( $ListOfIPs->{public_ip} eq $resolved_ip );
+        $isNat        = 1 if ( $ListOfIPs->{public_ip} ne $ListOfIPs->{ip} );
+        if ( !$ip_on_server ) {
+            $RetVal = $RetVal .= "[Not on this server]";
+            $defaultsite = 1;
+            return $RetVal;
         }
-    }
-    if ( !$IS_IP_ON_SERVER ) {
-        $RetVal = $RetVal .= "[Not on this server]";
-        $defaultsite = 1;
-        return $RetVal;
-    }
-
-    if ( -e ("/var/cpanel/cpnat") ) {
-        open( CPNAT, "/var/cpanel/cpnat" );
-        my @CPNAT = <CPNAT>;
-        close(CPNAT);
-        my $cpnatline;
-        my $RetVal;
-        foreach $cpnatline (@CPNAT) {
-            chomp($cpnatline);
-            my ( $private_ip, $public_ip ) = ( split( /\s+/, $cpnatline ) );
-            chomp($public_ip);
-            chomp($private_ip);
-            if ( $IP2CHK eq $public_ip ) {
-                $RetVal = " Routed via 1:1 NAT ($public_ip => $private_ip)"
-                  . GREEN " [SAME]";
-                $defaultsite = 0;
-                return $RetVal;
-            }
+        if ($isNat) {
+            $RetVal =
+" Routed via 1:1 NAT ($ListOfIPs->{public_ip} => $ListOfIPs->{ip})"
+              . GREEN " [SAME]";
+            $defaultsite = 0;
         }
-    }
-    else {
-        $RetVal      = " Direct Route ($IP2CHK => $IP2CHK)" . GREEN " [SAME]";
-        $defaultsite = 0;
+        else {    ## NOT A NAT SYSTEM
+            $RetVal =
+              " Direct Route ($resolved_ip => $resolved_ip)" . GREEN " [SAME]";
+            $defaultsite = 0;
+        }
         return $RetVal;
     }
 }
@@ -2539,19 +2538,64 @@ sub check_for_cagefs() {
 
 sub get_php_version {
     my $tcDomain         = shift;
-    my $searchFor = ( $IS_USERNAME) ? "account" : "vhost";
+    my $searchFor        = ($IS_USERNAME) ? "account" : "vhost";
     my $php_version_data = get_whmapi1('php_get_vhost_versions');
     for my $phpVhosts ( @{ $php_version_data->{data}->{versions} } ) {
-        if (   $phpVhosts->{$searchFor} eq $tcDomain && $phpVhosts->{main_domain} ) {
-            if ( defined( $phpVhosts->{phpversion_source}->{system_default} ) ) {
-                return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0, "", "", "", "inherit";
-            }
-            else {
-                if ( $phpVhosts->{php_fpm} ) {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 1, $phpVhosts->{php_fpm_pool_parms}->{pm_max_children}, $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests}, $phpVhosts->{php_fpm_pool_parms}->{pm_process_idle_timeout}, $phpVhosts->{version};
+        if ( $searchFor eq 'account' ) {    ## We only want the main domain
+            if (   $phpVhosts->{$searchFor} eq $tcDomain
+                && $phpVhosts->{main_domain} )
+            {
+                if (
+                    defined(
+                        $phpVhosts->{phpversion_source}->{system_default}
+                    )
+                  )
+                {
+                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0,
+                      "", "", "", "inherit";
                 }
                 else {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 0, "", "", "", $phpVhosts->{version};
+                    if ( $phpVhosts->{php_fpm} ) {
+                        return $phpVhosts->{documentroot},
+                          $phpVhosts->{phpversion_source}->{domain}, 1,
+                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_children},
+                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests},
+                          $phpVhosts->{php_fpm_pool_parms}
+                          ->{pm_process_idle_timeout}, $phpVhosts->{version};
+                    }
+                    else {
+                        return $phpVhosts->{documentroot},
+                          $phpVhosts->{phpversion_source}->{domain}, 0, "", "",
+                          "", $phpVhosts->{version};
+                    }
+                }
+            }
+        }
+        else {    ## We are looking for specific vhost
+            if ( $phpVhosts->{$searchFor} eq $tcDomain ) {
+                if (
+                    defined(
+                        $phpVhosts->{phpversion_source}->{system_default}
+                    )
+                  )
+                {
+                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0,
+                      "", "", "", "inherit";
+                }
+                else {
+                    if ( $phpVhosts->{php_fpm} ) {
+                        return $phpVhosts->{documentroot},
+                          $phpVhosts->{phpversion_source}->{domain}, 1,
+                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_children},
+                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests},
+                          $phpVhosts->{php_fpm_pool_parms}
+                          ->{pm_process_idle_timeout}, $phpVhosts->{version};
+                    }
+                    else {
+                        return $phpVhosts->{documentroot},
+                          $phpVhosts->{phpversion_source}->{domain}, 0, "", "",
+                          "", $phpVhosts->{version};
+                    }
                 }
             }
         }
@@ -2607,49 +2651,48 @@ sub display_mail_info {
         $DOMAIN = $QUERY;
     }
 
-	my @sortedPops;
-  	my $emailacctline;
-   	my $qused;
-   	my $qlimit;
-   	my $qpercent;
-   	my $localpart;
-   	my $emailPopCnt = 0;
-   	my $emailacctline;
-	my @sortedPops;
-	my $ListPopsJSON;
+    my @sortedPops;
+    my $emailacctline;
+    my $qused;
+    my $qlimit;
+    my $qpercent;
+    my $localpart;
+    my $emailPopCnt = 0;
+    my $emailacctline;
+    my @sortedPops;
+    my $ListPopsJSON;
 
-	$ListPopsJSON = get_uapi(
-   		'Email',            'list_pops_with_disk',
-   		"--user=$username", "domain=$DOMAIN"
-   	);
+    $ListPopsJSON = get_uapi(
+        'Email',            'list_pops_with_disk',
+        "--user=$username", "domain=$DOMAIN"
+    );
 
-   	# Check for suspended/held outgoing email
-   	chk_mail_suspend( $username, 0 );
-   	chk_mail_hold( $username, 0 );
+    # Check for suspended/held outgoing email
+    chk_mail_suspend( $username, 0 );
+    chk_mail_hold( $username, 0 );
 
-   	smborder();
+    smborder();
 
-   	my @listPops;
-	
-	for my $EmailPop ( @{ $ListPopsJSON->{result}->{data} } ) {
-   		$emailacctline = $EmailPop->{email};
-   		$qused =
-      		( $EmailPop->{humandiskused} eq 'None' )
-       		? $EmailPop->{diskused}
-       		: $EmailPop->{humandiskused};
-   		$qlimit =
-      		( $EmailPop->{humandiskquota} eq 'None' )
-      		? "Unlimited/None"
-       		: $EmailPop->{humandiskquota};
-   		$qpercent  = $EmailPop->{diskusedpercent};
-      		$localpart = $EmailPop->{user};
-       		push( @listPops,
-           		"$emailacctline||$qused||$qlimit||$qpercent||$localpart\n" );
-	}
+    my @listPops;
 
-   	@sortedPops = sort(@listPops);
-   	$emailPopCnt = @sortedPops;
-   	print "$DOMAIN has $emailPopCnt Email accounts: \n";
+    for my $EmailPop ( @{ $ListPopsJSON->{result}->{data} } ) {
+        $emailacctline = $EmailPop->{email};
+        $qused =
+          ( $EmailPop->{humandiskused} eq 'None' )
+          ? $EmailPop->{diskused}
+          : $EmailPop->{humandiskused};
+        $qlimit =
+          ( $EmailPop->{humandiskquota} eq 'None' )
+          ? "Unlimited/None"
+          : $EmailPop->{humandiskquota};
+        $qpercent  = $EmailPop->{diskusedpercent};
+        $localpart = $EmailPop->{user};
+        push( @listPops,
+            "$emailacctline||$qused||$qlimit||$qpercent||$localpart\n" );
+    }
+
+    @sortedPops  = sort(@listPops);
+    $emailPopCnt = @sortedPops;
 
     if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
 
@@ -2684,6 +2727,18 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
         }
     }
 
+    # Check for /etc/manualmx file
+    if ( -s '/etc/manualmx' ) {
+        my $manual_mx_entry =
+          Cpanel::SafeRun::Timed::timedsaferun( 5, 'egrep', "^$DOMAIN",
+            '/etc/manualmx' );
+        print expand( YELLOW "[INFO] - "
+              . $DOMAIN
+              . BOLD CYAN " has an entry in /etc/manualmx."
+              . YELLOW "\n\t\\_ $manual_mx_entry\n" )
+          unless ( !$manual_mx_entry );
+    }
+
     # Check for the domain being in /etc/vdomainaliases/ directory.
     if ( -s ("/etc/vdomainaliases/$DOMAIN") ) {
         print YELLOW "[INFO] - "
@@ -2693,78 +2748,89 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
           "\n\t\\_ Existing accounts/autoresponders will NOT forward!\n";
     }
 
-   	foreach my $EmailPop (@sortedPops) {
-       	chomp($EmailPop);
-       	( $emailacctline, $qused, $qlimit, $qpercent, $localpart ) =
-         	( split( /\|\|/, $EmailPop ) );
-       	print expand( CYAN $emailacctline . "\n" );
-       	print expand( "\t\\_ [Quota Used "
-             	. $qused
-             	. " MB of "
-             	. $qlimit . " ("
-             	. $qpercent
-             	. "%)]\n" );
-	}
-    if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
-
-        # Check for .boxtrapperenable touch file - enabled if it exists.
-        if ( -e ("$RealHome/etc/$DOMAIN/$localpart/.boxtrapperenable") ) {
-            print expand( YELLOW "\t \\_ Spam Boxtrapper Enabled\n" );
-        }
-
-        # Check for default webmail app
-        my $DefWebMailApp;
-        if ( -e ( "$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app")) {
-            $DefWebMailApp =
-qx[ cat "$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app" ];
-            $DefWebMailApp = ucfirst($DefWebMailApp);
-            print expand(
-                YELLOW "\t \\_ Default Webmail Client: $DefWebMailApp\n" );
-        }
-
-        # Check for mailbox_format.cpanel file. Display contents if it exists
-        if ( -e ("$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel") ) {
-            my $mbformat =
-qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
-            chomp($mbformat);
-            print expand(
-                YELLOW "\t \\_ Account is using the $mbformat format.\n" );
-        }
-
-        # check for mail hold/suspended
-        chk_mail_suspend( "$emailacctline", 1 );
-        chk_mail_hold( "$emailacctline", 1 );
+    print "$DOMAIN has $emailPopCnt Email accounts: \n\n";
+    foreach my $EmailPop (@sortedPops) {
+        chomp($EmailPop);
+        ( $emailacctline, $qused, $qlimit, $qpercent, $localpart ) =
+          ( split( /\|\|/, $EmailPop ) );
+        print expand( CYAN $emailacctline . "\n" );
+        print expand( "\t\\_ [Quota Used "
+              . $qused
+              . " MB of "
+              . $qlimit . " ("
+              . $qpercent
+              . "%)]\n" );
 
         if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
 
-            # Check rcube.db for corruption
-            if ( -e ("$RealHome/etc/$DOMAIN/$localpart.rcube.db") ) {
-                my $rcubechk =
-                  SQLiteDBChk("$RealHome/etc/$DOMAIN/$localpart.rcube.db");
-                print expand( RED
-"\t \\_ $RealHome/etc/$DOMAIN/$localpart.rcube.db might be corrupted.\n"
-                ) unless ( $rcubechk =~ m/ok/ );
+            # Check for .boxtrapperenable touch file - enabled if it exists.
+            if ( -e ("$RealHome/etc/$DOMAIN/$localpart/.boxtrapperenable") ) {
+                print expand( YELLOW "\t \\_ Spam Boxtrapper Enabled\n" );
             }
 
-            # Check for dovecot-acl file
-            my $dovecotACL =
-              timed_run( 4, 'find', "$RealHome/mail/$DOMAIN/$localpart",
-                '-name', 'dovecot-acl' );
-            chomp($dovecotACL);
-            if ($dovecotACL) {
-                print expand( RED
-"\t \\_ [WARN] - Found $dovecotACL - can cause odd permission issues.\n"
-                ) unless ( !-s $dovecotACL );
-            }
-
-            # Check for dovecot-uidlist.lock file
+            # Check for default webmail app
+            my $DefWebMailApp;
             if (
-                -e ("$RealHome/mail/$DOMAIN/$emailacctline/dovecot-uidlist.lock"
-                ) )
+                -e (
+"$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app"
+                )
+              )
             {
-                print expand( RED
+                $DefWebMailApp =
+qx[ cat "$RealHome/.cpanel/nvdata/$emailacctline\_default_webmail_app" ];
+                $DefWebMailApp = ucfirst($DefWebMailApp);
+                print expand(
+                    YELLOW "\t \\_ Default Webmail Client: $DefWebMailApp\n" );
+            }
+
+           # Check for mailbox_format.cpanel file. Display contents if it exists
+            if (
+                -e ("$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel") )
+            {
+                my $mbformat =
+qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
+                chomp($mbformat);
+                print expand(
+                    YELLOW "\t \\_ Account is using the $mbformat format.\n" );
+            }
+
+            # check for mail hold/suspended
+            chk_mail_suspend( "$emailacctline", 1 );
+            chk_mail_hold( "$emailacctline", 1 );
+
+            if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
+
+                # Check rcube.db for corruption
+                if ( -e ("$RealHome/etc/$DOMAIN/$localpart.rcube.db") ) {
+                    my $rcubechk =
+                      SQLiteDBChk("$RealHome/etc/$DOMAIN/$localpart.rcube.db");
+                    print expand( RED
+"\t \\_ $RealHome/etc/$DOMAIN/$localpart.rcube.db might be corrupted.\n"
+                    ) unless ( $rcubechk =~ m/ok/ );
+                }
+
+                # Check for dovecot-acl file
+                my $dovecotACL =
+                  timed_run( 4, 'find', "$RealHome/mail/$DOMAIN/$localpart",
+                    '-name', 'dovecot-acl' );
+                chomp($dovecotACL);
+                if ($dovecotACL) {
+                    print expand( RED
+"\t \\_ [WARN] - Found $dovecotACL - can cause odd permission issues.\n"
+                    ) unless ( !-s $dovecotACL );
+                }
+
+                # Check for dovecot-uidlist.lock file
+                if (
+                    -e (
+"$RealHome/mail/$DOMAIN/$emailacctline/dovecot-uidlist.lock"
+                    )
+                  )
+                {
+                    print expand( RED
 "\t \\_ [WARN] - Found dovecot-uidlist.lock file in $RealHome/mail/$DOMAIN/$emailacctline/ \n\t\tWebmail acting strangely? - remove it and see if resolved.\n"
-                );
+                    );
+                }
             }
         }
 
@@ -2794,15 +2860,15 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
             'Email',            'list_filters',
             "--user=$username", "account=$localpart%40$DOMAIN"
         );
-       	my $ShowHeader = 0;
-       	for my $UserFilter ( @{ $UserFilterJSON->{result}->{data} } ) {
-           	print expand(
-               	YELLOW "\t \\_ has the following user level filters\n" )
-             	unless ($ShowHeader);
-           	$ShowHeader = 1;
-           	print expand( WHITE "\t\t \\_ $UserFilter->{filtername}\n" );
-       	}
-	}
+        my $ShowHeader = 0;
+        for my $UserFilter ( @{ $UserFilterJSON->{result}->{data} } ) {
+            print expand(
+                YELLOW "\t \\_ has the following user level filters\n" )
+              unless ($ShowHeader);
+            $ShowHeader = 1;
+            print expand( WHITE "\t\t \\_ $UserFilter->{filtername}\n" );
+        }
+    }
 
     # Check for missing passwd and/or shadow files
     if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
@@ -3535,20 +3601,48 @@ sub dispSSLdata {
               . $expiredate . " "
               . $isExpired
               . "\n" );
-        my ($SSLSubject) = (split(/\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-subject', '-noout' )))[1];
-        my ($SSLIssuer) = (split(/\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout' )))[1];
+        my ($SSLSubject) = (
+            split(
+                /\= /,
+                timed_run(
+                    4, 'openssl', 'x509', '-in',
+                    "$sslsyscertdir/$tcDomain/certificates",
+                    '-subject', '-noout'
+                )
+            )
+        )[1];
+        my ($SSLIssuer) = (
+            split(
+                /\= /,
+                timed_run(
+                    4, 'openssl', 'x509', '-in',
+                    "$sslsyscertdir/$tcDomain/certificates",
+                    '-issuer', '-noout'
+                )
+            )
+        )[1];
         chomp($SSLSubject);
         chomp($SSLIssuer);
-        my $isSelfSigned = ($SSLSubject eq $SSLIssuer) ? 1 : 0;
+        my $isSelfSigned = ( $SSLSubject eq $SSLIssuer ) ? 1 : 0;
+
         if ( $isSelfSigned == 1 ) {
             print expand(
                 RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate!\n" );
         }
         else {
-            # Get Issuer and display it.
-            #my $SSLIssuer = qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
-            my ($SSLIssuer) = (split(/\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout' )))[1];
-			my ( $SSLIssuer ) = ( split( /CN=/, $SSLIssuer ) )[1];
+# Get Issuer and display it.
+#my $SSLIssuer = qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
+            my ($SSLIssuer) = (
+                split(
+                    /\= /,
+                    timed_run(
+                        4, 'openssl', 'x509', '-in',
+                        "$sslsyscertdir/$tcDomain/certificates",
+                        '-issuer', '-noout'
+                    )
+                )
+            )[1];
+            my ($SSLIssuer) = ( split( /CN=/, $SSLIssuer ) )[1];
             chomp($SSLIssuer);
             print expand(
                 GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
@@ -3799,14 +3893,14 @@ sub getPerms {
 }
 
 sub chk_mail_suspend {
-    my $tcAccount = $_[0];
-    my $llTab     = $_[1];
+    my $tcAccount = shift;
+    my $llTab     = shift;
     my $SMTPUserSusp =
       qx[ grep '^$tcAccount' /etc/outgoing_mail_suspended_users ];
     if ($SMTPUserSusp) {
         if ($llTab) {
             print expand(
-                RED "\t\t \\_ $tcAccount is suspended from sending email\n" );
+                RED "\t \\_ $tcAccount is suspended from sending email\n" );
         }
         else {
             print RED
@@ -3822,7 +3916,7 @@ sub chk_mail_hold {
     if ($SMTPUserHold) {
         if ($llTab) {
             print expand(
-                RED "\t\t \\_ $tcAccount is on hold from sending email\n" );
+                RED "\t \\_ $tcAccount is on hold from sending email\n" );
         }
         else {
             print RED "$tcAccount is on hold from sending email\n";
