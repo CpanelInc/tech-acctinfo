@@ -1,5 +1,5 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2014 - 2021, cPanel, L.L.C.
+# Copyright 2014 - 2022, cPanel, L.L.C.
 # All rights reserved.
 # http://cpanel.net
 #
@@ -36,10 +36,11 @@
 
 use strict;
 
-my $VERSION = "2.5.31";
+my $VERSION = "2.5.32";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
+use Cpanel::FindBin        	    ();
 use Cpanel::Sys::Hostname           ();
 use Cpanel::Config::LoadCpUserFile  ();
 use Cpanel::Config::LoadUserOwners  ();
@@ -735,8 +736,9 @@ if ( -e ("$custom_style_path") ) {
     $custom_style       = $custom_style_array[-1];
 }
 
+my $undefined_package = ( $PACKAGE eq "undefined" ) ? RED " [WARNING: PACKAGE SHOULD NEVER BE UNDEFINED]" : "";
 print WHITE "Hosting Package: "
-  . CYAN $PACKAGE
+  . CYAN $PACKAGE . $undefined_package
   . WHITE " ("
   . "Feature List: "
   . GREEN $FEATURELIST
@@ -1295,7 +1297,7 @@ if ( $resellerperms or $all ) {
     my $DefaultPerm  = "";
     my $defaultRPerm = "";
     my @defaultperms =
-      qw( acct-summary basic-system-info basic-whm-functions cors-proxy-get cpanel-api cpanel-integration create-user-session digest-auth generate-email-config list-pkgs manage-api-tokens manage-dns-records manage-oidc manage-styles mysql-info ns-config public-contact ssl-info track-email );
+      qw( acct-summary basic-system-info basic-whm-functions cors-proxy-get cpanel-api cpanel-integration create-user-session digest-auth generate-email-config list-pkgs manage-api-tokens manage-dns-records manage-oidc manage-styles mysql-info ns-config public-contact ssl-info track-email connected-applications );
     if ($Is_Reseller) {
         open( RESELLERS, "/var/cpanel/resellers" );
         my @RESELLERS = <RESELLERS>;
@@ -1316,7 +1318,7 @@ if ( $resellerperms or $all ) {
                     foreach $defaultRPerm (@defaultperms) {
                         chomp($defaultRPerm);
                         if ( $rperm =~ $defaultRPerm ) {
-                            $DefaultPerm = BLUE ON_BLACK "[DEFAULT]";
+                            $DefaultPerm = BLUE ON_BLACK " - Initial [DEFAULT]";
                             last;
                         }
                         else {
@@ -1326,11 +1328,18 @@ if ( $resellerperms or $all ) {
                     print expand(
                         BOLD YELLOW ON_BLACK "\t \\_ $rperm " . $DefaultPerm );
                     if ( $rperm eq "all" ) {
-                        print RED "[WARN] - HAS ROOT PRIVILEGES!!!\n";
+                        print RED "[DANGER] - HAS ROOT PRIVILEGES!!!";
                     }
-                    else {
-                        print "\n";
+                    if ( $rperm =~ m/(edit-account|limit-bandwidth|quota|demo-setup|rearrange-accts|clustering|locale-edit)$/ ) {
+                        print MAGENTA "[WARNING] - SUPER PRIVILEGE! (can bypass certain limits)";
                     }
+                    if ( $rperm =~ m/(list-accts|show-bandwidth|create-acct|kill-acct|suspend-acct|upgrade-acct|ssl|ssl-buy|ssl-gencrt|edit-mx|passwd|file-restore|create-dns|kill-dns|park-dns|edit-dns|add-pkg|edit-pkg|thirdparty|mailcheck|news|assign-root-account-enhancements)$/ ) {
+                        print GREEN " - Standard Privilege";
+                    }
+                    if ( $rperm =~ m/(status|stats|restart|resftp)$/ ) {
+                        print CYAN " - Global Privilege";
+                    }
+                    print "\n";
                 }
             }
         }
@@ -2099,6 +2108,12 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/overquota/$username", $dirstatus );
 
+	# Check /var/cpanel/authn/api_tokens_v2/whostmgr/$username.json
+	my $dirstatus = check_dir("/var/cpanel/authn/api_tokens_v2/whostmgr/$username.json");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/var/cpanel/authn/api_tokens_v2/whostmgr/$username.json", $dirstatus );
+
         # Check /var/cpanel/mainips/$username
         my $dirstatus = check_dir("/var/cpanel/mainips/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -2272,6 +2287,11 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/vdomainaliases/$QUERY", $dirstatus );
+
+        my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$QUERY");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/var/cpanel/ssl/apache_tls/$QUERY", $dirstatus );
 
         my $dirstatus = check_dir("/var/named/$QUERY.db");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -2736,7 +2756,7 @@ sub display_mail_info {
           ( $EmailPop->{humandiskquota} eq 'None' )
           ? "Unlimited/None"
           : $EmailPop->{humandiskquota};
-        $qpercent  = $EmailPop->{diskusedpercent};
+        $qpercent  = $EmailPop->{diskusedpercent20};
         $localpart = $EmailPop->{user};
         push( @listPops,
             "$emailacctline||$qused||$qlimit||$qpercent||$localpart\n" );
@@ -2804,13 +2824,15 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
         chomp($EmailPop);
         ( $emailacctline, $qused, $qlimit, $qpercent, $localpart ) =
           ( split( /\|\|/, $EmailPop ) );
+	my $over_quota_warn = "";
+	$over_quota_warn = RED "[ OVER QUOTA ]" unless( $qpercent < 100 );
         print expand( CYAN $emailacctline . "\n" );
         print expand( "\t\\_ [Quota Used "
               . $qused
               . " MB of "
               . $qlimit . " ("
               . $qpercent
-              . "%)]\n" );
+              . "%)] $over_quota_warn\n" );
 
         if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
 
@@ -3896,7 +3918,17 @@ sub checkperms2 {
         else {
             getPerms( "$RealHome/mail", "0751", "$username", "$username" );
         }
-    }
+		my $which_getfacl = Cpanel::FindBin::findbin('getfacl');
+		if ( $which_getfacl ) {
+			my $has_acl;
+			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', '/tmp' );
+			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R /tmp | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username" );
+			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username/public_html" );
+			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username/public_html | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+    	}
+	}
 }
 
 sub getPerms {
