@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.32";
+my $VERSION = "2.5.33";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -165,7 +165,8 @@ if ($helpME) {
 getProfileNode();
 
 my $conf        = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
-my $HOMEDIR     = $conf->{'HOMEDIR'};
+#my $HOMEDIR     = $conf->{'HOMEDIR'};
+my $HOMEDIR;
 my $HOMEMATCH   = $conf->{'HOMEMATCH'};
 my $SERVER_IP   = $conf->{'ADDR'};
 my $NS1         = $conf->{'NS'};
@@ -221,6 +222,7 @@ if ( $IS_USERNAME && !$systemUser ) {
 else {
     $username   = $DataJSON->{data}->{acct}->[0]->{user};
     $MAINDOMAIN = $DataJSON->{data}->{acct}->[0]->{domain};
+    $HOMEDIR = "/" . $DataJSON->{data}->{acct}->[0]->{partition};
     my $quotaused = $DataJSON->{data}->{acct}->[0]->{diskused};
     my $maxquota  = $DataJSON->{data}->{acct}->[0]->{disklimit};
 }
@@ -558,14 +560,6 @@ if ( $PWHash eq "" ) {
     print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
 }
 
-my $LastLoginIPdata = get_uapi( 'LastLogin', 'get_last_or_current_logged_in_ip',
-    "--user=$username" );
-my $LastLoginIP = $LastLoginIPdata->{result}->{data};
-chomp($LastLoginIP);
-if ( $LastLoginIP eq "''" ) {
-    $LastLoginIP = "";
-}
-
 print GREEN ON_BLACK "The main domain is "
   . YELLOW $MAINDOMAIN
   . GREEN ON_BLACK $RO_TEXT . "\n";
@@ -573,6 +567,16 @@ print GREEN ON_BLACK "The main domain is "
 if ( $QUERY eq $HOSTNAME ) {
     print RED
 "[WARN] - $QUERY is the same as hostname $HOSTNAME! (Can cause email issues such as User not found)\n";
+}
+
+my $LastLoginIP;
+if ( -e $RealHome ) {
+    my $LastLoginIPdata = get_uapi( 'LastLogin', 'get_last_or_current_logged_in_ip', "--user=$username" );
+    $LastLoginIP = $LastLoginIPdata->{result}->{data};
+    chomp($LastLoginIP);
+    if ( $LastLoginIP eq "''" ) {
+        $LastLoginIP = "";
+    }
 }
 
 print expand(
@@ -858,10 +862,23 @@ $PHPDefaultVersion = get_system_php_version();
 
 print "Default System PHP Version: " . CYAN $PHPDefaultVersion . "\n";
 my $HasPrecedence = MAGENTA " cPanel EA4 PHP version has precedence";
-my (
-    $docroot,       $phpdomain,     $phpFPMStat, $pmMaxChildren,
-    $pmMaxRequests, $pmProcTimeout, $PHPversion
-) = get_php_version($QUERY);
+my $found=timed_run( 0, 'grep', $QUERY, '/etc/userdomains' );
+my $docroot;
+my $phpdomain;
+my $phpFPMStat;
+my $pmMaxChildren;
+my $pmMaxRequests;
+my $pmProcTimeout;
+my $PHPversion;
+my $result;
+if ( $found ) {
+    ( $docroot, $phpdomain, $phpFPMStat, $pmMaxChildren, $pmMaxRequests, $pmProcTimeout, $PHPversion) = get_php_version($QUERY);
+    $result=$QUERY;
+}
+else {
+    ( $docroot, $phpdomain, $phpFPMStat, $pmMaxChildren, $pmMaxRequests, $pmProcTimeout, $PHPversion) = get_php_version($MAINDOMAIN);
+    $result=$MAINDOMAIN;
+}
 my $PHPiniFile;
 my $PHPiniLoad;
 my $PHPiniScan;
@@ -880,12 +897,8 @@ if ( $PHPversion eq "inherit" ) {
         my $clPHPVer2;
 
         if ( $clPHPVer eq "native" ) {
-            my $clPHPVerLine = timed_run_noerr(
-                4,           '/usr/bin/selectorctl',
-                '--current', '--show-native-version'
-            );
-            ( $clPHPVer1, $clPHPVer2 ) =
-              ( split( /\s+/, $clPHPVerLine ) )[ 0, 1 ];
+            my $clPHPVerLine = timed_run_noerr( 4, '/usr/bin/selectorctl', '--current', '--show-native-version');
+            ( $clPHPVer1, $clPHPVer2 ) = ( split( /\s+/, $clPHPVerLine ) )[ 0, 1 ];
             $clPHPVer = $clPHPVer1 . " " . $clPHPVer2;
         }
         $PHPiniFile = timed_run( 0, 'su', '-s', '/bin/bash', "$username", '-c',
@@ -897,7 +910,7 @@ if ( $PHPversion eq "inherit" ) {
         $skipEA4 = 1;
     }
 }
-print "EA4 PHP Version: " . CYAN $PHPversion;
+print "EA4 PHP Version [ $result ]: " . CYAN $PHPversion;
 
 print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless ( !$clPHPVer );
 print MAGENTA $HasPrecedence . "\n";
@@ -991,7 +1004,7 @@ print "\n";
 
 sub custom_UD {
     if ( -d ("/etc/apache2/conf.d/userdata") ) {
-        my @CONFDATA = qx[ find /etc/apache2/conf.d/userdata -name '*.conf' ];
+        my @CONFDATA = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', '/etc/apache2/conf.d/userdata', '-name', '*.conf' );
         my $confFile;
         my $NoShowHeader = 0;
         foreach $confFile (@CONFDATA) {
@@ -1182,7 +1195,7 @@ if ($IS_USERNAME) {
     $isInNamedConf = 1;
 }
 else {
-    $isInNamedConf = qx[ grep $QUERY /etc/named.conf ];
+    $isInNamedConf = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', "$QUERY", '/etc/named.conf' );
 }
 
 if ( $DNSLinesCnt != $TotalDomainCnt ) {
@@ -1376,6 +1389,9 @@ if ( $listdbs or $all ) {
     }
     else {
         $DBsJSON = get_uapi( 'Mysql', 'list_databases', "--user=$username" );
+        if ( $DBsJSON->{result}->{errors}->[0] ) {
+            print RED "$DBsJSON->{result}->{errors}->[0]\n";
+        }
         for my $UserDBs ( @{ $DBsJSON->{result}->{data} } ) {
             print BOLD GREEN "Database: " . $UserDBs->{database} . "\n";
             $DBCnt++;
@@ -1498,30 +1514,26 @@ if ( $listssls or $all ) {
     }
 
     # Check for purchased SSL's
-    print "Checking for pending SSL Orders (non-autossl): \n";
-    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
-        my ($PendingSSLOrder) = (
-            split(
-                /\s+/,
-qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]
-            )
-        )[3];
-        $PendingSSLOrder =~ s/\"//g;
-        $PendingSSLOrder =~ s/,//g;
-        $PendingSSLOrder =~ s/://g;
-        if ($PendingSSLOrder) {
-            print expand( CYAN "\t \\_ Pending order number: "
-                  . GREEN
-                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
-            );
-        }
-        else {
-            print expand( GREEN "\t \\_ None\n" );
-        }
-    }
-    else {
-        print expand( GREEN "\t \\_ None\n" );
-    }
+#    print "Checking for pending SSL Orders (non-autossl): \n";
+#    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
+#        my ($PendingSSLOrder) = (
+#            split( /\s+/, qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]))[3];
+#        $PendingSSLOrder =~ s/\"//g;
+#        $PendingSSLOrder =~ s/,//g;
+#        $PendingSSLOrder =~ s/://g;
+#        if ($PendingSSLOrder) {
+#            print expand( CYAN "\t \\_ Pending order number: "
+#                  . GREEN
+#                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
+#            );
+#        }
+#        else {
+#            print expand( GREEN "\t \\_ None\n" );
+#        }
+#    }
+#    else {
+#        print expand( GREEN "\t \\_ None\n" );
+#    }
 
     # Check for CAA records here.
     print "Checking for CAA records: \n";
@@ -1628,7 +1640,11 @@ sub smborder {
 sub check_cloudflare_ips {
     my $chkIP = shift;
     chomp($chkIP);
-    my @cf_subnets = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
+    my $url = URI->new( 'https://www.cloudflare.com/ips-v4' );
+    my $ua  = LWP::UserAgent->new( ssl_opts => { verify_hostname => 0 } );
+    my $res = $ua->get($url);
+    my $cf_subnets  = $res->decoded_content;
+    my @cf_subnets  = split /\n/, $cf_subnets;
     foreach my $cf_subnet (@cf_subnets) {
         chomp($cf_subnet);
         my $network = NetAddr::IP->new($cf_subnet);
@@ -1777,7 +1793,6 @@ sub cruft_check {
         if ($debugHookChanged) {
             get_whmapi1( 'set_tweaksetting', 'key=debughooks', 'value=logall' );
         }
-        exit;
     }
 
    # Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
@@ -2027,7 +2042,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
 
         # Check for home directory and others to see if they exist
         my $hmCnt;
-        my $dirstatus = check_dir("/$HOMEDIR/$username");
+        my $dirstatus = check_dir("$HOMEDIR/$username");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "$HOMEDIR/$username", $dirstatus );
@@ -2036,29 +2051,11 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
             my $FoundHere;
             foreach $FoundHere (@FoundHere) {
                 chomp($FoundHere);
-                my $dirstatus = check_dir("/$HOMEDIR/$username/$FoundHere");
+                my $dirstatus = check_dir("$HOMEDIR/$username/$FoundHere");
                 if   ($dirstatus) { $dirstatus = GREEN "EXISTS"; }
                 else              { $dirstatus = RED "MISSING"; }
                 print expand(
                     "\t \\_ " . $FoundHere . " - " . $dirstatus . "\n" );
-            }
-        }
-        if ( $dirstatus =~ m/MISSING/ ) {
-            if ($HOMEMATCH) {
-                print "Checking other possible home directory locations...\n";
-
-                # Now check HOMEMATCH 1 through 9.
-                for ( $hmCnt = 1 ; $hmCnt < 10 ; $hmCnt = $hmCnt + 1 ) {
-
-                    my $dirstatus = check_dir("$HOMEDIR$hmCnt/$username");
-                    if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-                    else              { $dirstatus = RED "[MISSING]"; }
-
-                    print_output( "$HOMEDIR$hmCnt/$username", $dirstatus );
-                    if ( $dirstatus =~ m/EXISTS/ ) {
-                        last;
-                    }
-                }
             }
         }
 
@@ -2406,19 +2403,19 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
     # Check MySQL users table.
     if ( $skipMySQLCruft == 0 ) {
         my $UserDbsJSON =
-          get_cpapi2( 'MysqlFE', 'listdbs', "--user=$username" );
+          get_uapi( 'Mysql', 'list_databases', "--user=$username" );
         print YELLOW "MySQL Databases:\n";
+        if ( $UserDbsJSON->{result}->{errors}->[0] ) {
+            print expand( RED "$UserDbsJSON->{result}->{errors}->[0]\n" );
+        }
         my $DBCnt = 0;
-        for my $UserDb ( @{ $UserDbsJSON->{cpanelresult}->{data} } ) {
+        for my $UserDb ( @{ $UserDbsJSON->{result}->{data} } ) {
             $DBCnt++;
-            print expand( WHITE "\t \\_ " . $UserDb->{db} . "\n" );
+            print expand( WHITE "\t \\_ " . $UserDb->{database} . "\n" );
         }
         if ( $DBCnt == 0 ) {
             print expand( WHITE "\t \\_ None Found\n" );
         }
-    }
-    else {
-        print BOLD CYAN "Skipping MySQL checks - username undetermined!\n";
     }
     print YELLOW "Checking for any MySQL users in mysql.user table\n";
     my $DBusername = timed_run( 3, 'mysql', '-BNe',
@@ -2602,7 +2599,7 @@ sub get_release_version {
 
 sub check_for_cagefs() {
     return unless ( -e ("/usr/sbin/cagefsctl") );
-    my $tcageFSStats = qx[ /usr/sbin/cagefsctl --user-status $username ];
+    my $tcageFSStats = Cpanel::SafeRun::Timed::timedsaferun( 0, '/usr/sbin/cagefsctl', '--user-status', "$username" );
     chomp($tcageFSStats);
     return $tcageFSStats;
 }
@@ -2613,45 +2610,24 @@ sub get_php_version {
     my $php_version_data = get_whmapi1('php_get_vhost_versions');
     for my $phpVhosts ( @{ $php_version_data->{data}->{versions} } ) {
         if ( $searchFor eq 'account' ) {    ## We only want the main domain
-            if (   $phpVhosts->{$searchFor} eq $tcDomain
-                && $phpVhosts->{main_domain} )
-            {
-                if (
-                    defined(
-                        $phpVhosts->{phpversion_source}->{system_default}
-                    )
-                  )
-                {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0,
-                      "", "", "", "inherit";
+            if ( $phpVhosts->{$searchFor} eq $tcDomain && $phpVhosts->{main_domain} ) {
+                if ( defined( $phpVhosts->{phpversion_source}->{system_default})) {
+                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0, "", "", "", "inherit";
                 }
                 else {
                     if ( $phpVhosts->{php_fpm} ) {
-                        return $phpVhosts->{documentroot},
-                          $phpVhosts->{phpversion_source}->{domain}, 1,
-                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_children},
-                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests},
-                          $phpVhosts->{php_fpm_pool_parms}
-                          ->{pm_process_idle_timeout}, $phpVhosts->{version};
+                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 1, $phpVhosts->{php_fpm_pool_parms}->{pm_max_children}, $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests}, $phpVhosts->{php_fpm_pool_parms}->{pm_process_idle_timeout}, $phpVhosts->{version};
                     }
                     else {
-                        return $phpVhosts->{documentroot},
-                          $phpVhosts->{phpversion_source}->{domain}, 0, "", "",
-                          "", $phpVhosts->{version};
+                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 0, "", "", "", $phpVhosts->{version};
                     }
                 }
             }
         }
         else {    ## We are looking for specific vhost
             if ( $phpVhosts->{$searchFor} eq $tcDomain ) {
-                if (
-                    defined(
-                        $phpVhosts->{phpversion_source}->{system_default}
-                    )
-                  )
-                {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0,
-                      "", "", "", "inherit";
+                if ( defined( $phpVhosts->{phpversion_source}->{system_default})) {
+                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0, "", "", "", "inherit";
                 }
                 else {
                     if ( $phpVhosts->{php_fpm} ) {
@@ -2659,13 +2635,10 @@ sub get_php_version {
                           $phpVhosts->{phpversion_source}->{domain}, 1,
                           $phpVhosts->{php_fpm_pool_parms}->{pm_max_children},
                           $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests},
-                          $phpVhosts->{php_fpm_pool_parms}
-                          ->{pm_process_idle_timeout}, $phpVhosts->{version};
+                          $phpVhosts->{php_fpm_pool_parms}->{pm_process_idle_timeout}, $phpVhosts->{version};
                     }
                     else {
-                        return $phpVhosts->{documentroot},
-                          $phpVhosts->{phpversion_source}->{domain}, 0, "", "",
-                          "", $phpVhosts->{version};
+                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 0, "", "", "", $phpVhosts->{version};
                     }
                 }
             }
@@ -3918,17 +3891,17 @@ sub checkperms2 {
         else {
             getPerms( "$RealHome/mail", "0751", "$username", "$username" );
         }
-		my $which_getfacl = Cpanel::FindBin::findbin('getfacl');
-		if ( $which_getfacl ) {
-			my $has_acl;
-			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', '/tmp' );
-			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R /tmp | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
-			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username" );
-			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
-			$has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username/public_html" );
-			print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username/public_html | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
-    	}
-	}
+        my $which_getfacl = Cpanel::FindBin::findbin('getfacl');
+        if ( $which_getfacl ) {
+            my $has_acl;
+            $has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', '/tmp' );
+            print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R /tmp | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+            $has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username" );
+            print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+            $has_acl = Cpanel::SafeRun::Timed::timedsaferun( 4, "$which_getfacl", '-p', '-c', '-R', "$HOMEDIR/$username/public_html" );
+            print expand( RED "\t \\_ [WARN] - Customer ACL set for $username [ getfacl -p -c -R $HOMEDIR/$username/public_html | grep ':$username:' ]\n" ) unless( ! grep { /:$username:/ } $has_acl );
+        }
+    }
 }
 
 sub getPerms {
