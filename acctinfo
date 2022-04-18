@@ -60,6 +60,7 @@ use Cpanel::LoginDefs         ();
 use Cpanel::Config::CpUser    ();
 use Cpanel::PwCache           ();
 use Cpanel::PwCache::Get      ();
+use LWP::UserAgent;
 use File::Basename;
 use Time::Piece;
 use Time::Seconds;
@@ -1640,20 +1641,39 @@ sub smborder {
 sub check_cloudflare_ips {
     my $chkIP = shift;
     chomp($chkIP);
-    my $url = URI->new( 'https://www.cloudflare.com/ips-v4' );
-    my $ua  = LWP::UserAgent->new( ssl_opts => { verify_hostname => 0 } );
-    my $res = $ua->get($url);
-    my $cf_subnets  = $res->decoded_content;
-    my @cf_subnets  = split /\n/, $cf_subnets;
-    foreach my $cf_subnet (@cf_subnets) {
+    my $cloudFlareIP=0;
+    my @cf_subnets   = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
+    #my @cf_subnets   = timed_run( 0, 'curl', '-s', 'https://www.cloudflare.com/ips-v4' );
+    my $cf_subnet    = "";
+    foreach $cf_subnet (@cf_subnets) {
         chomp($cf_subnet);
         my $network = NetAddr::IP->new($cf_subnet);
         my $ip      = NetAddr::IP->new($chkIP);
         if ( $ip->within($network) ) {
-            return 1;
+            $cloudFlareIP=1;
+            last;
         }
     }
+    return $cloudFlareIP;
 }
+
+#sub check_cloudflare_ips {
+#    my $chkIP = shift;
+#    chomp($chkIP);
+#    my $url = URI->new( 'https://www.cloudflare.com/ips-v4' );
+#    my $ua  = LWP::UserAgent->new( ssl_opts => { verify_hostname => 0 } );
+#    my $res = $ua->get($url);
+#    my $cf_subnets  = $res->decoded_content;
+#    my @cf_subnets  = split /\n/, $cf_subnets;
+#    foreach my $cf_subnet (@cf_subnets) {
+#        chomp($cf_subnet);
+#        my $network = NetAddr::IP->new($cf_subnet);
+#        my $ip      = NetAddr::IP->new($chkIP);
+#        if ( $ip->within($network) ) {
+#            return 1;
+#        }
+#    }
+#}
 
 sub check_for_nat {
     return if ( !( -e ("/var/cpanel/cpnat") ) );
