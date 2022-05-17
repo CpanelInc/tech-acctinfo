@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.33";
+my $VERSION = "2.5.34";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -66,6 +66,7 @@ use Time::Piece;
 use Time::Seconds;
 use String::Random;
 use Path::Iterator::Rule;
+#use NetAddr::IP;
 use Math::Round;
 use NetAddr::IP;
 use DateTime;
@@ -443,6 +444,11 @@ if ( $IPADDR eq $SERVER_IP ) {
 }
 else {
     $IPTYPE = "dedicated";
+}
+my $ip_on_localhost=0;
+if ( $IPADDR eq '127.0.0.1' ) {
+    $IPTYPE = RED "[WARN] - $username\'s IP address is configured to localhost!";
+    $ip_on_localhost=1;
 }
 my $REAL_OWNER = $DataJSON->{data}->{acct}->[0]->{owner};
 my $RO_TEXT    = "";
@@ -1035,6 +1041,10 @@ for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
     }
 }
 
+if ( $ip_on_localhost ) {
+    $NOTONSERVER="INVALID" . YELLOW "\n\t\\_ Can be fixed by running IP Migration Wizard [ https://support.cpanel.net/hc/en-us/articles/360048023693 ]";
+}
+
 print WHITE "Configured IP address: "
   . CYAN $IPADDR
   . WHITE " ("
@@ -1070,31 +1080,31 @@ my $FoundInHTTPDconf;
 if ($isEA4) {
     if ($IS_USERNAME) {
         $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
+          timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
     }
     else {
         $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
+          timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
     }
 }
 else {
     if ($IS_USERNAME) {
         $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$QUERY' /usr/local/apache/conf/httpd.conf" );
+          timed_run( 3, "grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf" );
     }
     else {
         $FoundInHTTPDconf = timed_run( 3,
-            "grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf" );
+            "grep -w '$QUERY' /usr/local/apache/conf/httpd.conf" );
     }
 }
 if ( !($FoundInHTTPDconf) ) {
     if ($IS_USERNAME) {
         print RED "[WARN] "
-          . YELLOW "- $QUERY is missing from httpd.conf file!\n";
+          . YELLOW "- $MAINDOMAIN is missing from httpd.conf file!\n";
     }
     else {
         print RED "[WARN] "
-          . YELLOW "- $MAINDOMAIN is missing from httpd.conf file!\n";
+          . YELLOW "- $QUERY is missing from httpd.conf file!\n";
     }
     $defaultsite = 1;
 }
@@ -1450,6 +1460,7 @@ if ( $listdbs or $all ) {
         print BOLD MAGENTA
           "PostGreSQL is not enabled/running or installed on $HOSTNAME\n";
     }
+    border();
 }
 
 if ( $listssls or $all ) {
@@ -1641,39 +1652,21 @@ sub smborder {
 sub check_cloudflare_ips {
     my $chkIP = shift;
     chomp($chkIP);
-    my $cloudFlareIP=0;
-    my @cf_subnets   = qx[ curl -s https://www.cloudflare.com/ips-v4 ];
-    #my @cf_subnets   = timed_run( 0, 'curl', '-s', 'https://www.cloudflare.com/ips-v4' );
-    my $cf_subnet    = "";
-    foreach $cf_subnet (@cf_subnets) {
+    my $url = URI->new( 'https://www.cloudflare.com/ips-v4' );
+    my $ua  = LWP::UserAgent->new( ssl_opts => { verify_hostname => 0 } );
+    $ua->agent("");
+    my $res = $ua->get($url);
+    my $cf_subnets  = $res->decoded_content;
+    my @cf_subnets  = split /\n/, $cf_subnets;
+    foreach my $cf_subnet (@cf_subnets) {
         chomp($cf_subnet);
         my $network = NetAddr::IP->new($cf_subnet);
         my $ip      = NetAddr::IP->new($chkIP);
         if ( $ip->within($network) ) {
-            $cloudFlareIP=1;
-            last;
+            return 1;
         }
     }
-    return $cloudFlareIP;
 }
-
-#sub check_cloudflare_ips {
-#    my $chkIP = shift;
-#    chomp($chkIP);
-#    my $url = URI->new( 'https://www.cloudflare.com/ips-v4' );
-#    my $ua  = LWP::UserAgent->new( ssl_opts => { verify_hostname => 0 } );
-#    my $res = $ua->get($url);
-#    my $cf_subnets  = $res->decoded_content;
-#    my @cf_subnets  = split /\n/, $cf_subnets;
-#    foreach my $cf_subnet (@cf_subnets) {
-#        chomp($cf_subnet);
-#        my $network = NetAddr::IP->new($cf_subnet);
-#        my $ip      = NetAddr::IP->new($chkIP);
-#        if ( $ip->within($network) ) {
-#            return 1;
-#        }
-#    }
-#}
 
 sub check_for_nat {
     return if ( !( -e ("/var/cpanel/cpnat") ) );
@@ -2106,12 +2099,19 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 );
                 shift @DNSLinesOnly;
                 my %y     = map { $_ => 1 } @DNSLinesOnly;
-                my @diff  = grep( !defined $y{$_}, @OtherDomains );
+                my @diff1  = grep( !defined $y{$_}, @OtherDomains );
                 my %x     = map { $_ => 1 } @OtherDomains;
                 my @diff2 = grep( !defined $x{$_}, @DNSLinesOnly );
-                print expand(
-"\t\\_ The following domains are missing from /var/cpanel/users/$username:\n"
-                );
+                my $d1cnt=@diff1;
+                my $d2cnt=@diff2;
+                my @diff;
+                if ( $d1cnt > 0 ) {
+                    @diff=@diff1;
+                }
+                else {
+                    @diff=@diff2;
+                }
+                print expand( "\t\\_ The following domains are missing from /var/cpanel/users/$username:\n");
                 foreach my $diff (@diff) {
                     chomp($diff);
                     print expand( CYAN "\t\t\\_ " . $diff . "\n" );
@@ -2125,8 +2125,8 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/overquota/$username", $dirstatus );
 
-	# Check /var/cpanel/authn/api_tokens_v2/whostmgr/$username.json
-	my $dirstatus = check_dir("/var/cpanel/authn/api_tokens_v2/whostmgr/$username.json");
+        # Check /var/cpanel/authn/api_tokens_v2/whostmgr/$username.json
+        my $dirstatus = check_dir("/var/cpanel/authn/api_tokens_v2/whostmgr/$username.json");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/authn/api_tokens_v2/whostmgr/$username.json", $dirstatus );
@@ -2216,6 +2216,16 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             print_output( "/etc/vfilters", CYAN "[SKIPPING]" );
         }
 
+        my $dirstatus = check_dir("/etc/vdomainaliases/$QUERY");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/etc/vdomainaliases/$QUERY", $dirstatus );
+
+        my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$MAINDOMAIN");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/var/cpanel/ssl/apache_tls/$MAINDOMAIN", $dirstatus );
+
         if ($MAINDOMAIN) {
             my $dirstatus = check_dir("/var/named/$MAINDOMAIN.db");
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -2225,6 +2235,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else {
             print_output( "/var/named/", CYAN "[SKIPPING]" );
         }
+
 
         # Check /etc/apache2/logs/domlogs/$QUERY
         if ($isAddon) {
@@ -2241,8 +2252,15 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                   check_dir("/etc/apache2/logs/domlogs/$MAINDOMAIN");
                 if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
                 else              { $dirstatus = RED "[MISSING]"; }
-                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN",
-                    $dirstatus );
+                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN", $dirstatus );
+                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$QUERY-ssl_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/etc/apache2/logs/domlogs/$QUERY-ssl_log", $dirstatus );
+                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$QUERY-bytes_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/etc/apache2/logs/domlogs/$QUERY-bytes_log", $dirstatus );
             }
             else {
                 print_output( "/etc/apache2/logs/domlogs/", CYAN "[SKIPPING]" );
@@ -2269,6 +2287,14 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
                 else              { $dirstatus = RED "[MISSING]"; }
                 print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log", $dirstatus );
+                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log", $dirstatus );
             }
             else {
                 print_output( "/etc/apache2/logs/domlogs/", CYAN "[SKIPPING]" );
@@ -2289,7 +2315,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             }
         }
     }
-    else {
+    else {              ## Domain name was entered (check $QUERY).
         my $dirstatus = check_dir("/etc/valiases/$QUERY");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
@@ -2305,7 +2331,14 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/vdomainaliases/$QUERY", $dirstatus );
 
-        my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$QUERY");
+        my $SubDomain = ( split( /\./, $QUERY ) )[0] . "." . $MAINDOMAIN;
+        chomp($SubDomain);
+        if ( $isAddon ) {
+            my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$SubDomain");
+        }
+        else {
+            my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$QUERY");
+        }
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/ssl/apache_tls/$QUERY", $dirstatus );
@@ -2319,6 +2352,14 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/apache2/logs/domlogs/$QUERY", $dirstatus );
+        my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$QUERY-ssl_log" );
+        if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else { $dirstatus = RED "[MISSING]"; }
+        print_output( "/etc/apache2/logs/domlogs/$QUERY-ssl_log", $dirstatus );
+        my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$QUERY-bytes_log" );
+        if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else { $dirstatus = RED "[MISSING]"; }
+        print_output( "/etc/apache2/logs/domlogs/$QUERY-bytes_log", $dirstatus );
 
         # Check /etc/named.conf file
         my $dirstatus =
@@ -2687,12 +2728,6 @@ sub isEA4 {
 }
 
 sub display_mail_info {
-    if ($UserSuspended) {
-        border();
-        print RED "Account $username is suspended - Cannot list email data!\n";
-        border();
-        return;
-    }
     if ($acct_over_quota) {
         border();
         print RED "Account $username is over quota - Cannot list email data!\n";
@@ -2726,10 +2761,7 @@ sub display_mail_info {
     my @sortedPops;
     my $ListPopsJSON;
 
-    $ListPopsJSON = get_uapi(
-        'Email',            'list_pops_with_disk',
-        "--user=$username", "domain=$DOMAIN"
-    );
+    $ListPopsJSON = get_uapi( 'Email', 'list_pops_with_disk', "--user=$username", "domain=$DOMAIN");
 
     # Check for suspended/held outgoing email
     chk_mail_suspend( $username, 0 );
@@ -3632,7 +3664,8 @@ sub ChkForIntegration {
 }
 
 sub dispSSLdata {
-    my $tcDomain = $_[0];
+    #my $tcDomain = $_[0];
+    my $tcDomain = shift;
     chomp($tcDomain);
     print YELLOW $tcDomain . "\n";
     if ( -e ("$sslsyscertdir/$tcDomain/certificates") ) {
@@ -3696,26 +3729,13 @@ sub dispSSLdata {
                 RED "\t \\_ [WARN] " . WHITE "- Self-Signed Certificate!\n" );
         }
         else {
-# Get Issuer and display it.
-#my $SSLIssuer = qx[ openssl x509 -in "$sslsyscertdir/$tcDomain/certificates" -issuer -noout ];
-            my ($SSLIssuer) = (
-                split(
-                    /\= /,
-                    timed_run(
-                        4, 'openssl', 'x509', '-in',
-                        "$sslsyscertdir/$tcDomain/certificates",
-                        '-issuer', '-noout'
-                    )
-                )
-            )[1];
-            my ($SSLIssuer) = ( split( /CN=/, $SSLIssuer ) )[1];
-            chomp($SSLIssuer);
-            print expand(
-                GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
+            # Get Issuer and display it.
+            my ($SSLIssuer) = ( split( /CN = /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[1];
+            $SSLIssuer =~ s/\"//g;
+            print expand( GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
 
             # Get OCSP and Certificate status
-            my $OCSPstatus =
-qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | grep 'Cert Status:' ];
+            my $OCSPstatus = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | grep 'Cert Status:' ];
 
             # It looks like if OCSPstatus is empty, the SSL may be revoked!
             if ( $OCSPstatus and $isExpired ne "[EXPIRED]" ) {
@@ -3726,33 +3746,22 @@ qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<qui
         }
         print WHITE "Protecting the following Subject Alternative Names:\n";
         my $SAN;
-        my $getSANS =
-          timed_run( 3, 'openssl', 'x509', '-in',
-            "$sslsyscertdir/$tcDomain/certificates",
-            '-noout', '-text' );
+        my $getSANS = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-noout', '-text' );
         my @getSANS = split "\n", $getSANS;
+        push @getSANS, "DNS: $tcDomain";
         my $SSLHostMismatch = 0;
         foreach $SAN (@getSANS) {
             chomp($SAN);
-            if ( $SAN =~ m/DNS:/ ) {
-                $SAN =~ s/DNS://g;
-                $SAN =~ s/\s+//;
-                $SAN =~ s/, /\n/g;
-                my @SANS = split( /\s+/, $SAN );
-                foreach $SAN (@SANS) {
-                    chomp($SAN);
-                    print expand( CYAN "\t \\_ " . CYAN $SAN . "\n" );
-                    checkCAA($SAN);
-                    $SSLHostMismatch = SSLHostMismatch_check($SAN)
-                      unless ( $SSLHostMismatch == 1 );
-                    $SSLHostMismatch = 1 if ($SSLHostMismatch);
-                }
+            next unless( $SAN =~ m/DNS:/ );
+            $SAN =~ s/DNS://g;
+            $SAN =~ s/\s+//;
+            $SAN =~ s/, /\n/g;
+            my @SANS = split( /\s+/, $SAN );
+            foreach $SAN (@SANS) {
+                chomp($SAN);
+                print expand( CYAN "\t \\_ " . CYAN $SAN . "\n" );
+                checkCAA($SAN);
             }
-        }
-        if ( $SSLHostMismatch == 0 ) {
-            print expand( BOLD RED
-"\t \\_ SSL Hostname Mismatch! [ $tcDomain wasn't found in SAN ]\n"
-            );
         }
     }
     else {
@@ -4368,22 +4377,14 @@ sub checkCAA {
     return;
 }
 
-sub SSLHostMismatch_check {
-    my $tcDomain = shift;
-    return 0 if ( !-e "$sslsyscertdir/$tcDomain/certificates" );
-    my $SSLMatchesDomain = Cpanel::SafeRun::Timed::timedsaferun( 4,
-"openssl x509 -in $sslsyscertdir/$tcDomain/certificates -noout -subject | grep $tcDomain"
-    );
-    return 1 if $SSLMatchesDomain;
-    return 0;
-}
-
 sub display_header {
     my $tcDomain = shift;
-    get_http_loc($tcDomain);
-    get_data( $tcDomain, 'Server',       10 );
-    get_data( $tcDomain, 'Powered-By:',  10 );
-    get_data( $tcDomain, 'Redirect-By:', 10 );
+    my $httpval = 0;
+    $httpval = get_http_loc($tcDomain);
+    return unless($httpval == 0);
+    get_data( $tcDomain, 'Server',       4 );
+    get_data( $tcDomain, 'Powered-By:',  4 );
+    get_data( $tcDomain, 'Redirect-By:', 4 );
 }
 
 sub get_data {
@@ -4391,15 +4392,13 @@ sub get_data {
     my $tcValue   = shift;
     my $tnTimeout = shift;
     my $result =
-      Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s',
-        '--head', "http://$tcDomain" );
+      Cpanel::SafeRun::Timed::timedsaferun( $tnTimeout, 'curl', '-L', '-s', '--head', "http://$tcDomain" );
     my @result   = split /\n/, $result;
     my $lastline = "";
     foreach my $line (@result) {
         chomp($line);
-        if ( $line =~ $tcValue ) {
-            print expand( CYAN "\t\\_ " . $line . "\n" )
-              unless ( $line eq $lastline );
+        if ( $line =~ m/$tcValue/i ) {
+            print expand( CYAN "\t\\_ " . $line . "\n" ) unless ( $line eq $lastline );
             $lastline = $line;
         }
     }
@@ -4408,37 +4407,40 @@ sub get_data {
 sub get_http_loc {
     my $tcDomain = shift;
     my $result =
-      Cpanel::SafeRun::Timed::timedsaferun( 10, 'curl', '-L', '-s', '--head',
-        "http://$tcDomain" );
+      Cpanel::SafeRun::Timed::timedsaferun( 4, 'curl', '-L', '-s', '--head', "http://$tcDomain" );
+    if ( $result =~ m/Timeout while executing/ ) {
+        return 1;
+    }
     my @result   = split /\n/, $result;
     my $lastline = "";
     my $result2;
+    my $line_printed=0;
+    my $line2_printed=0;
     foreach my $line (@result) {
         chomp($line);
         if ( $line =~ m/301|302/ ) {
-            print expand( YELLOW "\t\\_ $line\n" ) if ( $line =~ m/HTTP/ );
+            if ( $line_printed==0 ) {
+                print expand( YELLOW "\t\\_ $line\n" ) if ( $line =~ m/HTTP/ );
+                $result2 = qx[ curl -sL --head "http://$tcDomain" | grep -i 'Location:' ];
+                my @result2 = split /\n/, $result2;
+                foreach my $line2 (@result2) {
+                    chomp($line2);
+                    if ( $line2_printed==0) {
+                        print expand( CYAN "\t\t\\_ $line2\n" );
+                    }
+                }
+            }
+            $line_printed=1;
         }
         elsif ( $line =~ m/200/ ) {
             print expand( GREEN "\t\\_ $line\n" ) if ( $line =~ m/HTTP/ );
+            $line_printed=1;
         }
-        elsif ( $line =~
-m/400|401|403|404|405|406|408|500|502|503|504|520|521|522|523|524|525|526/
-          )
-        {
+        elsif ( $line =~ m/400|401|403|404|405|406|408|500|502|503|504|520|521|522|523|524|525|526/) {
             print expand( RED "\t\\_ $line\n" ) if ( $line =~ m/HTTP/ );
         }
         else {
             print expand( MAGENTA "\t\\_ $line\n" ) if ( $line =~ m/HTTP/ );
-        }
-        while ( $line =~ m/301|302/ ) {
-            $result2 =
-              qx[ curl -sL --head "http://$tcDomain" | grep -i 'Location:' ];
-            my @result2 = split /\n/, $result2;
-            foreach my $line2 (@result2) {
-                chomp($line2);
-                print expand( CYAN "\t\t\\_ $line2\n" );
-            }
-            last;
         }
     }
 }
