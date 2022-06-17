@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.34";
+my $VERSION = "2.5.35";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -724,6 +724,11 @@ if ( !( -e ("/var/cpanel/features/$FEATURELIST") ) ) {
 "[INFO] - Skipping bandwidth check! Feature list \"$FEATURELIST\" missing from /var/cpanel/features/\n";
     $skip_bwcheck = 1;
 }
+if ( $UserSuspended ) {
+    print YELLOW
+"[INFO] - Skipping bandwidth check! Account is suspended\n";
+    $skip_bwcheck = 1;
+}
 if ( $skip_bwcheck == 0 ) {
     my $bwdataJSON = get_uapi(
         'StatsBar',               'get_stats',
@@ -1011,12 +1016,14 @@ print "\n";
 
 sub custom_UD {
     if ( -d ("/etc/apache2/conf.d/userdata") ) {
-        my @CONFDATA = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', '/etc/apache2/conf.d/userdata', '-name', '*.conf' );
+        my $CONFDATA = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', '/etc/apache2/conf.d/userdata', '-name', '*.conf' );
+        my @CONFDATA = split /\n/, $CONFDATA;
         my $confFile;
         my $NoShowHeader = 0;
         foreach $confFile (@CONFDATA) {
             chomp($confFile);
-            if ( $confFile =~ m/$username/ ) {
+            next unless( $confFile =~ m{/$username/} );
+            if ( $confFile =~ m{/$username/} ) {
                 print expand( YELLOW
 "Found custom userdata directory for $username under /etc/apache2/conf.d/\n"
                 ) unless ($NoShowHeader);
@@ -1460,7 +1467,6 @@ if ( $listdbs or $all ) {
         print BOLD MAGENTA
           "PostGreSQL is not enabled/running or installed on $HOSTNAME\n";
     }
-    border();
 }
 
 if ( $listssls or $all ) {
@@ -1564,8 +1570,8 @@ if ( $listssls or $all ) {
             print expand( CYAN "$CAARecord\n" );
         }
     }
+    border();
 }
-border();
 
 if ($debugHookChanged) {
     get_whmapi1( 'set_tweaksetting', 'key=debughooks', 'value=logall' );
@@ -3730,7 +3736,7 @@ sub dispSSLdata {
         }
         else {
             # Get Issuer and display it.
-            my ($SSLIssuer) = ( split( /CN = /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[1];
+            my ($SSLIssuer) = ( split( /CN=|CN = /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[1];
             $SSLIssuer =~ s/\"//g;
             print expand( GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
 
@@ -4492,102 +4498,98 @@ sub getProfileNode {
 }
 
 sub get_wp_info {
-    my $wpconf = shift;
-    if ( !-e "$wpconf/wp-config.php" ) {
-        print YELLOW "No wp-config.php file found in $wpconf\n";
-        return;
-    }
-    my $insecure    = ($showpass)                   ? 1 : 0;
-    my $inmaintmode = ( -e "$wpconf/.maintenance" ) ? 1 : 0;
-    print RED "[WARN] - WordPress is in maintenance mode!\n"
-      unless ( !$inmaintmode );
-    open my $fh, '<:encoding(UTF-8)', "$wpconf/wp-config.php";
-    my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
-    while ( my $line = <$fh> ) {
-        if ( $line =~ m/DB_HOST/ ) {
-            ($dbhost) = ( split( /'/, $line ) )[3];
-            print CYAN "Host: " . YELLOW $dbhost . "\n";
-        }
-        if ( $line =~ m/DB_NAME/ ) {
-            ($dbname) = ( split( /'/, $line ) )[3];
-            print CYAN "WordPress Database Name: " . YELLOW $dbname . "\n";
-        }
-        if ( $line =~ m/DB_USER/ ) {
-            ($dbuser) = ( split( /'/, $line ) )[3];
-            print CYAN "WordPress Database User: " . YELLOW $dbuser . "\n";
-        }
-        if ( $line =~ m/DB_PASSWORD/ ) {
-            ($dbpass) = ( split( /'/, $line ) )[3];
-            print CYAN "Database Password: " . YELLOW $dbpass . "\n"
-              unless ( !$insecure );
-            print CYAN "Database Password: "
-              . GREEN
-              . "[REDACTED] "
-              . MAGENTA "(use --showpass to reveal)\n"
-              unless ($insecure);
-        }
-        if ( $line =~ m/table_prefix/ ) {
-            ($tblprefix) = ( split( /'/, $line ) )[1];
-            print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
-        }
-    }
-    close $fh;
-    my $wp_settings =
-qx[ mysql $dbname -BNe "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" ];
-    my @wp_settings = split /\n/, $wp_settings;
-    if (@wp_settings) {
-        print CYAN
-"WP Settings for home, siteurl, stylesheet, template  and permalinks:\n";
-        foreach my $wp_setting (@wp_settings) {
-            chomp($wp_setting);
-            $wp_setting =~ s/\s+/: /g;
-            print YELLOW "\t\\_ $wp_setting\n";
-        }
-    }
-    my $wp_activeplugins =
-qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
-    my @wp_activeplugins = split /\n/, $wp_activeplugins;
-    if (@wp_activeplugins) {
-        print CYAN "WP Active Plugins:\n";
-        foreach my $wp_activeplugin (@wp_activeplugins) {
-            chomp($wp_activeplugin);
-            print YELLOW "\t\\_ $wp_activeplugin\n";
-        }
-    }
-    my $current_version;
-    if ( -e "$wpconf/wp-includes/version.php" ) {
-        open my $fh, '<:encoding(UTF-8)', "$wpconf/wp-includes/version.php";
+    my $pubhtml = shift;
+    my $allwpconfs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-type', 'f', '-name', 'wp-config.php' );
+    my @allwpconfs = split /\n/, $allwpconfs;
+    foreach my $wpconf( @allwpconfs ) {
+        print "Found wp-config.php file at: $wpconf\n";
+        chomp($wpconf);
+        my $wppath = dirname( $wpconf );
+        my $insecure    = ($showpass)                   ? 1 : 0;
+        my $inmaintmode = ( -e "$wppath/.maintenance" ) ? 1 : 0;
+        print RED "[WARN] - WordPress is in maintenance mode!\n" unless ( !$inmaintmode );
+        open my $fh, '<:encoding(UTF-8)', $wpconf;
+        my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
         while ( my $line = <$fh> ) {
-            if ( $line =~ m/^\$wp_version/ ) {
-                ($current_version) = ( split( /\s+/, $line ) )[2];
-                $current_version =~ s/\'//g;
-                $current_version =~ s/\;//g;
-                chomp($current_version);
-                print CYAN "Current WordPress Version: "
-                  . YELLOW $current_version . "\n";
+            if ( $line =~ m/DB_HOST/ ) {
+                ($dbhost) = ( split( /'/, $line ) )[3];
+                print CYAN "Host: " . YELLOW $dbhost . "\n";
+            }
+            if ( $line =~ m/DB_NAME/ ) {
+                ($dbname) = ( split( /'/, $line ) )[3];
+                print CYAN "WordPress Database Name: " . YELLOW $dbname . "\n";
+            }
+            if ( $line =~ m/DB_USER/ ) {
+                ($dbuser) = ( split( /'/, $line ) )[3];
+                print CYAN "WordPress Database User: " . YELLOW $dbuser . "\n";
+            }
+            if ( $line =~ m/DB_PASSWORD/ ) {
+                ($dbpass) = ( split( /'/, $line ) )[3];
+                print CYAN "Database Password: " . YELLOW $dbpass . "\n"
+                unless ( !$insecure );
+                print CYAN "Database Password: "
+                . GREEN
+                . "[REDACTED] "
+                . MAGENTA "(use --showpass to reveal)\n"
+                unless ($insecure);
+            }
+            if ( $line =~ m/table_prefix/ ) {
+                ($tblprefix) = ( split( /'/, $line ) )[1];
+                print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
             }
         }
-        my @latest_version =
-qx[ curl -s https://wordpress.org/news/category/releases/ | grep -A3 'widefat' |
-sed -e 's/<[^>]*>/ /g' ];
-        my $release_date;
-        my $release_version;
-        for my $line (@latest_version) {
-            chomp($line);
-            next if ( length($line) < 12 );
-            $line =~ s/^\s*(.*?)\s*$/$1/;
-            if ( $line =~ m/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/ )
-            {
-                $release_date = $line;
-                next;
+        close $fh;
+        if (! -d "/var/lib/mysql/$dbname" ) {
+            print RED "[WARN] - Database " . YELLOW $dbname . RED " seems to be missing!\n";
+            smborder();
+            next;
+        }
+        my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
+        my @wp_settings = split /\n/, $wp_settings;
+        if (@wp_settings) {
+            print CYAN "WP Settings for home, siteurl, stylesheet, template  and permalinks:\n";
+            foreach my $wp_setting (@wp_settings) {
+                chomp($wp_setting);
+                $wp_setting =~ s/\s+/: /g;
+                print YELLOW "\t\\_ $wp_setting\n";
             }
-            if ( $line =~ m/WordPress/ ) {
+        }
+        my $wp_activeplugins = qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
+        my @wp_activeplugins = split /\n/, $wp_activeplugins;
+        if (@wp_activeplugins) {
+            print CYAN "WP Active Plugins:\n";
+            foreach my $wp_activeplugin (@wp_activeplugins) {
+                chomp($wp_activeplugin);
+                print YELLOW "\t\\_ $wp_activeplugin\n";
+            }
+        }
+        my $current_version;
+        if ( -e "$wppath/wp-includes/version.php" ) {
+            open my $fh, '<:encoding(UTF-8)', "$wppath/wp-includes/version.php";
+            while ( my $line = <$fh> ) {
+                if ( $line =~ m/^\$wp_version/ ) {
+                    ($current_version) = ( split( /\s+/, $line ) )[2];
+                    $current_version =~ s/\'//g;
+                    $current_version =~ s/\;//g;
+                    chomp($current_version);
+                    print CYAN "Current WordPress Version: "
+                    . YELLOW $current_version . "\n";
+                }
+            }
+            my $latest_version = Cpanel::SafeRun::Timed::timedsaferun( 4, 'curl', '-s', 'https://wordpress.org/download/' );
+            my @latest_version = split /\n/, $latest_version;
+            my $release_version;
+            foreach my $line(@latest_version) {
+                chomp($line);
+                next unless( $line =~ m{softwareVersion} );
                 $release_version = $line;
+                last;
             }
-            chomp($release_version);
-            print CYAN $release_version
-              . " was released on "
-              . CYAN $release_date;
+            $release_version =~ s/^\s+|\s+$//g;
+            ($release_version) = (split( /\s+/, $release_version ))[1];
+            $release_version =~ s/\"//g;
+            $release_version =~ s/\,//g;
+            print CYAN "Latest WordPress Version Available: " . YELLOW $release_version;
             if ( $release_version =~ m/$current_version/ ) {
                 print GREEN " [OK]";
             }
@@ -4596,6 +4598,7 @@ sed -e 's/<[^>]*>/ /g' ];
             }
             print "\n";
         }
+    smborder();
     }
 }
 
