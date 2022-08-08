@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.35";
+my $VERSION = "2.5.36";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2339,11 +2339,12 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
 
         my $SubDomain = ( split( /\./, $QUERY ) )[0] . "." . $MAINDOMAIN;
         chomp($SubDomain);
+        my $dirstatus=0;
         if ( $isAddon ) {
-            my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$SubDomain");
+            $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$SubDomain");
         }
         else {
-            my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$QUERY");
+            $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$QUERY");
         }
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
@@ -2898,9 +2899,11 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
                     YELLOW "\t \\_ Account is using the $mbformat format.\n" );
             }
 
-            # check for mail hold/suspended
+            # check for mail hold/suspended/incoming email suspended, login disabled/suspended
             chk_mail_suspend( "$emailacctline", 1 );
             chk_mail_hold( "$emailacctline", 1 );
+            chk_login_disabled( "$RealHome/etc/$DOMAIN", $localpart );
+            chk_suspended_mail( "$RealHome/etc/$DOMAIN/$localpart" );
 
             if ( $ProfileNode =~ m/STANDARD|UNKNOWN/ ) {
 
@@ -3997,6 +4000,34 @@ sub chk_mail_suspend {
             print RED
               "The $tcAccount account is suspended from sending email.\n";
         }
+    }
+}
+
+sub chk_login_disabled {
+    my $shadow_file = shift;
+    my $tcLocalPart = shift;
+    my $localpart = $tcLocalPart . ":!!";
+    if ( -s "$shadow_file/shadow" ) {
+        open( my $fh, '<', "$shadow_file/shadow" ) or die( $! );
+        while( <$fh> ) {
+            if ( $_ =~ m/$localpart/ ) {
+                print expand( RED "\t \\_ Login for this account has been disabled/suspended\n" );
+            }
+        }
+        close( $fh );
+    }
+}
+
+sub chk_suspended_mail {
+    my $filter_file = shift;
+    if ( -s "$filter_file/filter" ) {
+        open( my $fh, '<', "$filter_file/filter" ) or die( $! );
+        while( <$fh> ) {
+            if ( $_ =~ m/SUSPEND RECEPTION OF NEW MESSAGES/ ) {
+                print expand( RED "\t \\_ Receiving mail for this account has been suspended\n" );
+            }
+        }
+        close( $fh );
     }
 }
 
