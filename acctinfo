@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.36";
+my $VERSION = "2.5.38";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -65,7 +65,7 @@ use File::Basename;
 use Time::Piece;
 use Time::Seconds;
 use String::Random;
-use Path::Iterator::Rule;
+#use Path::Iterator::Rule;
 #use NetAddr::IP;
 use Math::Round;
 use NetAddr::IP;
@@ -760,10 +760,14 @@ print WHITE "Hosting Package: "
   . GREEN $FEATURELIST
   . WHITE ") "
   . $HAS_AUTOSSL_TEXT . "\n";
-my $X3WARN = "";
+my $deprecated_theme_warning = "";
 if ( $THEME eq "x3" ) {
-    $X3WARN = RED
-"[WARN] - x3 Theme deprecated. cPanel UI not loading?  This is probably why!";
+    $deprecated_theme_warning = RED "WARNING - The x3 theme is deprecated. cPanel UI not loading? This is probably why!";
+}
+if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') ) {
+    if ( $THEME eq "paper_lantern" ) {
+        $deprecated_theme_warning = RED "WARNING - The paper_lantern theme is deprecated as of version 106 and will be removed in version 108.";
+    }
 }
 my $wptkLiteJSON =
   get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit' );
@@ -783,10 +787,10 @@ if ($custom_style) {
     print WHITE "Theme: "
       . CYAN $THEME
       . " (Style: $custom_style) "
-      . $X3WARN . "\n";
+      . $deprecated_theme_warning . "\n";
 }
 else {
-    print WHITE "Theme: " . CYAN $THEME . " " . $X3WARN . "\n";
+    print WHITE "Theme: " . CYAN $THEME . expand( "\n\t\\_" . $deprecated_theme_warning . "\n" );
 }
 print WHITE "Max Addon/Alias/Sub Domains: "
   . CYAN $MAXADDON
@@ -1024,9 +1028,7 @@ sub custom_UD {
             chomp($confFile);
             next unless( $confFile =~ m{/$username/} );
             if ( $confFile =~ m{/$username/} ) {
-                print expand( YELLOW
-"Found custom userdata directory for $username under /etc/apache2/conf.d/\n"
-                ) unless ($NoShowHeader);
+                print expand( YELLOW "Found custom userdata directory for $username in:\n") unless ($NoShowHeader);
                 $NoShowHeader = 1;
                 print expand("\t \\_ $confFile\n");
             }
@@ -1616,7 +1618,7 @@ sub Usage {
     print expand( GREEN "\t Display mail information for cptestdomain.net.\n" );
     print CYAN "acctinfo" . WHITE " --tomcat cptestdo\n";
     print expand( GREEN
-"\t Display Tomcat 8.5 configuration information for the cptestdo user.\n"
+"\t Display Tomcat 8.5/10.0 configuration information for the cptestdo user.\n"
     );
     print CYAN "acctinfo" . WHITE " --wpinfo [--showpass] cptestdomain.net\n";
     print expand( GREEN
@@ -2164,10 +2166,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             $dirstatus );
         my $dbindex =
           (
-            Cpanel::Version::compare(
-                Cpanel::Version::getversionnumber(),
-                '<', '11.50'
-            )
+            Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '<', '11.50')
           )
           ? "/var/cpanel/databases/dbindex.db"
           : "/var/cpanel/databases/dbindex.db.json";
@@ -3331,16 +3330,13 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
 
     if ( $ptrstate eq "VALID" ) {
         print expand( GREEN "\t \\_ [ " . $ptrstate . " ]\n" );
-        print expand( YELLOW "\t\t \\_ Domain " . CYAN $ptrdomain . "\n" );
-        print expand( YELLOW "\t\t \\_ HELO: " . CYAN $ptrHELO . "\n" );
-        print expand( YELLOW "\t\t \\_ IP Address: " . CYAN $ptripAddr . "\n" );
     }
     else {
         print expand( RED "\t \\_ [ " . $ptrstate . " ]\n" );
-        print expand( YELLOW "\t\t \\_ Domain " . CYAN $ptrdomain . "\n" );
-        print expand( YELLOW "\t\t \\_ HELO: " . CYAN $ptrHELO . "\n" );
-        print expand( YELLOW "\t\t \\_ IP Address: " . CYAN $ptripAddr . "\n" );
-    }
+	}
+    print expand( YELLOW "\t\t \\_ Domain " . CYAN $ptrdomain . "\n" );
+    print expand( YELLOW "\t\t \\_ HELO: " . CYAN $ptrHELO . "\n" );
+    print expand( YELLOW "\t\t \\_ IP Address: " . CYAN $ptripAddr . "\n" );
     print "\n";
 
     # Check for DMARC record.
@@ -3841,6 +3837,14 @@ sub securitychk {
             }
         }
     }
+    my $susp_filter = Cpanel::SafeRun::Timed::timedsaferun( 0, "grep -srl '\$header_from: contains \"@\"' $RealHome/etc/*/*/filter" );
+    if ( $susp_filter ) {
+        print RED "[SECURITY WARNING] - Suspicious Mail Filter [ " . YELLOW "containing only '\@'" . RED " ] Found in " . CYAN $susp_filter;
+    }
+    my $susp_filter2 = Cpanel::SafeRun::Timed::timedsaferun( 0, "grep -srl '\$header_from: contains \"mailer-daemon\"' $RealHome/etc/*/*/filter" );
+    if ( $susp_filter2 ) {
+        print RED "[SECURITY WARNING] - Suspicious Mail Filter [ " . YELLOW "containing only 'mailer-daemon'" . RED " ] Found in " . CYAN $susp_filter2;
+    }
 }
 
 sub checkperms2 {
@@ -4046,7 +4050,141 @@ sub chk_mail_hold {
     }
 }
 
+sub chk_tomcat10 {
+    return unless ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') );
+    return unless ( -x '/opt/cpanel/ea-podman/bin/ea-podman' );
+    my $podmanPS = Cpanel::SafeRun::Timed::timedsaferun( 4, "su - $username -c 'podman ps | grep ea-tomcat'" );
+    if ( ! $podmanPS ) {
+        print YELLOW "[INFO] - Tomcat not running or configured for $username\n";
+        return;
+    }
+    print YELLOW "[INFO] - Retrieving Tomcat information for $username\n";
+    my ( $httpport1 ) = ( split ( /:/, $podmanPS ))[2];
+    my ( $httpport ) = ( split ( /\//, $httpport1 ));
+    my ( $ajpport1 ) = ( split ( /:/, $podmanPS ))[3];
+    my ( $ajpport ) = ( split ( /\//, $ajpport1 ));
+    chomp($ajpport);
+    my $data = Cpanel::SafeRun::Timed::timedsaferun( 0, "su - $username -c '/usr/local/cpanel/scripts/ea-podman running'" );
+    my $podman_running = decode_json $data;
+    my $tomcat_ports;
+    my $tomcat_container;
+    my $TCEnabled = 0;
+    opendir my $dh, "$RealHome/ea-podman.d/";
+    my @containers = readdir($dh);
+    closedir( $dh );
+    foreach my $container(@containers) {
+        chomp($container);
+		next if ( $container =~ m/\.bak/ );
+        next unless( $container =~ m/tomcat/);
+        if ( grep { /$container/ } $data ) {
+            $tomcat_container = $container;
+            $TCEnabled = 1;
+            last;
+        }
+    }
+    print YELLOW "Tomcat container [ " . BOLD BLUE $tomcat_container . YELLOW " ] installed using ports:\n";
+    print expand( CYAN "\t\\_ HTTP PORT: $httpport\n");
+    print expand( CYAN "\t\\_ AJP PORT: $ajpport\n");
+    my $container_status = Cpanel::SafeRun::Timed::timedsaferun( 3, "su - $username -c '/usr/local/cpanel/scripts/ea-podman status $tomcat_container' | grep 'Active:'" );
+    if ( $container_status =~ m/active \(running\)/) {
+        print expand( GREEN "\t\\_ $tomcat_container is actively running.\n" );
+    }
+    else {
+        print expand( RED "\t\\_ $tomcat_container is NOT running!\n" );
+        return;
+    }
+    print YELLOW "\t \\_ Checking $RealHome/ea-podman.d/$tomcat_container/conf/server.xml:\n";
+    my $TCConnPort = timed_run( 2, "egrep 'Connector port.*HTTP' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
+    ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
+    $TCConnPort =~ s/\"//g;
+    if ( $TCConnPort eq "8080" ) {
+        print expand( CYAN "\t\t\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ HTTP Connector Port: " . RED . $TCConnPort . " [ CONFIG ERROR! Run " . YELLOW "su - $username -c 'podman ps' | grep ea-tomcat" . RED " ]\n" );
+    }
+    my $TCAJPPort = timed_run( 2, "egrep 'Connector port.*AJP' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
+    ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
+    $TCAJPPort =~ s/\"//g;
+    if ( $TCAJPPort eq "8009" ) {
+        print expand( CYAN "\t\t\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ AJP Connector Port: " . RED . $TCAJPPort . " [ CONFIG ERROR! Run " . YELLOW "su - $username -c 'podman ps' | grep tomcat" . RED " ]\n" );
+    }
+    my $TCdocBase = Cpanel::SafeRun::Timed::timedsaferun( 2, "egrep 'Context path.*docBase' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f3" );
+    chomp($TCdocBase);
+    print expand( CYAN "\t\t\t \\_ docBase Defined: " . GREEN . $TCdocBase . "\n" );
+    my $TCHost = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'Host name' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
+    ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
+    $TCHost =~ s/\"//g;
+    print expand( CYAN "\t\t\t \\_ Host: " . GREEN . $TCHost . "\n" );
+    my $TCunpackWARs = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'unpackWARs' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
+    ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
+    $TCunpackWARs =~ s/\"//g;
+    if ( $TCunpackWARs =~ m/false/ ) {
+        print expand( CYAN "\t\t\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ unpackWARs: " . RED . $TCunpackWARs . " [ SHOULD BE FALSE ]\n" );
+    }
+    my $TCautoDeploy = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'autoDeploy' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
+    ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
+    $TCautoDeploy =~ s/\"//g;
+    if ( $TCautoDeploy =~ m/false/ ) {
+        print expand( CYAN "\t\t\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ autoDeploy: " . RED . $TCautoDeploy . " [ SHOULD BE FALSE ]\n" );
+    }
+    my $TCDeployStartup = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'deployOnStartup' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
+    ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
+    $TCDeployStartup =~ s/\"//g;
+    if ( $TCDeployStartup =~ m/false/ ) {
+        print expand( CYAN "\t\t\t \\_ deployOnStartup: " . GREEN . $TCDeployStartup . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ deployOnStartup: " . RED . $TCDeployStartup . " [ SHOULD BE FALSE ]\n" );
+    }
+    my $TCDeployXML = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'deployXML' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
+    ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
+    $TCDeployXML =~ s/\"//g;
+    $TCDeployXML =~ s/>//g;
+    if ( $TCDeployXML =~ m/false/ ) {
+        print expand( CYAN "\t\t\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ deployXML " . RED . $TCDeployXML . " [ SHOULD BE FALSE ]\n" );
+    }
+    my $TCsecretRequired = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'secretRequired' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
+    ($TCsecretRequired) = ( split( /\s+/, $TCsecretRequired ) )[5];
+    $TCsecretRequired =~ s/\"//g;
+    $TCsecretRequired =~ s/\/>//g;
+    if ( $TCsecretRequired =~ m/false/ ) {
+        print expand( CYAN "\t\t\t \\_ secretRequired " . GREEN . $TCsecretRequired . "\n" );
+    }
+    else {
+        print expand( CYAN "\t\t\t \\_ secretRequired " . RED . $TCsecretRequired . " [ SHOULD BE FALSE ]\n" );
+    }
+    opendir my $dh, "$RealHome/ea-podman.d/$tomcat_container/webapps/ROOT";
+    my @webapp_data = readdir( $dh );
+    closedir( $dh );
+    my $showHeader=0;
+    foreach my $jspfile (@webapp_data) {
+        chomp($jspfile);
+        next unless( $jspfile =~ m{\.jsp} );
+        print expand( "\t\t\t\\_ jsp files found in $RealHome/ea-podman.d/$tomcat_container/webapps/ROOT/\n" ) unless( $showHeader );
+        $showHeader=1;
+        print expand( YELLOW "\t\t\t\t \\_ $jspfile\n");	
+    }
+    print "\n";
+}
+
 sub chk_tomcat {
+    if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') ) {
+        chk_tomcat10;
+        return;
+    }
     my $TCEnabledUsers =
       timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list' );
     my @TCEnabledUsers = split "\n", $TCEnabledUsers;
@@ -4198,34 +4336,29 @@ sub chk_tomcat {
               . $TCsecretRequired
               . " [ SHOULD BE FALSE ]\n" );
     }
-    if ( -d "$RealHome/ea-tomcat85/webapps/ROOT/" ) {
-        use Path::Iterator::Rule;
-        my $rule        = Path::Iterator::Rule->new;
-        my $it          = $rule->iter("$RealHome/ea-tomcat85/webapps/ROOT");
-        my $headPrinted = 0;
-        while ( my $jspFile = $it->() ) {
-            next if ( $jspFile eq "." or $jspFile eq ".." );
-            next unless ( $jspFile =~ m/\.jsp$/ );
-            print CYAN
-              "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/\n"
-              unless ($headPrinted);
-            $headPrinted = 1;
-
-  # Need to strip full path from $jspFile here.  It should just be the filename!
-            print expand( YELLOW "\t \\_ $jspFile\n" );
-            if ( $jspFile eq "test.jsp" ) {
-                my $TJP = timed_run( 2,
-                    "lynx --dump http://$MAINDOMAIN/test.jsp | head -1" );
-                if ( $TJP =~ m/Test JSP Page/ ) {
-                    print GREEN "\t \\_ Success: "
-                      . WHITE "http://$MAINDOMAIN/test.jsp"
-                      . CYAN " Works!\n";
-                }
-                else {
-                    print RED "\t \\_ Failed: "
-                      . WHITE "http://$MAINDOMAIN/test.jsp"
-                      . CYAN " Didn't work!\n";
-                }
+	# RIGHT HERE
+	opendir my $dh, "$RealHome/ea-tomcat85/webapps/ROOT";
+	my @webapp_data = readdir( $dh );
+	closedir( $dh );
+	my $showHeader=0;
+	foreach my $jspFile (@webapp_data) {
+		chomp($jspFile);
+		next unless( $jspFile =~ m{\.jsp} );
+		print expand( "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/\n" ) unless( $showHeader );
+		$showHeader=1;
+		print expand( YELLOW "\t \\_ $jspFile\n");	
+        if ( $jspFile eq "test.jsp" ) {
+            my $TJP = timed_run( 2,
+                "lynx --dump http://$MAINDOMAIN/test.jsp | head -1" );
+            if ( $TJP =~ m/Test JSP Page/ ) {
+                print GREEN "\t \\_ Success: "
+                  . WHITE "http://$MAINDOMAIN/test.jsp"
+                  . CYAN " Works!\n";
+            }
+            else {
+                print RED "\t \\_ Failed: "
+                  . WHITE "http://$MAINDOMAIN/test.jsp"
+                  . CYAN " Didn't work!\n";
             }
         }
     }
