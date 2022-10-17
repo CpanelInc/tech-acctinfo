@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.38";
+my $VERSION = "2.5.39";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -782,7 +782,7 @@ if ($hasWPTKLite) {
 if ($hasWPTKDeluxe) {
     $hasWPTKFeature = "Deluxe";
 }
-print WHITE "WordPress Toolkit Feature: " . CYAN $hasWPTKFeature . "\n";
+print WHITE "WP Toolkit Feature: " . CYAN $hasWPTKFeature . "\n";
 if ($custom_style) {
     print WHITE "Theme: "
       . CYAN $THEME
@@ -3333,7 +3333,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
     }
     else {
         print expand( RED "\t \\_ [ " . $ptrstate . " ]\n" );
-	}
+    }
     print expand( YELLOW "\t\t \\_ Domain " . CYAN $ptrdomain . "\n" );
     print expand( YELLOW "\t\t \\_ HELO: " . CYAN $ptrHELO . "\n" );
     print expand( YELLOW "\t\t \\_ IP Address: " . CYAN $ptripAddr . "\n" );
