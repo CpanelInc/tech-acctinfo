@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.39";
+my $VERSION = "2.5.40";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -106,6 +106,7 @@ my $listsubs        = undef;
 my $listaddons      = undef;
 my $listparked      = undef;
 my $listaliased     = undef;
+my $domains         = undef;
 my $reselleraccts   = undef;
 my $resellerperms   = undef;
 my $resellerprivs   = undef;
@@ -127,6 +128,7 @@ our @HasCAA;
 GetOptions(
     'listdbs'       => \$listdbs,
     'listssls'      => \$listssls,
+    'domains'       => \$domains,
     'listsubs'      => \$listsubs,
     'listaddons'    => \$listaddons,
     'listaliased'   => \$listaliased,
@@ -301,12 +303,14 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
 
             push( @OtherDomains, $DomainInfoLines->{domain} );
             push( @SUBDOMAINS,   $DomainInfoLines->{domain} );
+            my $docroot_status = "";
+            $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             $IS_SUB = expand(
 "$DomainInfoLines->{domain} is a sub domain of $MAINDOMAIN \n\t\\_ "
               )
               . YELLOW
               . "(DocumentRoot: "
-              . WHITE $DomainInfoLines->{docroot} . ")\n"
+              . WHITE $DomainInfoLines->{docroot} . ") $docroot_status\n"
               unless ( $DomainInfoLines->{domain} ne $QUERY );
             $subdocroot = $DomainInfoLines->{docroot}
               unless ( $DomainInfoLines->{domain} ne $QUERY );
@@ -314,19 +318,21 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
         if ( $DomainInfoLines->{domain_type} eq "addon" ) {
 
             push( @OtherDomains, $DomainInfoLines->{domain} );
+            my $docroot_status = "";
+            $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             push( @ADDONDOMAINS,
                     $DomainInfoLines->{domain}
                   . "\n\t\t \\_ [ Sub: "
                   . $DomainInfoLines->{parent_domain} . " ]"
                   . "\n\t\t \\_ [ DocumentRoot: "
                   . $DomainInfoLines->{docroot}
-                  . " ]" );
+                  . " ] $docroot_status" );
             $IS_ADDON = expand(
 "$DomainInfoLines->{domain} is an AddOn domain of $MAINDOMAIN \n\t\\_ "
               )
               . YELLOW
               . "(DocumentRoot: "
-              . WHITE $DomainInfoLines->{docroot} . ")\n"
+              . WHITE $DomainInfoLines->{docroot} . ") $docroot_status\n"
               unless ( $DomainInfoLines->{domain} ne $QUERY );
             $addondocroot = $DomainInfoLines->{docroot}
               unless ( $DomainInfoLines->{domain} ne $QUERY );
@@ -335,12 +341,14 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
 
             push( @OtherDomains,  $DomainInfoLines->{domain} );
             push( @PARKEDDOMAINS, $DomainInfoLines->{domain} );
+            my $docroot_status = "";
+            $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             $IS_PARKED = expand(
 "$DomainInfoLines->{domain} is an alias (parked) domain of $MAINDOMAIN\n\t\\_ "
               )
               . YELLOW
               . "(DocumentRoot: "
-              . WHITE $DomainInfoLines->{docroot} . ")\n"
+              . WHITE $DomainInfoLines->{docroot} . ") $docroot_status\n"
               unless ( $DomainInfoLines->{domain} ne $QUERY );
             $parkeddocroot = $DomainInfoLines->{docroot}
               unless ( $DomainInfoLines->{domain} ne $QUERY );
@@ -663,7 +671,31 @@ if ( $showHeader || $all ) {
     display_header($QUERY)      unless ($IS_USERNAME);
     display_header($MAINDOMAIN) unless ( !$IS_USERNAME );
 }
-print "\n";
+
+# domainfwdip and domainfwdmap checks
+if ( -e '/var/cpanel/domainfwdip' ) {
+	if ( -s '/var/cpanel/domainmap' ) {
+		open( my $fh, '<', '/var/cpanel/domainmap');
+		my @domainmaps=<$fh>;
+		close( $fh );
+		foreach my $line(@domainmaps) {
+			chomp($line);
+			my ($fwddom,$fwdurl) = ( split( /\=/, $line ));
+			#if ( $fwddom eq $MAINDOMAIN or $fwddom eq $QUERY ) {
+			if ( $IS_USERNAME ) {
+				if ( $fwddom eq $MAINDOMAIN ) {
+					print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
+				}
+			}
+			else {
+				if ( $fwddom eq $QUERY ) {
+					print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
+				}
+			}
+		}
+	}
+}
+
 print WHITE "Shell: " . CYAN $RealShell . "\n";
 my $jailapacheTweakJSON = get_whmapi1( 'get_tweaksetting', 'key=jailapache' );
 my $jaTweak             = $jailapacheTweakJSON->{data}->{tweaksetting}->{value};
@@ -762,11 +794,11 @@ print WHITE "Hosting Package: "
   . $HAS_AUTOSSL_TEXT . "\n";
 my $deprecated_theme_warning = "";
 if ( $THEME eq "x3" ) {
-    $deprecated_theme_warning = RED "WARNING - The x3 theme is deprecated. cPanel UI not loading? This is probably why!";
+    $deprecated_theme_warning = RED "\n\t\\_ WARNING - The x3 theme is deprecated. cPanel UI not loading? This is probably why!";
 }
-if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') ) {
+if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106.0.0') ) {
     if ( $THEME eq "paper_lantern" ) {
-        $deprecated_theme_warning = RED "WARNING - The paper_lantern theme is deprecated as of version 106 and will be removed in version 108.";
+        $deprecated_theme_warning = RED "\n\t\\_ WARNING - The paper_lantern theme is deprecated as of version 106 and will be removed in a future version.";
     }
 }
 my $wptkLiteJSON =
@@ -790,7 +822,7 @@ if ($custom_style) {
       . $deprecated_theme_warning . "\n";
 }
 else {
-    print WHITE "Theme: " . CYAN $THEME . expand( "\n\t\\_" . $deprecated_theme_warning . "\n" );
+    print WHITE "Theme: " . CYAN $THEME . expand( $deprecated_theme_warning . "\n" );
 }
 print WHITE "Max Addon/Alias/Sub Domains: "
   . CYAN $MAXADDON
@@ -1231,7 +1263,7 @@ my $SUB   = "";
 my $PARK  = "";
 my $ADDON = "";
 if ( $subcnt + $addoncnt + $parkcnt > 1
-    and ( $all or $listsubs or $listaddons or $listparked or $listaliased ) )
+    and ( $all or $domains or $listsubs or $listaddons or $listparked or $listaliased ) )
 {
     print WHITE "The following are associated with "
       . CYAN $MAINDOMAIN
@@ -1240,9 +1272,9 @@ if ( $subcnt + $addoncnt + $parkcnt > 1
       . WHITE ")\n";
     smborder();
 }
-if ( $all or $listsubs ) {
+if ( $all or $domains or $listsubs ) {
     print YELLOW "Sub Domains: ";
-    if ( $subcnt > 0 and ( $all or $listsubs ) ) {
+    if ( $subcnt > 0 and ( $all or $domains or $listsubs ) ) {
         print "\n";
         foreach $SUB (@SUBDOMAINS) {
             chomp($SUB);
@@ -1259,9 +1291,9 @@ if ( $all or $listsubs ) {
     smborder();
 }
 
-if ( $all or $listaddons ) {
+if ( $all or $domains or $listaddons ) {
     print YELLOW "Addon Domains: ";
-    if ( $addoncnt > 0 and ( $all or $listaddons ) ) {
+    if ( $addoncnt > 0 and ( $all or $domains or $listaddons ) ) {
         print "\n";
         foreach $ADDON (@ADDONDOMAINS) {
             chomp($ADDON);
@@ -1278,9 +1310,9 @@ if ( $all or $listaddons ) {
     smborder();
 }
 
-if ( $all or $listparked or $listaliased ) {
+if ( $all or $domains or $listparked or $listaliased ) {
     print YELLOW "Aliased (Parked) Domains: ";
-    if ( $parkcnt > 0 and ( $all or $listparked or $listaliased ) ) {
+    if ( $parkcnt > 0 and ( $all or $domains or $listparked or $listaliased ) ) {
         print "\n";
         foreach $PARK (@PARKEDDOMAINS) {
             chomp($PARK);
@@ -1600,6 +1632,10 @@ sub Usage {
     print CYAN "acctinfo" . WHITE " --listalias cptestdomain.net\n";
     print expand( GREEN
 "\t Lists all alias (parked) domains under the cptestdomain.net domain name.\n"
+    );
+    print CYAN "acctinfo" . WHITE " --domains cptestdomain.net\n";
+    print expand( GREEN
+"\t Lists all alias (parked), subdomains and addon domains under the cptestdomain.net domain name.\n"
     );
     print CYAN "acctinfo" . WHITE " --reselleraccts cptestdo\n";
     print expand( GREEN
@@ -2001,6 +2037,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
       /etc/demodomains
       /etc/ssldomains
       /var/cpanel/moddirdomains
+	  /var/cpanel/domainmap
     );
 
     my $file2searchu;
@@ -2406,6 +2443,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 or $dnscluster eq ".."
                 or $dnscluster =~ m/dnsrole/
                 or $dnscluster =~ m/json/
+                or $dnscluster =~ m/error_log/
                 or $dnscluster =~ m/.cache/ )
             {
                 next;
