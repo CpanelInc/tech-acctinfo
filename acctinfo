@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.40";
+my $VERSION = "2.5.41";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -1857,42 +1857,35 @@ sub cruft_check {
     print BRIGHT_BLUE "From your query of "
       . GREEN $QUERY
       . BRIGHT_BLUE " I have determined:\n";
-    open( ACCOUNTING, "/var/cpanel/accounting.log" );
-    foreach (<ACCOUNTING>) {
-        @temp = split(/:/);
-        if ($IS_USERNAME) {
-            $check_for = ':' . $QUERY . '$';
-        }
-        else {
-            $check_for = ':' . $QUERY . ':';
-        }
-        if (/$check_for/) {
-            $is_acct = 1
-              ; ## Main domain (sub/addon/parked don't get added to accounting.log file)
-            if (/:CREATE:/) {
+    open( my $fh, '<', '/var/cpanel/accounting.log' );
+    my @data=<$fh>;
+    close( $fh);
+    foreach my $line( @data ) {
+        chomp($line);
+        my ( $day, $mon, $date, $time, $year ) = ( split( /\s+/, $line ))[0,1,2,3,4];
+        my ( $onlyyear ) = ( split( /:/, $year ) )[0];
+        my $fulldate = $day . " " . $mon . " " . $date . " " . $time . " " . $onlyyear;
+        my ( $cmd, $owner1, $owner2, $other1, $other2, $other3 ) = ( split( /\:/, $line ))[3,4,5,6,7,8];
+        next unless( $cmd =~ m{CREATE$|REMOVE$|CREATERESELLERWITHOUTDOMAIN$} );
+        if ( $line =~ m/$QUERY/ ) {
+            $is_acct = 1;       ## Main domain (sub/addon/parked don't get added to accounting.log file)
+            if ( $cmd eq 'CREATE' ) {
+                print GREEN "Domain: $other1 with username $other3 was created on $fulldate.\n";
                 $isActive     = 1;
                 $isTerminated = 0;
-                chomp( $username   = $temp[-1] );
-                chomp( $MAINDOMAIN = $temp[-3] );
-                @temp       = ();
-                @temp       = split(/:/);
-                $createdate = @temp[0] . ":" . @temp[1] . ":" . @temp[2];
             }
-            if (/:REMOVE:/) {
-                chomp( $username   = $temp[-1] );
-                chomp( $MAINDOMAIN = $temp[-2] );
+            if ( $cmd eq 'REMOVE' ) {
+                print RED "Domain: $other1 with username $other2 was terminated on $fulldate.\n";
                 $isActive     = 0;
                 $isTerminated = 1;
-                @temp         = ();
-                @temp         = split(/:/);
-                $termdate     = @temp[0] . ":" . @temp[1] . ":" . @temp[2];
+            }
+            if ( $cmd eq 'CREATERESELLERWITHOUTDOMAIN' ) {
+                print MAGENTA "A domainless reseller account ( $other1 ) was created on $fulldate.\n";
             }
         }
     }
-    close(ACCOUNTING);
     my $NOGrep = 0;
     if ($isTerminated) {  ## $is_acct is true if this is the main account/domain
-        print "$MAINDOMAIN ($username) was terminated on $termdate\n";
         $NOGrep         = 1;
         $skipMySQLCruft = 1;
     }
@@ -1901,7 +1894,6 @@ sub cruft_check {
             print RED
 "[WARN] - $MAINDOMAIN is either root or is the same as hostname $HOSTNAME!\n";
         }
-        print "$MAINDOMAIN ($username) is active since $createdate\n";
         if ( $addoncnt > 0 ) {
 
             print "It has $addoncnt Addon domains ";
@@ -1951,7 +1943,7 @@ sub cruft_check {
         and !$MAINDOMAIN
         and !$username )
     {
-        print
+        print 
 "No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
         print "Continuing search for $QUERY...\n";
     }
@@ -1970,7 +1962,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
             ($username) = ( split( /\s+/, $isAddon ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isAddon)  = ( split( /:/,   $isAddon ) );
-            print
+            print YELLOW 
 "$QUERY has an entry in /etc/userdatadomains as an Addon Domain under the "
               . CYAN $username
               . WHITE " user\n";
@@ -1980,7 +1972,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
             ($username) = ( split( /\s+/, $isSub ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isSub)    = ( split( /:/,   $isSub ) );
-            print
+            print YELLOW 
 "$QUERY has an entry in /etc/userdatadomains as a Sub Domain under the "
               . CYAN $username
               . WHITE " user\n"
@@ -1992,7 +1984,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
             ($username) = ( split( /\s+/, $isParked ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isParked) = ( split( /:/,   $isParked ) );
-            print
+            print YELLOW 
 "$QUERY has an entry in /etc/userdatadomains as a Aliased Domain under the "
               . CYAN $username
               . WHITE " user\n";
@@ -2037,7 +2029,7 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
       /etc/demodomains
       /etc/ssldomains
       /var/cpanel/moddirdomains
-	  /var/cpanel/domainmap
+      /var/cpanel/domainmap
     );
 
     my $file2searchu;
@@ -2263,10 +2255,15 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/vdomainaliases/$QUERY", $dirstatus );
 
-        my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$MAINDOMAIN");
-        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-        else              { $dirstatus = RED "[MISSING]"; }
-        print_output( "/var/cpanel/ssl/apache_tls/$MAINDOMAIN", $dirstatus );
+        if ( $MAINDOMAIN ) {
+            my $dirstatus = check_dir("/var/cpanel/ssl/apache_tls/$MAINDOMAIN");
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            print_output( "/var/cpanel/ssl/apache_tls/$MAINDOMAIN", $dirstatus );
+        }
+        else {
+            print_output( "/var/cpanel/ssl/apache_tls/$QUERY", CYAN "[SKIPPING]" );
+        }
 
         if ($MAINDOMAIN) {
             my $dirstatus = check_dir("/var/named/$MAINDOMAIN.db");
