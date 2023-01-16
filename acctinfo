@@ -1,5 +1,5 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2014 - 2022, cPanel, L.L.C.
+# Copyright 2014 - 2023, cPanel, L.L.C.
 # All rights reserved.
 # http://cpanel.net
 #
@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.41";
+my $VERSION = "2.5.42";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -583,9 +583,9 @@ if ( $QUERY eq $HOSTNAME ) {
     print RED
 "[WARN] - $QUERY is the same as hostname $HOSTNAME! (Can cause email issues such as User not found)\n";
 }
-
+# RIGHT HERE - check if suspended or not
 my $LastLoginIP;
-if ( -e $RealHome ) {
+if ( -e $RealHome && !$UserSuspended ) {
     my $LastLoginIPdata = get_uapi( 'LastLogin', 'get_last_or_current_logged_in_ip', "--user=$username" );
     $LastLoginIP = $LastLoginIPdata->{result}->{data};
     chomp($LastLoginIP);
@@ -606,8 +606,8 @@ print WHITE "Real Home Directory (/etc/passwd): "
   . YELLOW " - Checking permissions...";
 print "\n";
 
-checkperms2();
-securitychk();
+checkperms2() unless( $UserSuspended );
+securitychk() unless( $UserSuspended );
 
 # Check if user is in demo mode
 open( DEMO, "/etc/demousers" );
@@ -801,20 +801,22 @@ if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.10
         $deprecated_theme_warning = RED "\n\t\\_ WARNING - The paper_lantern theme is deprecated as of version 106 and will be removed in a future version.";
     }
 }
-my $wptkLiteJSON =
-  get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit' );
-my $wptkDluxJSON = get_uapi( "--user=$username", 'Features', 'has_feature',
-    'name=wp-toolkit-deluxe' );
-my $hasWPTKLite    = $wptkLiteJSON->{result}->{data};
-my $hasWPTKDeluxe  = $wptkDluxJSON->{result}->{data};
-my $hasWPTKFeature = "Neither Lite nor Deluxe";
-if ($hasWPTKLite) {
-    $hasWPTKFeature = "Lite";
+
+if( !$UserSuspended ) {
+    my $wptkLiteJSON = get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit' );
+    my $wptkDluxJSON = get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit-deluxe' );
+    my $hasWPTKLite    = $wptkLiteJSON->{result}->{data};
+    my $hasWPTKDeluxe  = $wptkDluxJSON->{result}->{data};
+    my $hasWPTKFeature = "Neither Lite nor Deluxe";
+    if ($hasWPTKLite) {
+        $hasWPTKFeature = "Lite";
+    }
+    if ($hasWPTKDeluxe) {
+        $hasWPTKFeature = "Deluxe";
+    }
+    print WHITE "WP Toolkit Feature: " . CYAN $hasWPTKFeature . "\n";
 }
-if ($hasWPTKDeluxe) {
-    $hasWPTKFeature = "Deluxe";
-}
-print WHITE "WP Toolkit Feature: " . CYAN $hasWPTKFeature . "\n";
+
 if ($custom_style) {
     print WHITE "Theme: "
       . CYAN $THEME
@@ -887,8 +889,6 @@ nginx_caching();
 
 my $PHPDefaultVersion;
 
-my $isEA4 = 0;
-
 if ($tomcat) {
     chk_tomcat();
 }
@@ -904,7 +904,6 @@ else {
 }
 
 # Check for php-selector (CloudLinux)
-$isEA4 = isEA4();
 my $clPHPVer = "";
 $PHPDefaultVersion = get_system_php_version();
 
@@ -982,12 +981,14 @@ if ( !$skipEA4 ) {
 chomp($PHPiniFile);
 chomp($PHPiniLoad);
 chomp($PHPiniScan);
-my $PHPHandlerJSON = get_uapi(
-    'LangPHP',    'php_get_domain_handler',
-    'type=vhost', "vhost=$MAINDOMAIN",
-    "--user=$username"
-);
-my $PHPHandler = $PHPHandlerJSON->{result}->{data}->{php_handler};
+
+my $PHPHandlerJSON;
+my $PHPHandler;
+if ( ! $UserSuspended ) {
+        $PHPHandlerJSON = get_uapi( 'LangPHP', 'php_get_domain_handler', 'type=vhost', "vhost=$MAINDOMAIN", "--user=$username");
+        $PHPHandler = $PHPHandlerJSON->{result}->{data}->{php_handler};
+}
+
 my $suPHPConfPathFound;
 if ( -e ("$docroot/.htaccess") ) {
     $suPHPConfPathFound =
@@ -1060,7 +1061,22 @@ sub custom_UD {
             chomp($confFile);
             next unless( $confFile =~ m{/$username/} );
             if ( $confFile =~ m{/$username/} ) {
-                print expand( YELLOW "Found custom userdata directory for $username in:\n") unless ($NoShowHeader);
+                print expand( YELLOW "Found custom Apache userdata directory for $username in:\n") unless ($NoShowHeader);
+                $NoShowHeader = 1;
+                print expand("\t \\_ $confFile\n");
+            }
+        }
+    }
+    if ( -d ("/etc/nginx/conf.d/users/$username") ) {
+        my $CONFDATA = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "/etc/nginx/conf.d/users/$username", '-name', '*.conf' );
+        my @CONFDATA = split /\n/, $CONFDATA;
+        my $confFile;
+        my $NoShowHeader = 0;
+        foreach $confFile (@CONFDATA) {
+            chomp($confFile);
+            next unless( $confFile =~ m{/$username/} );
+            if ( $confFile =~ m{/$username/} ) {
+                print expand( YELLOW "Found custom NginX user directory for $username in:\n") unless ($NoShowHeader);
                 $NoShowHeader = 1;
                 print expand("\t \\_ $confFile\n");
             }
@@ -1118,26 +1134,13 @@ else {
 my $FoundInHTTPDconf;
 
 # NEED TO REVIEW THIS.  SHOULD I JUST CHECK FOR $QUERY (regardless if it's a username or not?)
-if ($isEA4) {
-    if ($IS_USERNAME) {
-        $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
-    }
-    else {
-        $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
-    }
+if ($IS_USERNAME) {
+    $FoundInHTTPDconf = timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
 }
 else {
-    if ($IS_USERNAME) {
-        $FoundInHTTPDconf =
-          timed_run( 3, "grep -w '$MAINDOMAIN' /usr/local/apache/conf/httpd.conf" );
-    }
-    else {
-        $FoundInHTTPDconf = timed_run( 3,
-            "grep -w '$QUERY' /usr/local/apache/conf/httpd.conf" );
-    }
+    $FoundInHTTPDconf = timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
 }
+
 if ( !($FoundInHTTPDconf) ) {
     if ($IS_USERNAME) {
         print RED "[WARN] "
@@ -1252,7 +1255,7 @@ else {
 
 if ( $DNSLinesCnt != $TotalDomainCnt ) {
     print expand(
-            RED "\t\\_ [WARN]: One or more DNS lines may be missing from "
+            RED "\t\\_ [WARN]: Total domains for $username doesn't match the DNS lines in "
           . BOLD CYAN
 "/var/cpanel/users/$username [DNS: $DNSLinesCnt / Cnt: $TotalDomainCnt]\n"
     );
@@ -1326,11 +1329,11 @@ if ( $all or $domains or $listparked or $listaliased ) {
           . GREEN $username
           . WHITE ")\n";
     }
+    border();
 }
 
 # RESELLER INFO
 if ( $reselleraccts or $all ) {
-    if ($all) { border(); }
     my $owned_by_reseller = "";
     if ( $Is_Reseller and $ResellerAcctsCnt > 0 ) {
         print CYAN $MAINDOMAIN
@@ -1355,6 +1358,7 @@ if ( $reselleraccts or $all ) {
           . WHITE ")\n";
 
     }
+    border();
 }
 
 if ( $resellerperms or $all ) {
@@ -1501,6 +1505,7 @@ if ( $listdbs or $all ) {
         print BOLD MAGENTA
           "PostGreSQL is not enabled/running or installed on $HOSTNAME\n";
     }
+    border();
 }
 
 if ( $listssls or $all ) {
@@ -2131,9 +2136,12 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         print_output( "/var/cpanel/users/$username", $dirstatus );
         if ( -e ("/var/cpanel/users/$username") ) {
             if ( $DNSLinesCnt != $TotalDomainCnt ) {
-                print expand( RED
-"\t \\_ [WARN]: One or more DNS lines may be missing from this file! [DNS: $DNSLinesCnt / Cnt: $TotalDomainCnt]\n"
-                );
+                if ( $DNSLinesCnt > $TotalDomainCnt ) {
+                    print expand( RED "\t \\_ [WARN]: There may be extra DNS lines in this file! [DNS: $DNSLinesCnt / Cnt: $TotalDomainCnt]\n");
+                }
+                if ( $DNSLinesCnt < $TotalDomainCnt ) {
+                    print expand( RED "\t \\_ [WARN]: One or more DNS lines may be missing from this file! [DNS: $DNSLinesCnt / Cnt: $TotalDomainCnt]\n");
+                }
                 shift @DNSLinesOnly;
                 my %y     = map { $_ => 1 } @DNSLinesOnly;
                 my @diff1  = grep( !defined $y{$_}, @OtherDomains );
@@ -2148,7 +2156,12 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 else {
                     @diff=@diff2;
                 }
-                print expand( "\t\\_ The following domains are missing from /var/cpanel/users/$username:\n");
+                if ( $DNSLinesCnt > $TotalDomainCnt ) {
+                    print expand( "\t\\_ The following domains should probably not be listed in /var/cpanel/users/$username:\n");
+                }
+                if ( $DNSLinesCnt < $TotalDomainCnt ) {
+                    print expand( "\t\\_ The following domains might be missing from /var/cpanel/users/$username:\n");
+                }
                 foreach my $diff (@diff) {
                     chomp($diff);
                     print expand( CYAN "\t\t\\_ " . $diff . "\n" );
@@ -2275,6 +2288,18 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
             print_output( "/var/named/", CYAN "[SKIPPING]" );
         }
 
+        if ($MAINDOMAIN) {
+            my $dirstatus = check_file_existance( '/etc/named.conf',
+                'zone "' . $MAINDOMAIN . '"' );
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            print_output( "/etc/named.conf", $dirstatus );
+        }
+        else {
+            print_output( "/etc/named.conf", CYAN "[SKIPPING]" );
+        }
+
+        # RIGHT HERE
 
         # Check /etc/apache2/logs/domlogs/$QUERY
         if ($isAddon) {
@@ -2307,53 +2332,55 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         }
 
         if ($MAINDOMAIN) {
-            my $dirstatus = check_file_existance( '/etc/named.conf',
-                'zone "' . $MAINDOMAIN . '"' );
+            my $dirstatus =
+              check_file_existance( "/etc/apache2/conf/httpd.conf", $MAINDOMAIN );
             if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
             else              { $dirstatus = RED "[MISSING]"; }
-            print_output( "/etc/named.conf", $dirstatus );
+            print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
+            my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log" );
+            if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else { $dirstatus = RED "[MISSING]"; }
+            print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log", $dirstatus );
+            my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log" );
+            if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else { $dirstatus = RED "[MISSING]"; }
+            print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log", $dirstatus );
         }
         else {
-            print_output( "/etc/named.conf", CYAN "[SKIPPING]" );
+            print_output( "/etc/apache2/logs/domlogs/", CYAN "[SKIPPING]" );
         }
 
-        my $isEA4 = isEA4();
-        if ($isEA4) {
-            if ($MAINDOMAIN) {
-                my $dirstatus =
-                  check_file_existance( "/etc/apache2/conf/httpd.conf",
-                    $MAINDOMAIN );
-                if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-                else              { $dirstatus = RED "[MISSING]"; }
-                print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
-                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log" );
-                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-                else { $dirstatus = RED "[MISSING]"; }
-                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-ssl_log", $dirstatus );
-                my $dirstatus = check_dir( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log" );
-                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-                else { $dirstatus = RED "[MISSING]"; }
-                print_output( "/etc/apache2/logs/domlogs/$MAINDOMAIN-bytes_log", $dirstatus );
-            }
-            else {
-                print_output( "/etc/apache2/logs/domlogs/", CYAN "[SKIPPING]" );
-            }
+        # Check /var/log/nginx/domains/$QUERY
+        if ($isAddon) {
+            my $SubDomain = ( split( /\./, $QUERY ) )[0] . "." . $MAINDOMAIN;
+            chomp($SubDomain);
+            my $dirstatus = check_dir("/var/log/nginx/domains/$SubDomain");
+            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+            else              { $dirstatus = RED "[MISSING]"; }
+            print_output( "/var/log/nginx/domains/$SubDomain", $dirstatus );
         }
         else {
             if ($MAINDOMAIN) {
                 my $dirstatus =
-                  check_file_existance( "/usr/local/apache/conf/httpd.conf",
-                    $MAINDOMAIN );
+                  check_dir("/var/log/nginx/domains/$MAINDOMAIN");
                 if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
                 else              { $dirstatus = RED "[MISSING]"; }
-                print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
+                print_output( "/var/log/nginx/domains/$MAINDOMAIN", $dirstatus );
+                my $dirstatus = check_dir( "/var/log/nginx/domains/$QUERY-ssl_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/var/log/nginx/domains/$QUERY-ssl_log", $dirstatus );
+                my $dirstatus = check_dir( "/var/log/nginx/domains/$QUERY-bytes_log" );
+                if ( $dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+                else { $dirstatus = RED "[MISSING]"; }
+                print_output( "/var/log/nginx/domains/$QUERY-bytes_log", $dirstatus );
             }
             else {
-                print_output( "/usr/local/apache/conf/httpd.conf",
-                    CYAN "[SKIPPING]" );
+                print_output( "/var/log/nginx/domains/", CYAN "[SKIPPING]" );
             }
         }
     }
+
     else {              ## Domain name was entered (check $QUERY).
         my $dirstatus = check_dir("/etc/valiases/$QUERY");
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
@@ -2408,23 +2435,10 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/named.conf", $dirstatus );
 
-        my $isEA4 = isEA4();
-        if ($isEA4) {
-            my $dirstatus =
-              check_file_existance( "/etc/apache2/conf/httpd.conf",
-                $MAINDOMAIN );
-            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-            else              { $dirstatus = RED "[MISSING]"; }
-            print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
-        }
-        else {
-            my $dirstatus =
-              check_file_existance( "/usr/local/apache/conf/httpd.conf",
-                $MAINDOMAIN );
-            if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
-            else              { $dirstatus = RED "[MISSING]"; }
-            print_output( "/usr/local/apache/conf/httpd.conf", $dirstatus );
-        }
+        my $dirstatus = check_file_existance( "/etc/apache2/conf/httpd.conf", $MAINDOMAIN );
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/etc/apache2/conf/httpd.conf", $dirstatus );
     }
 
     # Check for DNS Clustering
@@ -2749,7 +2763,6 @@ sub get_php_version {
 }
 
 sub get_system_php_version() {
-    return unless ($isEA4);
     my $phpDefaultJSON = get_whmapi1('php_get_system_default_version');
     my $phpDefault     = $phpDefaultJSON->{data}->{version};
     return $phpDefault;
@@ -2759,13 +2772,6 @@ sub alltrim() {
     my $string2trim = $_[0];
     $string2trim =~ s/^\s*(.*?)\s*$/$1/;
     return $string2trim;
-}
-
-sub isEA4 {
-    if ( -f "/etc/cpanel/ea4/is_ea4" ) {
-        return 1;
-    }
-    return undef;
 }
 
 sub display_mail_info {
