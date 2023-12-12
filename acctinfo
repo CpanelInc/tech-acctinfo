@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.43";
+my $VERSION = "2.5.45";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -120,6 +120,7 @@ my $tomcat          = undef;
 my $scan            = undef;
 my $wpinfo          = undef;
 my $showpass        = undef;
+my $showteaminfo    = undef;
 my $acct_over_quota = 0;
 our $isInNamedConf = 0;
 our $spincounter;
@@ -146,6 +147,7 @@ GetOptions(
     'scan'          => \$scan,
     'wpinfo'        => \$wpinfo,
     'showpass'      => \$showpass,
+    'teams'  	    => \$showteaminfo,
 );
 
 if ( $> != 0 ) {
@@ -584,6 +586,25 @@ if ( $maindocroot eq "" ) {
     print expand( RED "\t \\_ [WARN] - DocumentRoot is blank!\n" );
 }
 
+if ( $OnCloud ) {
+    print GREEN expand( "\tcPCloud Instance Detected...\n");
+    my $namespaces=timed_run( 3, 'kubectl', 'get', 'namespaces' );
+    my @namespaces=split /\n/, $namespaces;
+    foreach my $namespace(@namespaces) {
+        chomp($namespace);
+        next unless( $namespace =~ m/$username/ );
+        print expand( YELLOW "\t " . $namespace . "\n");
+        last;
+    }
+    my $serviceweb=timed_run( 3, 'kubectl', '-n', "cpsc-service-web-$username", 'get', 'all' );
+    my @servicewebs=split /\n/, $serviceweb;
+    foreach my $line(@servicewebs) {
+        chomp($line);
+        print expand( CYAN "\t\t\\_ $line\n" ) if ( $line =~ m{pod/cpsc-service-web} );
+    }
+    print "\n";
+}
+
 print WHITE "Real Home Directory (/etc/passwd): "
   . CYAN $RealHome
   . YELLOW " - Checking permissions...";
@@ -657,26 +678,26 @@ if ( $showHeader || $all ) {
 
 # domainfwdip and domainfwdmap checks
 if ( -e '/var/cpanel/domainfwdip' ) {
-	if ( -s '/var/cpanel/domainmap' ) {
-		open( my $fh, '<', '/var/cpanel/domainmap');
-		my @domainmaps=<$fh>;
-		close( $fh );
-		foreach my $line(@domainmaps) {
-			chomp($line);
-			my ($fwddom,$fwdurl) = ( split( /\=/, $line ));
-			#if ( $fwddom eq $MAINDOMAIN or $fwddom eq $QUERY ) {
-			if ( $IS_USERNAME ) {
-				if ( $fwddom eq $MAINDOMAIN ) {
-					print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
-				}
-			}
-			else {
-				if ( $fwddom eq $QUERY ) {
-					print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
-				}
-			}
-		}
-	}
+    if ( -s '/var/cpanel/domainmap' ) {
+        open( my $fh, '<', '/var/cpanel/domainmap');
+        my @domainmaps=<$fh>;
+        close( $fh );
+        foreach my $line(@domainmaps) {
+            chomp($line);
+            my ($fwddom,$fwdurl) = ( split( /\=/, $line ));
+            #if ( $fwddom eq $MAINDOMAIN or $fwddom eq $QUERY ) {
+            if ( $IS_USERNAME ) {
+                if ( $fwddom eq $MAINDOMAIN ) {
+                    print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
+                }
+            }
+            else {
+                if ( $fwddom eq $QUERY ) {
+                    print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
+                }
+            }
+        }
+    }
 }
 
 print WHITE "Shell: " . CYAN $RealShell . "\n";
@@ -1508,6 +1529,41 @@ if ( $listdbs or $all ) {
     border();
 }
 
+if ( $showteaminfo or $all ) {
+	my $teamdir = '/var/cpanel/team';
+	open( my $fh, '<', "$teamdir/$username" );
+    my $cnt=0;
+    while ( <$fh> ) {
+        $cnt++;
+    }
+    close( $fh );
+	$cnt--;
+	print "Getting team info...\n";
+	my $max_team_accts=7;
+	my $get_team_info = get_uapi( 'Team', 'list_team', "--user=$username" );
+	my $i=0;
+    print expand( RED $get_team_info->{result}->{errors}->[0] . "\n" ) unless( $get_team_info->{result}->{errors}->[0] );
+	print "No team members configured.\n" unless( $get_team_info->{result}->{data}->[$i]->{created} );
+	while( $i < $cnt ) {
+		print CYAN "Username: $get_team_info->{result}->{data}->[$i]->{username}\@$MAINDOMAIN\n" if ( defined $get_team_info->{result}->{data}->[$i]->{username} );
+		print expand( CYAN "\t\\_Created: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{created} )) . "\n" if ( defined $get_team_info->{result}->{data}->[$i]->{created} );
+		print expand( CYAN "\t\\_Last Logged In: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{lastlogin} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{lastlogin} eq "" );
+		print expand( "\t\\_Expires: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{expire_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_date} eq "" );
+		print expand( CYAN "\t\t\\_Expire Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{expire_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_reason} eq "" );
+		print expand( CYAN "\t\\_Suspend Date: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{suspend_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_date} eq "" );
+		print expand( "\t\t\\_Suspend Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{suspend_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_reason} eq "" );
+		my $x=0;
+		print expand( CYAN "\t\\_Roles: " );
+		while( $x < 4 ) {
+			print GREEN $get_team_info->{result}->{data}->[$i]->{roles}->[$x] . " ";
+			$x++;
+		}
+		print "\n";
+		$i++;
+	}
+	print "\n";
+}
+
 if ( $listssls or $all ) {
     print WHITE "SSL Certificates installed under main domain: "
       . CYAN $MAINDOMAIN
@@ -1675,6 +1731,10 @@ sub Usage {
     print expand( GREEN
 "\t Attempt to obtain certain Apache Header information and display if found [ requires patience ].\n"
     );
+    print CYAN "acctinfo" . WHITE " --teams [domain.tld|username]\n";
+    print expand( GREEN
+"\t Show any users created via Team Manager and their info including roles.\n"
+    );
     print CYAN "acctinfo" . WHITE " --help\n";
     print expand( GREEN
 "\t Shows this usage information. (NOTE: ACTION can go before or after domain/username).\n\n"
@@ -1739,21 +1799,20 @@ sub check_for_nat {
 }
 
 sub hasCloud {
-	my $tcIP=shift;
-	return unless( -x '/usr/local/bin/kubectl' );
-	my $getnodes_raw = Cpanel::SafeRun::Timed::timedsaferun( 5, 'kubectl', 'get', 'nodes', '-o', 'wide', '-o', 'json' );
-	if ( grep { /$tcIP/ } $getnodes_raw ) {
-		return 1;
-	}
-	else { 
-		return 0;
-	}
+    my $tcIP=shift;
+    return unless( -x '/usr/local/bin/kubectl' );
+    my $getnodes_raw = Cpanel::SafeRun::Timed::timedsaferun( 5, 'kubectl', 'get', 'nodes', '-o', 'wide', '-o', 'json' );
+    if ( grep { /$tcIP/ } $getnodes_raw ) {
+        return 1;
+    }
+    else {
+        return 0;
+    }
 }
 
 sub check_resolved_ip {
     my $resolved_ip      = shift;
     my $RetVal           = "";
-	# RIGHT HERE
     my $is_cloudflare_ip = check_cloudflare_ips($resolved_ip);
     if ($is_cloudflare_ip) {
         $RetVal = $RetVal .= " <<--- CloudFlare IP Address";
@@ -1767,24 +1826,31 @@ sub check_resolved_ip {
         $privateIP = $ListOfIPs->{ip};
         chomp($publicIP);
         chomp($privateIP);
+		#print "DEBUG: publicIP=$publicIP / resolved_ip=$resolved_ip / IPADDR=$IPADDR\n";
         $ip_on_server = 1 if ( $publicIP eq $resolved_ip );
         $isNat        = 1 if ( $publicIP ne $privateIP );
-    }
-    if ( !$ip_on_server ) {
-        $RetVal = $RetVal .= "[Not on this server]";
-        $defaultsite = 1;
-        return $RetVal;
-    }
-    if ($isNat) {
-        $RetVal =
-          " Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
-        $defaultsite = 0;
-    }
-    else {    ## NOT A NAT SYSTEM
-        $RetVal =
-          " Direct Route ($resolved_ip => $resolved_ip)" . GREEN " [SAME]";
-        $defaultsite = 0;
-    }
+		#    }
+    	if ( !$ip_on_server ) {
+        	$RetVal = $RetVal .= "[Not on this server]";
+        	$defaultsite = 1;
+        	return $RetVal;
+    	}
+		if ( $IPADDR ne $resolved_ip ) {
+			$RetVal = " Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
+			$defaultsite = 1;
+			return $RetVal;
+		}
+    	if ($isNat) {
+        	$RetVal =
+          	" Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
+        	$defaultsite = 0;
+    	}
+    	else {    ## NOT A NAT SYSTEM
+        	$RetVal =
+          	" Direct Route ($resolved_ip => $resolved_ip)" . GREEN " [SAME]";
+        	$defaultsite = 0;
+    	}
+	}
     return $RetVal;
 }
 
@@ -2219,12 +2285,7 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/var/cpanel/databases/$username.$yaml_json",
             $dirstatus );
-        my $dbindex =
-          (
-            Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '<', '11.50')
-          )
-          ? "/var/cpanel/databases/dbindex.db"
-          : "/var/cpanel/databases/dbindex.db.json";
+        my $dbindex = "/var/cpanel/databases/dbindex.db.json";
         my $dirstatus = check_file_existance( $dbindex, $username );
         if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
         else              { $dirstatus = RED "[MISSING]"; }
@@ -2311,8 +2372,6 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
         else {
             print_output( "/etc/named.conf", CYAN "[SKIPPING]" );
         }
-
-        # RIGHT HERE
 
         # Check /etc/apache2/logs/domlogs/$QUERY
         if ($isAddon) {
@@ -3907,10 +3966,12 @@ sub checkperms2 {
     if ($IS_USERNAME) {
         getPerms( "/etc/valiases/$MAINDOMAIN", "0640", "$username", "mail" );
         getPerms( "/etc/vfilters/$MAINDOMAIN", "0640", "$username", "mail" );
+        getPerms( "/var/cpanel/ssl/domain_tls/$MAINDOMAIN/combined", "0640", "root", "mail" );
     }
     else {
         getPerms( "/etc/valiases/$QUERY", "0640", "$username", "mail" );
         getPerms( "/etc/vfilters/$QUERY", "0640", "$username", "mail" );
+        getPerms( "/var/cpanel/ssl/domain_tls/$QUERY/combined", "0640", "root", "mail" );
     }
     if ( !-e ("$RealHome") ) {
         print expand( RED "\t \\_ [WARN] - $RealHome directory is missing!\n" );
@@ -4007,10 +4068,8 @@ sub getPerms {
     my $DefPerm     = $_[1];
     my $DefPermUser = $_[2];
     my $DefPermGrp  = $_[3];
-    if ( !-e "$tcPermFile" ) {
-        print RED "[WARN] - $tcPermFile is missing!\n";
-        return;
-    }
+    return unless( -e $tcPermFile );
+
     my $currentPerm = sprintf '%04o', ( stat $tcPermFile )[2] & 07777;
     my $curUserID   = ( stat $tcPermFile )[4];
     my $curGrpID    = ( stat $tcPermFile )[5];
@@ -4706,7 +4765,8 @@ sub getProfileNode {
 # Note that if running older than 74 (when profiles were introduced) this should just return true.
     my $ProfileNodeJSON = get_whmapi1('get_current_profile');
     $ProfileNode = $ProfileNodeJSON->{data}->{code};
-    if ( $ProfileNode ne "STANDARD" ) {
+    return if ( $ProfileNode eq 'WP2' );
+    if ( $ProfileNode ne 'STANDARD' ) {
         print RED "This server is not running on a standard node "
           . CYAN "[ "
           . WHITE $ProfileNode
@@ -4730,33 +4790,41 @@ sub get_wp_info {
         print RED "[WARN] - WordPress is in maintenance mode!\n" unless ( !$inmaintmode );
         open my $fh, '<:encoding(UTF-8)', $wpconf;
         my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
-        while ( my $line = <$fh> ) {
-            if ( $line =~ m/DB_HOST/ ) {
-                ($dbhost) = ( split( /'/, $line ) )[3];
-                print CYAN "Host: " . YELLOW $dbhost . "\n";
-            }
+        my @wpconfdata=<$fh>;
+        close( $fh );
+        foreach my $line( @wpconfdata ) {
+            chomp($line);
+            next unless( $line =~ m{DB_NAME|DB_HOST|DB_USER|DB_PASSWORD|table_prefix} );
             if ( $line =~ m/DB_NAME/ ) {
                 ($dbname) = ( split( /'/, $line ) )[3];
                 print CYAN "WordPress Database Name: " . YELLOW $dbname . "\n";
+                next;
+            }
+            if ( $line =~ m/DB_HOST/ ) {
+                ($dbhost) = ( split( /'/, $line ) )[3];
+                print CYAN "Host: " . YELLOW $dbhost . "\n";
+                next;
             }
             if ( $line =~ m/DB_USER/ ) {
                 ($dbuser) = ( split( /'/, $line ) )[3];
                 print CYAN "WordPress Database User: " . YELLOW $dbuser . "\n";
+                next;
             }
             if ( $line =~ m/DB_PASSWORD/ ) {
                 ($dbpass) = ( split( /'/, $line ) )[3];
-                print CYAN "Database Password: " . YELLOW $dbpass . "\n"
-                unless ( !$insecure );
-                print CYAN "Database Password: "
-                . GREEN
-                . "[REDACTED] "
-                . MAGENTA "(use --showpass to reveal)\n"
-                unless ($insecure);
+                print CYAN "Database Password: " . YELLOW $dbpass . "\n" unless ( !$insecure );
+                print CYAN "Database Password: " . GREEN . "[REDACTED] " . MAGENTA "(use --showpass to reveal)\n" unless ($insecure);
+                next;
             }
             if ( $line =~ m/table_prefix/ ) {
                 ($tblprefix) = ( split( /'/, $line ) )[1];
                 print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
             }
+            my %attr = ( PrintError=>0, RaiseError=>0 );
+            my $dbconnect = DBI->connect("dbi:mysql:$dbname",$dbuser,$dbpass, \%attr);
+            print MAGENTA "Connection check using above credentials: ";
+            print GREEN "Success\n" if( defined( $dbconnect ));
+            print RED "Failed\n" unless( defined( $dbconnect ));
             my $DB_Exists = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', '-BNe', "SHOW DATABASES" );
             my @DB_Exists = split /\n/, $DB_Exists;
             foreach my $line(@DB_Exists) {
