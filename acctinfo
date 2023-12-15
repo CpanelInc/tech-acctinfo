@@ -1810,7 +1810,7 @@ sub hasCloud {
     }
 }
 
-sub check_resolved_ip {
+#sub check_resolved_ip {
     my $resolved_ip      = shift;
     my $RetVal           = "";
     my $is_cloudflare_ip = check_cloudflare_ips($resolved_ip);
@@ -1826,82 +1826,80 @@ sub check_resolved_ip {
         $privateIP = $ListOfIPs->{ip};
         chomp($publicIP);
         chomp($privateIP);
-		#print "DEBUG: publicIP=$publicIP / resolved_ip=$resolved_ip / IPADDR=$IPADDR\n";
+        print "DEBUG: publicIP=$publicIP / resolved_ip=$resolved_ip / IPADDR=$IPADDR\n";
         $ip_on_server = 1 if ( $publicIP eq $resolved_ip );
         $isNat        = 1 if ( $publicIP ne $privateIP );
-		#    }
-    	if ( !$ip_on_server ) {
-        	$RetVal = $RetVal .= "[Not on this server]";
-        	$defaultsite = 1;
-        	return $RetVal;
-    	}
-		if ( $IPADDR ne $resolved_ip ) {
-			$RetVal = " Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
-			$defaultsite = 1;
-			return $RetVal;
-		}
-    	if ($isNat) {
-        	$RetVal =
-          	" Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
-        	$defaultsite = 0;
-    	}
-    	else {    ## NOT A NAT SYSTEM
-        	$RetVal =
-          	" Direct Route ($resolved_ip => $resolved_ip)" . GREEN " [SAME]";
-        	$defaultsite = 0;
-    	}
-	}
+        #    }
+        if ( !$ip_on_server ) {
+            $RetVal = $RetVal .= "[Not on this server]";
+            $defaultsite = 1;
+            return $RetVal;
+        }
+        if ( $IPADDR ne $resolved_ip && !$isNat ) {
+            $RetVal = " Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
+            $defaultsite = 1;
+            return $RetVal;
+        }
+        if ($isNat) {
+            $RetVal = " Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
+            $defaultsite = 0;
+        }
+        else {    ## NOT A NAT SYSTEM
+            $RetVal = " Direct Route ($resolved_ip => $resolved_ip)" . GREEN " [SAME]";
+            $defaultsite = 0;
+        }
+    }
     return $RetVal;
-}
+    #}
 
 # OLD ROUTINE
-#sub check_resolved_ip {
-#    my $IP2CHK        = $shift;
-#    my $RetVal        = "";
-#    my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
-#    if ($IS_CLOUDFLARE) {
-#        $RetVal = $RetVal .= " <<--- CloudFlare IP Address";
-#        $defaultsite = 1;
-#        return $RetVal;
-#    }
-#    my $ListIPsJSON     = get_whmapi1('listips');
-#    my $IS_IP_ON_SERVER = 0;
-#    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-#        if ( $ListOfIPs->{public_ip} eq $IP2CHK ) {
-#            $IS_IP_ON_SERVER = 1;
-#        }
-#    }
-#    if ( !$IS_IP_ON_SERVER ) {
-#        $RetVal = $RetVal .= "[Not on this server]";
-#        $defaultsite = 1;
-#        return $RetVal;
-#    }
-#
-#    if ( -e ("/var/cpanel/cpnat") ) {
-#        open( CPNAT, "/var/cpanel/cpnat" );
-#        my @CPNAT = <CPNAT>;
-#        close(CPNAT);
-#        my $cpnatline;
-#        my $RetVal;
-#        foreach $cpnatline (@CPNAT) {
-#            chomp($cpnatline);
-#            my ( $private_ip, $public_ip ) = ( split( /\s+/, $cpnatline ) );
-#            chomp($public_ip);
-#            chomp($private_ip);
-#            if ( $IP2CHK eq $public_ip ) {
-#                $RetVal = " Routed via 1:1 NAT ($public_ip => $private_ip)"
-#                  . GREEN " [SAME]";
-#                $defaultsite = 0;
-#                return $RetVal;
-#            }
-#        }
-#    }
-#    else {
-#        $RetVal      = " Direct Route ($IP2CHK => $IP2CHK)" . GREEN " [SAME]";
-#        $defaultsite = 0;
-#        return $RetVal;
-#    }
-#}
+sub check_resolved_ip {
+    my $IP2CHK        = shift;
+    my $RetVal        = "";
+    my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
+    if ($IS_CLOUDFLARE) {
+        $RetVal = $RetVal .= " <<--- CloudFlare IP Address";
+        $defaultsite = 1;
+        return $RetVal;
+    }
+    my $ListIPsJSON     = get_whmapi1('listips');
+    my $IS_IP_ON_SERVER = 0;
+    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
+        if ( $ListOfIPs->{public_ip} eq $IP2CHK ) {
+            $IS_IP_ON_SERVER = 1;
+        }
+    }
+    if ( !$IS_IP_ON_SERVER ) {
+        $RetVal = $RetVal .= "[Not on this server]";
+        $defaultsite = 1;
+        return $RetVal;
+    }
+
+    if ( -e ("/var/cpanel/cpnat") ) {
+        open( CPNAT, "/var/cpanel/cpnat" );
+        my @CPNAT = <CPNAT>;
+        close(CPNAT);
+        my $cpnatline;
+        my $RetVal;
+        foreach $cpnatline (@CPNAT) {
+            chomp($cpnatline);
+            my ( $private_ip, $public_ip ) = ( split( /\s+/, $cpnatline ) );
+            chomp($public_ip);
+            chomp($private_ip);
+            if ( $IP2CHK eq $public_ip ) {
+                $RetVal = " Routed via 1:1 NAT ($public_ip => $private_ip)"
+                  . GREEN " [SAME]";
+                $defaultsite = 0;
+                return $RetVal;
+            }
+        }
+    }
+    else {
+        $RetVal      = " Direct Route ($IP2CHK => $IP2CHK)" . GREEN " [SAME]";
+        $defaultsite = 0;
+        return $RetVal;
+    }
+}
 
 sub cruft_check {
     border();
