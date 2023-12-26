@@ -1761,6 +1761,24 @@ sub smborder {
     return;
 }
 
+sub check_if_on_server {
+	my $tcIPaddr=shift;
+    my $ListIPsJSON = get_whmapi1('listips');
+    my $publicIP = 0;
+    my $privateIP = 0;
+    my $ip_on_server = 0;
+    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
+        $publicIP  = $ListOfIPs->{public_ip};
+        $privateIP = $ListOfIPs->{ip};
+        chomp($publicIP);
+        chomp($privateIP);
+		$ip_on_server = 1 if ( $privateIP eq $tcIPaddr );
+		$ip_on_server = 1 if ( $publicIP eq $tcIPaddr );
+		last if ( $ip_on_server );
+    }
+	return $ip_on_server;
+}
+
 sub check_cloudflare_ips {
     my $chkIP = shift;
     chomp($chkIP);
@@ -1841,41 +1859,36 @@ sub check_resolved_ip {
         return $RetVal;
     }
 
+	# RIGHT HERE
     # is $tcIPaddr an RFC1918 (private) IP?
     my $isRFC1918 = check_for_rfc1918($tcIPaddr);
 
     # Check if either IP is on the server.
-    my $ListIPsJSON = get_whmapi1('listips');
-    my ( $ip_on_server, $publicIP, $privateIP ) = 0;
-    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-        $publicIP  = $ListOfIPs->{public_ip};
-        $privateIP = $ListOfIPs->{ip};
-        chomp($publicIP);
-        chomp($privateIP);
-        $ip_on_server = 1 if ( $publicIP eq $tcResolvedIP );
-		$ip_on_server = 1 if ( $privateIP eq $tcIPaddr );
-    }
-    if ( !$ip_on_server ) {
-        $RetVal .= " <<--- [Not on this server]";
-        $defaultsite = 1;
-        return $RetVal;
-    }
-    if ($isRFC1918 && $tcResolvedIP eq $publicIP ) {
-        $RetVal .= " <<--- Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
-        $defaultsite = 0;
-    }
-    elsif ( $publicIP eq $tcIPaddr && !$isRFC1918 ) {
-        $RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
-        $defaultsite = 0;
-    }
-    else {
-        $RetVal .= " <<--- Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
-        $defaultsite = 1;
-    }
+	my $IP_ON_SERVER=check_if_on_server($tcResolvedIP);
+	if ( ! $IP_ON_SERVER ) {
+		$RetVal .= " <<--- Not on this server";
+    	$defaultsite = 1;
+		return $RetVal;
+	}
+
     if ( $isRFC1918 ) {
         # Should be a NAT system, does /var/cpanel/cpnat exist?
-        #$RetVal .= " <<--- missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
-        $RetVal .= "\n\t\\_Missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
+        print RED "Detected NAT system but missing the " . CYAN "/var/cpanel/cpnat" . RED " file." . YELLOW " Do you need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
+    }
+
+	if ( $IP_ON_SERVER && $tcIPaddr ne $tcResolvedIP ) {
+        $RetVal .= " <<--- Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
+        $defaultsite = 1;
+		return $RetVal;
+    }
+
+    if ($isRFC1918 ) {
+        $RetVal .= " <<--- Routed via 1:1 NAT ( $tcResolvedIP => $tcIPaddr )" . GREEN " [SAME]";
+        $defaultsite = 0;
+    }
+    elsif ( !$isRFC1918 ) {
+        $RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
+        $defaultsite = 0;
     }
     return $RetVal;
 }
