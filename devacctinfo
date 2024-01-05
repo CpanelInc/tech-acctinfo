@@ -36,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.45";
+my $VERSION = "2.5.46";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -440,25 +440,22 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 
-# RIGHT HERE
-my $ResolvedIP2;
-if ($IS_USERNAME) {
-	#    $ResolvedIP = timed_run( 4, 'dig', '@8.8.8.8', "$MAINDOMAIN", 'A', '+short' );
-	$ResolvedIP2 = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A' );
-}
-else {
-	$ResolvedIP2 = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A' );
-	#    $ResolvedIP = timed_run( 4, 'dig', '@8.8.4.4', "$QUERY", 'A', '+short' );
-}
-#print "DEBUG: ResolvedIP2=$ResolvedIP2\n";
-@ResolvedIP=split /\n/, $ResolvedIP2;
-my $IPTYPE = "";
-if ( $IPADDR eq $SERVER_IP ) {
-    $IPTYPE = "shared";
-}
-else {
-    $IPTYPE = "dedicated";
-}
+$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
+#if ($IS_USERNAME) {
+#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A' );
+#}
+#else {
+#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A' );
+#}
+@ResolvedIP=split /\n/, $ResolvedIP;
+my $IPTYPE = ( $IPADDR eq $SERVER_IP ) ? "shared" : "dedicated";
+#my $IPTYPE = "";
+#if ( $IPADDR eq $SERVER_IP ) {
+#    $IPTYPE = "shared";
+#}
+#else {
+#    $IPTYPE = "dedicated";
+#}
 my $ip_on_localhost=0;
 if ( $IPADDR eq '127.0.0.1' ) {
     $IPTYPE = RED "[WARN] - $username\'s IP address is configured to localhost!";
@@ -1840,7 +1837,6 @@ sub check_resolved_ip {
 
     # Does it resolve to a CloudFlare IP?
     my $is_cloudflare_ip = check_cloudflare_ips($tcResolvedIP);
-    $is_cloudflare_ip=0;		## DEBUG
     if ($is_cloudflare_ip) {
         $RetVal .= " <<--- CloudFlare IP Address";
         $defaultsite = 1;
