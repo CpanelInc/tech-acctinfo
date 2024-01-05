@@ -1850,33 +1850,35 @@ sub check_resolved_ip {
     my $ListIPsJSON = get_whmapi1('listips');
     my ( $ip_on_server, $publicIP, $privateIP ) = 0;
     for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-        $publicIP  = $ListOfIPs->{public_ip};
-        $privateIP = $ListOfIPs->{ip};
-        chomp($publicIP);
-        chomp($privateIP);
-        $ip_on_server = 1 if ( $publicIP eq $tcResolvedIP );
-    }
+		if ( $ListOfIPs->{public_ip} eq $tcResolvedIP ) {
+        	$publicIP  = $ListOfIPs->{public_ip};
+        	$privateIP = $ListOfIPs->{ip};
+        	$ip_on_server = 1;
+			last;
+		}
+	}
+    #print "DEBUG: ip_on_server=$ip_on_server / isRFC1918=$isRFC1918 / tcResolvedIP=$tcResolvedIP / tcIPaddr=$tcIPaddr / publicIP=$publicIP / privateIP=$privateIP\n";
     if ( !$ip_on_server ) {
         $RetVal .= " <<--- [Not on this server]";
         $defaultsite = 1;
         return $RetVal;
     }
-    if ($isRFC1918 && $tcResolvedIP eq $publicIP ) {
-        $RetVal .= " <<--- Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
-        $defaultsite = 0;
+    if ($isRFC1918 ) {
+		if ( $tcIPaddr eq $privateIP ) {
+        	$RetVal .= " <<--- Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
+        	$RetVal .= "\n\t\\_Missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
+        	$defaultsite = 0;
+		}
     }
-    elsif ( $publicIP eq $tcIPaddr && !$isRFC1918 ) {
-        $RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
-        $defaultsite = 0;
+    if ( !$isRFC1918 ) {
+		if ( $publicIP eq $tcIPaddr ) {
+        	$RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
+        	$defaultsite = 0;
+		}
     }
-    else {
+	if ( $tcResolvedIP ne $publicIP || $tcResolvedIP ne $tcIPaddr ) {
         $RetVal .= " <<--- Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
         $defaultsite = 1;
-    }
-    if ( $isRFC1918 ) {
-        # Should be a NAT system, does /var/cpanel/cpnat exist?
-        #$RetVal .= " <<--- missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
-        $RetVal .= "\n\t\\_Missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
     }
     return $RetVal;
 }
