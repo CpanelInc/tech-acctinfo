@@ -1,17 +1,32 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2014 - 2024, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
+# Copyright 2014 - 2023, cPanel, L.L.C.
 # All rights reserved.
+# http://cpanel.net
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are met:
 #
-# 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+# 1. Redistributions of source code must retain the above copyright notice,
+# this list of conditions and the following disclaimer.
 #
-# 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
 #
-# 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+# 3. Neither the name of the owner nor the names of its contributors may be
+# used to endorse or promote products derived from this software without
+# specific prior written permission.
 #
-# THE SOFTWARE LICENSED HEREUNDER IS PROVIDED "AS IS" AND WEBPROS INTERNATIONAL, LLC D/B/A/ CPANEL (CPANEL)  HEREBY DISCLAIMS ALL WARRANTIES OF ANY KIND, WHETHER EXPRESS OR IMPLIED, RELATING TO THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, OR THE ACCURACY, TIMELINESS, COMPLETENESS, OR ADEQUACY OF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, AND ANY DATA ACCESSED THEREFROM, INCLUDING THE IMPLIED WARRANTIES OF TITLE, MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. CPANEL DOES NOT WARRANT THAT THE SOFTWARE OR ITS THIRD PARTY COMPONENTS ARE ERROR-FREE OR WILL OPERATE WITHOUT INTERRUPTION.  IF THE SOFTWARE, ITS THIRD PARTY COMPONENTS, OR ANY DATA ACCESSED THEREFROM IS DEFECTIVE, YOU ASSUME THE SOLE RESPONSIBILITY FOR THE ENTIRE COST OF ALL REPAIR OR INJURY OF ANY KIND, EVEN IF CPANEL HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DEFECTS OR DAMAGES. NO ORAL OR WRITTEN INFORMATION OR ADVICE GIVEN BY CPANEL, ITS AFFILIATES, LICENSEES, DEALERS, SUB-LICENSORS, AGENTS OR EMPLOYEES SHALL CREATE A WARRANTY OR IN ANY WAY INCREASE THE SCOPE OF ANY WARRANTY.
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # SCRIPT: acctinfo
 # PURPOSE: Get as much information for a username or domain entered at command line as possible.
@@ -21,7 +36,7 @@
 
 use strict;
 
-my $VERSION = "2.5.46";
+my $VERSION = "2.5.45";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -424,23 +439,21 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 }
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
-
-$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
-#if ($IS_USERNAME) {
-#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A' );
-#}
-#else {
-#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A' );
-#}
-@ResolvedIP=split /\n/, $ResolvedIP;
-my $IPTYPE = ( $IPADDR eq $SERVER_IP ) ? "shared" : "dedicated";
-#my $IPTYPE = "";
-#if ( $IPADDR eq $SERVER_IP ) {
-#    $IPTYPE = "shared";
-#}
-#else {
-#    $IPTYPE = "dedicated";
-#}
+if ($IS_USERNAME) {
+    $ResolvedIP =
+      timed_run( 4, 'dig', '@8.8.8.8', "$MAINDOMAIN", 'A', '+short' );
+}
+else {
+    $ResolvedIP = timed_run( 4, 'dig', '@8.8.4.4', "$QUERY", 'A', '+short' );
+}
+@ResolvedIP = split "\n", $ResolvedIP;
+my $IPTYPE = "";
+if ( $IPADDR eq $SERVER_IP ) {
+    $IPTYPE = "shared";
+}
+else {
+    $IPTYPE = "dedicated";
+}
 my $ip_on_localhost=0;
 if ( $IPADDR eq '127.0.0.1' ) {
     $IPTYPE = RED "[WARN] - $username\'s IP address is configured to localhost!";
@@ -1748,6 +1761,24 @@ sub smborder {
     return;
 }
 
+sub check_if_on_server {
+	my $tcIPaddr=shift;
+    my $ListIPsJSON = get_whmapi1('listips');
+    my $publicIP = 0;
+    my $privateIP = 0;
+    my $ip_on_server = 0;
+    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
+        $publicIP  = $ListOfIPs->{public_ip};
+        $privateIP = $ListOfIPs->{ip};
+        chomp($publicIP);
+        chomp($privateIP);
+		$ip_on_server = 1 if ( $privateIP eq $tcIPaddr );
+		$ip_on_server = 1 if ( $publicIP eq $tcIPaddr );
+		last if ( $ip_on_server );
+    }
+	return $ip_on_server;
+}
+
 sub check_cloudflare_ips {
     my $chkIP = shift;
     chomp($chkIP);
@@ -1828,42 +1859,36 @@ sub check_resolved_ip {
         return $RetVal;
     }
 
+	# RIGHT HERE
     # is $tcIPaddr an RFC1918 (private) IP?
     my $isRFC1918 = check_for_rfc1918($tcIPaddr);
 
     # Check if either IP is on the server.
-    my $ListIPsJSON = get_whmapi1('listips');
-    my ( $ip_on_server, $publicIP, $privateIP ) = 0;
-    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-		if ( $ListOfIPs->{public_ip} eq $tcResolvedIP ) {
-        	$publicIP  = $ListOfIPs->{public_ip};
-        	$privateIP = $ListOfIPs->{ip};
-        	$ip_on_server = 1;
-			last;
-		}
+	my $IP_ON_SERVER=check_if_on_server($tcResolvedIP);
+	if ( ! $IP_ON_SERVER ) {
+		$RetVal .= " <<--- Not on this server";
+    	$defaultsite = 1;
+		return $RetVal;
 	}
-    #print "DEBUG: ip_on_server=$ip_on_server / isRFC1918=$isRFC1918 / tcResolvedIP=$tcResolvedIP / tcIPaddr=$tcIPaddr / publicIP=$publicIP / privateIP=$privateIP\n";
-    if ( !$ip_on_server ) {
-        $RetVal .= " <<--- [Not on this server]";
-        $defaultsite = 1;
-        return $RetVal;
+
+    if ( $isRFC1918 ) {
+        # Should be a NAT system, does /var/cpanel/cpnat exist?
+        print RED "Detected NAT system but missing the " . CYAN "/var/cpanel/cpnat" . RED " file." . YELLOW " Do you need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
     }
-    if ($isRFC1918 ) {
-		if ( $tcIPaddr eq $privateIP ) {
-        	$RetVal .= " <<--- Routed via 1:1 NAT ( $publicIP => $privateIP )" . GREEN " [SAME]";
-        	$RetVal .= "\n\t\\_Missing /var/cpanel/cpnat file, Need to run /scripts/build_cpnat?\n" unless ( -e '/var/cpanel/cpnat' );
-        	$defaultsite = 0;
-		}
-    }
-    if ( !$isRFC1918 ) {
-		if ( $publicIP eq $tcIPaddr ) {
-        	$RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
-        	$defaultsite = 0;
-		}
-    }
-	if ( $tcResolvedIP ne $publicIP || $tcResolvedIP ne $tcIPaddr ) {
+
+	if ( $IP_ON_SERVER && $tcIPaddr ne $tcResolvedIP ) {
         $RetVal .= " <<--- Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
         $defaultsite = 1;
+		return $RetVal;
+    }
+
+    if ($isRFC1918 ) {
+        $RetVal .= " <<--- Routed via 1:1 NAT ( $tcResolvedIP => $tcIPaddr )" . GREEN " [SAME]";
+        $defaultsite = 0;
+    }
+    elsif ( !$isRFC1918 ) {
+        $RetVal = " <<--- Direct Route ($tcResolvedIP => $tcResolvedIP)" . GREEN " [SAME]";
+        $defaultsite = 0;
     }
     return $RetVal;
 }
