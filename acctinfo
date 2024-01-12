@@ -1861,7 +1861,7 @@ sub check_resolved_ip {
             $defaultsite = 0;
         }
     }
-    if ( $tcResolvedIP ne $publicIP || $tcResolvedIP ne $tcIPaddr || $tcIPaddr ne $privateIP ) {
+    if ( $tcResolvedIP ne $publicIP && $tcResolvedIP ne $tcIPaddr && $tcIPaddr ne $privateIP ) {
         $RetVal .= " <<--- Resolves to a different IP then configured for this domain" . RED " (IP address misconfiguration)";
         $defaultsite = 1;
     }
