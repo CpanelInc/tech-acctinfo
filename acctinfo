@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.47";
+my $VERSION = "2.5.48";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -35,7 +35,7 @@ use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::SafeRun::Timed          ();
 use Cpanel::JSON                    ();
-use JSON::MaybeXS qw(encode_json decode_json);
+use JSON::PP;
 use Cpanel::ResellerFunctions ();
 use Cpanel::Usage             ();
 use Cpanel::Validate::IP      ();
@@ -103,7 +103,9 @@ my $showHeader      = undef;
 my $tomcat          = undef;
 my $scan            = undef;
 my $wpinfo          = undef;
+my $sitejetinfo		= undef;
 my $showpass        = undef;
+my $showtoken       = undef;
 my $showteaminfo    = undef;
 my $acct_over_quota = 0;
 our $isInNamedConf = 0;
@@ -130,7 +132,9 @@ GetOptions(
     'tomcat'        => \$tomcat,
     'scan'          => \$scan,
     'wpinfo'        => \$wpinfo,
+    'sitejetinfo'   => \$sitejetinfo,
     'showpass'      => \$showpass,
+    'showtoken'     => \$showtoken,
     'teams'  	    => \$showteaminfo,
 );
 
@@ -286,7 +290,6 @@ my $DomainInfoLines;
 for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
     if ( $DomainInfoLines->{user} eq $username ) {
         if ( $DomainInfoLines->{domain_type} eq "sub" ) {
-
             push( @OtherDomains, $DomainInfoLines->{domain} );
             push( @SUBDOMAINS,   $DomainInfoLines->{domain} );
             my $docroot_status = "";
@@ -306,15 +309,17 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
             push( @OtherDomains, $DomainInfoLines->{domain} );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
+			my $sitejet_status = ( -e "$HOMEDIR/$username/sitejet/$DomainInfoLines->{domain}" ) ? MAGENTA "[Sitejet Enabled]" : "";
             push( @ADDONDOMAINS,
-                    $DomainInfoLines->{domain}
-                  . "\n\t\t \\_ [ Sub: "
+                    $DomainInfoLines->{domain} . " "
+				  . $sitejet_status 
+                  . YELLOW "\n\t\t \\_ [ Sub: "
                   . $DomainInfoLines->{parent_domain} . " ]"
                   . "\n\t\t \\_ [ DocumentRoot: "
                   . $DomainInfoLines->{docroot}
                   . " ] $docroot_status" );
             $IS_ADDON = expand(
-"$DomainInfoLines->{domain} is an AddOn domain of $MAINDOMAIN \n\t\\_ "
+"$DomainInfoLines->{domain} $sitejet_status is an AddOn domain of $MAINDOMAIN \n\t\\_ "
               )
               . YELLOW
               . "(DocumentRoot: "
@@ -370,6 +375,7 @@ my $MAXSUB          = $DataJSON->{data}->{acct}->[0]->{maxsub};
 my $MAXFTP          = $DataJSON->{data}->{acct}->[0]->{maxftp};
 my $MAXSQL          = $DataJSON->{data}->{acct}->[0]->{maxsql};
 my $MAXLST          = $DataJSON->{data}->{acct}->[0]->{maxlst};
+my $SitejetAPI		= $user_conf->{SITEJET_API_TOKEN};
 my $SUSPEND_TIME    = $DataJSON->{data}->{acct}->[0]->{suspendtime};
 my $FEATURELIST     = $user_conf->{'FEATURELIST'};
 my $STARTDATE       = $DataJSON->{data}->{acct}->[0]->{startdate};
@@ -451,6 +457,8 @@ my $RO_TEXT    = "";
 if ( $REAL_OWNER ne $username and $REAL_OWNER ne "root" ) {
     $RO_TEXT = " (Which is under the reseller: $REAL_OWNER)";
 }
+
+my	$sitejet_status = ( -e "$HOMEDIR/$username/sitejet/$MAINDOMAIN" ) ? MAGENTA " [Sitejet Enabled]" : "";
 
 # Check if main domain (username) is a reseller.
 my @ACCTSOWNEDBYRESELLER = undef;
@@ -547,9 +555,7 @@ if ( $PWHash eq "" ) {
     print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
 }
 
-print GREEN ON_BLACK "The main domain is "
-  . YELLOW $MAINDOMAIN
-  . GREEN ON_BLACK $RO_TEXT . "\n";
+print GREEN ON_BLACK "The main domain is " . YELLOW $MAINDOMAIN . $sitejet_status . GREEN ON_BLACK $RO_TEXT . "\n";
 
 if ( $QUERY eq $HOSTNAME ) {
     print RED
@@ -792,19 +798,19 @@ if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.10
     }
 }
 
-if( !$UserSuspended ) {
-    my $wptkLiteJSON = get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit' );
-    my $wptkDluxJSON = get_uapi( "--user=$username", 'Features', 'has_feature', 'name=wp-toolkit-deluxe' );
-    my $hasWPTKLite    = $wptkLiteJSON->{result}->{data};
-    my $hasWPTKDeluxe  = $wptkDluxJSON->{result}->{data};
-    my $hasWPTKFeature = "Neither Lite nor Deluxe";
-    if ($hasWPTKLite) {
-        $hasWPTKFeature = "Lite";
-    }
-    if ($hasWPTKDeluxe) {
-        $hasWPTKFeature = "Deluxe";
-    }
-    print WHITE "WP Toolkit Feature: " . CYAN $hasWPTKFeature . "\n";
+if ( $sitejetinfo ) {
+	my $sitejet_domain = ( $IS_USERNAME ) ? $MAINDOMAIN : $QUERY;
+	if ( -e "$RealHome/sitejet/$sitejet_domain" ) {
+		my $insecure    = ($showtoken) ? 1 : 0;
+		print WHITE "Sitejet Builder Data [ " . GREEN "API Token: " . YELLOW $SitejetAPI . WHITE " ]\n" unless( !$insecure );
+		print WHITE "Sitejet Builder Data [ " . GREEN "API Token: " . YELLOW "REDACTED --showtoken to reveal" . WHITE " ]\n" unless( $insecure );
+		my $SjJSON = get_uapi( 'Sitejet', 'get_all_user_sitejet_info', "--user=$username", "domain=$sitejet_domain" );
+		print expand( YELLOW "\t\\_ Website ID: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{websiteId} . "\n" );
+		print expand( YELLOW "\t\\_ Template Name: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateName} . YELLOW "[ Template ID: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateId} . YELLOW "]\n" );
+		my $isPublished = ( $SjJSON->{result}->{data}->[0]->{metadata}->{publish_status} ) ? "Yes" : "No";
+		print expand( YELLOW "\t\\_ Published: " . CYAN $isPublished . YELLOW " Latest Published Date: " . CYAN scalar(localtime($SjJSON->{result}->{data}->[0]->{metadata}->{latest_publish_date})));
+		print "\n";
+	}
 }
 
 if ($custom_style) {
