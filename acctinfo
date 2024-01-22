@@ -1717,6 +1717,10 @@ sub Usage {
     print expand( GREEN
 "\t Check for and display WordPress information for the cptestdomain.net domain.\n"
     );
+    print CYAN "acctinfo" . WHITE " --sitejetinfo [--showtoken] cptestdomain.net\n";
+    print expand( GREEN
+"\t Check for and display Sitejet information for the cptestdomain.net domain.\n"
+    );
     print CYAN "acctinfo" . WHITE " --scan cptest\n";
     print expand(
         GREEN "\t Scan users home directory for known infection strings.\n" );
