@@ -1,4 +1,4 @@
-Copyright 2006 - 2024, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
+Copyright 2006-2024, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
