@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.49";
+my $VERSION = "2.5.50";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -100,7 +100,6 @@ my $SearchFor       = undef;
 my $cruft           = undef;
 my $mail            = undef;
 my $showHeader      = undef;
-my $tomcat          = undef;
 my $scan            = undef;
 my $wpinfo          = undef;
 my $sitejetinfo     = undef;
@@ -129,7 +128,6 @@ GetOptions(
     'mail'          => \$mail,
     'header'        => \$showHeader,
     'cphulkblocks'  => \$chk_cph_blocks,
-    'tomcat'        => \$tomcat,
     'scan'          => \$scan,
     'wpinfo'        => \$wpinfo,
     'sitejetinfo'   => \$sitejetinfo,
@@ -885,10 +883,6 @@ nginx_caching();
 
 my $PHPDefaultVersion;
 
-if ($tomcat) {
-    chk_tomcat();
-}
-
 custom_UD();
 
 my $cageFSStats = check_for_cagefs();
@@ -1602,58 +1596,22 @@ if ( $listssls or $all ) {
         }
     }
 
-# Check for pending AutoSSL orders here (uses whmapi1 get_autossl_pending_queue (62.0.26+ only)
-    print "\nChecking for pending AutoSSL orders: \n";
-    my $SSL_PENDINGJSON = get_whmapi1('get_autossl_pending_queue');
-    my $SSLPendingCnt   = 0;
-    for
-      my $SSL_Pending ( @{ $SSL_PENDINGJSON->{data}->{pending_certificates} } )
-    {
-        if ( $SSL_Pending->{user} eq $username ) {
-            $SSLPendingCnt = 1;
-            my $SSLPending_domain   = $SSL_Pending->{domain};
-            my $SSLPending_ordernum = $SSL_Pending->{order_item_id};
-            my $SSLPending_URL =
-"https:\/\/manage2.cpanel.net\/certificate.cgi\?oii=$SSLPending_ordernum";
-            my $SSLPending_time = $SSL_Pending->{request_time};
-            print expand(
-                GREEN "\t \\_ Domain: " . CYAN "$SSLPending_domain\n" );
-            print expand(
-                GREEN "\t\t \\_ Request Time: " . CYAN "$SSLPending_time\n" );
-            print expand( GREEN "\t\t \\_ Order Number "
-                  . CYAN $SSLPending_ordernum
-                  . GREEN " [ "
-                  . BOLD MAGENTA $SSLPending_URL
-                  . GREEN " ]\n" );
+    # Check for purchased SSL's
+    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
+        print "Checking for pending SSL Orders (purchased): \n";
+        my ($PendingSSLOrder) = ( split( /\s+/, qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]))[3];
+        $PendingSSLOrder =~ s/\"//g;
+        $PendingSSLOrder =~ s/,//g;
+        $PendingSSLOrder =~ s/://g;
+        if ($PendingSSLOrder) {
+            print expand( CYAN "\t \\_ Pending order number: "
+                  . GREEN
+                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
+            );
         }
     }
-    if ( $SSLPendingCnt == 0 ) {
-        print expand( GREEN "\t \\_ None\n" );
-    }
 
-    # Check for purchased SSL's
-#    print "Checking for pending SSL Orders (non-autossl): \n";
-#    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
-#        my ($PendingSSLOrder) = (
-#            split( /\s+/, qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]))[3];
-#        $PendingSSLOrder =~ s/\"//g;
-#        $PendingSSLOrder =~ s/,//g;
-#        $PendingSSLOrder =~ s/://g;
-#        if ($PendingSSLOrder) {
-#            print expand( CYAN "\t \\_ Pending order number: "
-#                  . GREEN
-#                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
-#            );
-#        }
-#        else {
-#            print expand( GREEN "\t \\_ None\n" );
-#        }
-#    }
-#    else {
-#        print expand( GREEN "\t \\_ None\n" );
-#    }
-
-    # Check for CAA records here.
+    # Check for CAA records
     print "Checking for CAA records: \n";
     my $CAARecord;
     my $CAAFound = @HasCAA;
@@ -1665,8 +1623,6 @@ if ( $listssls or $all ) {
 "The following domains have CAA records and SSL's can only be obtained from the following CA's:\n";
         foreach $CAARecord (@HasCAA) {
             chomp($CAARecord);
-
-            #print expand( CYAN "\t \\_ $CAARecord\n" );
             print expand( CYAN "$CAARecord\n" );
         }
     }
@@ -1718,10 +1674,6 @@ sub Usage {
     print CYAN "acctinfo"
       . WHITE " --mail cptestdomain.net [ --cphulkblocks]\n";
     print expand( GREEN "\t Display mail information for cptestdomain.net.\n" );
-    print CYAN "acctinfo" . WHITE " --tomcat cptestdo\n";
-    print expand( GREEN
-"\t Display Tomcat 8.5/10.0 configuration information for the cptestdo user.\n"
-    );
     print CYAN "acctinfo" . WHITE " --wpinfo [--showpass] cptestdomain.net\n";
     print expand( GREEN
 "\t Check for and display WordPress information for the cptestdomain.net domain.\n"
@@ -4198,319 +4150,6 @@ sub chk_mail_hold {
     }
 }
 
-sub chk_tomcat10 {
-    return unless ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') );
-    return unless ( -x '/opt/cpanel/ea-podman/bin/ea-podman' );
-    my $podmanPS = Cpanel::SafeRun::Timed::timedsaferun( 4, "su - $username -c 'podman ps | grep ea-tomcat'" );
-    if ( ! $podmanPS ) {
-        print YELLOW "[INFO] - Tomcat not running or configured for $username\n";
-        return;
-    }
-    print YELLOW "[INFO] - Retrieving Tomcat information for $username\n";
-    my ( $httpport1 ) = ( split ( /:/, $podmanPS ))[2];
-    my ( $httpport ) = ( split ( /\//, $httpport1 ));
-    my ( $ajpport1 ) = ( split ( /:/, $podmanPS ))[3];
-    my ( $ajpport ) = ( split ( /\//, $ajpport1 ));
-    chomp($ajpport);
-    my $data = Cpanel::SafeRun::Timed::timedsaferun( 0, "su - $username -c '/usr/local/cpanel/scripts/ea-podman running'" );
-    my $podman_running = decode_json $data;
-    my $tomcat_ports;
-    my $tomcat_container;
-    my $TCEnabled = 0;
-    opendir my $dh, "$RealHome/ea-podman.d/";
-    my @containers = readdir($dh);
-    closedir( $dh );
-    foreach my $container(@containers) {
-        chomp($container);
-		next if ( $container =~ m/\.bak/ );
-        next unless( $container =~ m/tomcat/);
-        if ( grep { /$container/ } $data ) {
-            $tomcat_container = $container;
-            $TCEnabled = 1;
-            last;
-        }
-    }
-    print YELLOW "Tomcat container [ " . BOLD BLUE $tomcat_container . YELLOW " ] installed using ports:\n";
-    print expand( CYAN "\t\\_ HTTP PORT: $httpport\n");
-    print expand( CYAN "\t\\_ AJP PORT: $ajpport\n");
-    my $container_status = Cpanel::SafeRun::Timed::timedsaferun( 3, "su - $username -c '/usr/local/cpanel/scripts/ea-podman status $tomcat_container' | grep 'Active:'" );
-    if ( $container_status =~ m/active \(running\)/) {
-        print expand( GREEN "\t\\_ $tomcat_container is actively running.\n" );
-    }
-    else {
-        print expand( RED "\t\\_ $tomcat_container is NOT running!\n" );
-        return;
-    }
-    print YELLOW "\t \\_ Checking $RealHome/ea-podman.d/$tomcat_container/conf/server.xml:\n";
-    my $TCConnPort = timed_run( 2, "egrep 'Connector port.*HTTP' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
-    ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
-    $TCConnPort =~ s/\"//g;
-    if ( $TCConnPort eq "8080" ) {
-        print expand( CYAN "\t\t\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ HTTP Connector Port: " . RED . $TCConnPort . " [ CONFIG ERROR! Run " . YELLOW "su - $username -c 'podman ps' | grep ea-tomcat" . RED " ]\n" );
-    }
-    my $TCAJPPort = timed_run( 2, "egrep 'Connector port.*AJP' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
-    ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
-    $TCAJPPort =~ s/\"//g;
-    if ( $TCAJPPort eq "8009" ) {
-        print expand( CYAN "\t\t\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ AJP Connector Port: " . RED . $TCAJPPort . " [ CONFIG ERROR! Run " . YELLOW "su - $username -c 'podman ps' | grep tomcat" . RED " ]\n" );
-    }
-    my $TCdocBase = Cpanel::SafeRun::Timed::timedsaferun( 2, "egrep 'Context path.*docBase' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f3" );
-    chomp($TCdocBase);
-    print expand( CYAN "\t\t\t \\_ docBase Defined: " . GREEN . $TCdocBase . "\n" );
-    my $TCHost = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'Host name' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml' | cut -d \= -f2");
-    ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
-    $TCHost =~ s/\"//g;
-    print expand( CYAN "\t\t\t \\_ Host: " . GREEN . $TCHost . "\n" );
-    my $TCunpackWARs = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'unpackWARs' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
-    ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
-    $TCunpackWARs =~ s/\"//g;
-    if ( $TCunpackWARs =~ m/false/ ) {
-        print expand( CYAN "\t\t\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ unpackWARs: " . RED . $TCunpackWARs . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCautoDeploy = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'autoDeploy' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
-    ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
-    $TCautoDeploy =~ s/\"//g;
-    if ( $TCautoDeploy =~ m/false/ ) {
-        print expand( CYAN "\t\t\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ autoDeploy: " . RED . $TCautoDeploy . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCDeployStartup = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'deployOnStartup' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
-    ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
-    $TCDeployStartup =~ s/\"//g;
-    if ( $TCDeployStartup =~ m/false/ ) {
-        print expand( CYAN "\t\t\t \\_ deployOnStartup: " . GREEN . $TCDeployStartup . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ deployOnStartup: " . RED . $TCDeployStartup . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCDeployXML = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'deployXML' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
-    ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
-    $TCDeployXML =~ s/\"//g;
-    $TCDeployXML =~ s/>//g;
-    if ( $TCDeployXML =~ m/false/ ) {
-        print expand( CYAN "\t\t\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ deployXML " . RED . $TCDeployXML . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCsecretRequired = Cpanel::SafeRun::Timed::timedsaferun( 2, "grep 'secretRequired' '$RealHome/ea-podman.d/$tomcat_container/conf/server.xml'" );
-    ($TCsecretRequired) = ( split( /\s+/, $TCsecretRequired ) )[5];
-    $TCsecretRequired =~ s/\"//g;
-    $TCsecretRequired =~ s/\/>//g;
-    if ( $TCsecretRequired =~ m/false/ ) {
-        print expand( CYAN "\t\t\t \\_ secretRequired " . GREEN . $TCsecretRequired . "\n" );
-    }
-    else {
-        print expand( CYAN "\t\t\t \\_ secretRequired " . RED . $TCsecretRequired . " [ SHOULD BE FALSE ]\n" );
-    }
-    opendir my $dh, "$RealHome/ea-podman.d/$tomcat_container/webapps/ROOT";
-    my @webapp_data = readdir( $dh );
-    closedir( $dh );
-    my $showHeader=0;
-    foreach my $jspfile (@webapp_data) {
-        chomp($jspfile);
-        next unless( $jspfile =~ m{\.jsp} );
-        print expand( "\t\t\t\\_ jsp files found in $RealHome/ea-podman.d/$tomcat_container/webapps/ROOT/\n" ) unless( $showHeader );
-        $showHeader=1;
-        print expand( YELLOW "\t\t\t\t \\_ $jspfile\n");	
-    }
-    print "\n";
-}
-
-sub chk_tomcat {
-    if ( Cpanel::Version::compare( Cpanel::Version::getversionnumber(), '>=', '11.106') ) {
-        chk_tomcat10;
-        return;
-    }
-    my $TCEnabledUsers =
-      timed_run( 2, '/usr/local/cpanel/scripts/ea-tomcat85', 'list' );
-    my @TCEnabledUsers = split "\n", $TCEnabledUsers;
-    my $TCEnabled = 0;
-    my $TCEnabledUser;
-    foreach $TCEnabledUser (@TCEnabledUsers) {
-        chomp($TCEnabledUser);
-        if ( $TCEnabledUser eq $username ) {
-            $TCEnabled = 1;
-            last;
-        }
-    }
-    if ( !$TCEnabled ) {
-        print YELLOW "[INFO] - Tomcat not configured for $username\n";
-        return;
-    }
-    my $TCDispStatus = 1;
-    if ( $RealShell ne "/bin/bash" ) {
-        print RED
-"[WARN] - $username\'s shell is not Normal (/bin/bash) - unable to obtain a valid status for ea-tomcat85.\n";
-        $TCDispStatus = 0;
-        print "\t \\_ Continuing with the remainder of the configuration.\n";
-    }
-    if ( -e ("/etc/profile.d/limits.sh") ) {
-        print RED
-"[WARN] - Shell fork bomb protection enabled - unable to obtain a valid status for ea-tomcat85.\n";
-        $TCDispStatus = 0;
-        print "\t \\_ Continuing with the remainder of the configuration.\n";
-    }
-    if ($TCDispStatus) {
-        my $PerlPath = qx[ readlink /usr/local/cpanel/3rdparty/bin/perl ];
-        chomp($PerlPath);
-        $PerlPath =~ s/\/bin\/perl/\/bin/;
-        my $ubicPathFound =
-          timed_run( 2, "grep $PerlPath '$RealHome/.bashrc'" );
-        chomp($ubicPathFound);
-        if ($ubicPathFound) {
-            my $TCStatus = timed_run( 2,
-                "su - $username -s /bin/bash -c 'ubic status ea-tomcat85'" );
-            chomp($TCStatus);
-            my ($TCStatus1) = ( split( /\s+/, $TCStatus ) )[1];
-            print YELLOW "ea-tomcat85 is: ";
-            if ( $TCStatus1 eq "running" ) {
-                print GREEN "running\n";
-            }
-            else {
-                print RED "not running\n";
-            }
-        }
-        else {
-            print RED "[WARN] "
-              . CYAN "- Check "
-              . WHITE "$RealHome/.bashrc "
-              . CYAN "file for PATH containing "
-              . WHITE "$PerlPath\n"
-              . YELLOW "\t[ubic command will not work without it].\n\n";
-        }
-    }
-    print YELLOW "Checking $RealHome/ea-tomcat85/conf/server.xml:\n";
-    my $TCConnPort = timed_run( 2,
-"egrep 'Connector port.*HTTP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
-    );
-    ($TCConnPort) = ( split( /\s+/, $TCConnPort ) )[0];
-    $TCConnPort =~ s/\"//g;
-    print expand(
-        CYAN "\t \\_ HTTP Connector Port: " . GREEN . $TCConnPort . "\n" );
-    my $TCAJPPort = timed_run( 2,
-"egrep 'Connector port.*AJP' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
-    );
-    ($TCAJPPort) = ( split( /\s+/, $TCAJPPort ) )[0];
-    $TCAJPPort =~ s/\"//g;
-    print expand(
-        CYAN "\t \\_ AJP Connector Port: " . GREEN . $TCAJPPort . "\n" );
-    my $TCHost = timed_run( 2,
-"grep 'Host name' '$RealHome/ea-tomcat85/conf/server.xml' | cut -d \= -f2"
-    );
-    ($TCHost) = ( split( /\s+/, $TCHost ) )[0];
-    $TCHost =~ s/\"//g;
-    print expand( CYAN "\t \\_ Host: " . GREEN . $TCHost . "\n" );
-    my $TCunpackWARs = timed_run( 2,
-        "grep 'unpackWARs' '$RealHome/ea-tomcat85/conf/server.xml'" );
-    ($TCunpackWARs) = ( split( /\s+/, $TCunpackWARs ) )[4];
-    $TCunpackWARs =~ s/\"//g;
-
-    if ( $TCunpackWARs =~ m/true/ ) {
-        print expand(
-            CYAN "\t \\_ unpackWARs: " . GREEN . $TCunpackWARs . "\n" );
-    }
-    else {
-        print expand( CYAN "\t \\_ unpackWARs: "
-              . RED
-              . $TCunpackWARs
-              . " [ SHOULD BE TRUE ]\n" );
-    }
-    my $TCautoDeploy = timed_run( 2,
-        "grep 'autoDeploy' '$RealHome/ea-tomcat85/conf/server.xml'" );
-    ($TCautoDeploy) = ( split( /\s+/, $TCautoDeploy ) )[5];
-    $TCautoDeploy =~ s/\"//g;
-    if ( $TCautoDeploy =~ m/false/ ) {
-        print expand(
-            CYAN "\t \\_ autoDeploy: " . GREEN . $TCautoDeploy . "\n" );
-    }
-    else {
-        print expand( CYAN "\t \\_ autoDeploy: "
-              . RED
-              . $TCautoDeploy
-              . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCDeployStartup = timed_run( 2,
-        "grep 'deployOnStartup' '$RealHome/ea-tomcat85/conf/server.xml'" );
-    ($TCDeployStartup) = ( split( /\s+/, $TCDeployStartup ) )[6];
-    $TCDeployStartup =~ s/\"//g;
-    if ( $TCDeployStartup =~ m/false/ ) {
-        print expand(
-            CYAN "\t \\_ deployOnStartup: " . GREEN . $TCDeployStartup . "\n" );
-    }
-    else {
-        print expand( CYAN "\t \\_ deployOnStartup: "
-              . RED
-              . $TCDeployStartup
-              . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCDeployXML = timed_run( 2,
-        "grep 'deployXML' '$RealHome/ea-tomcat85/conf/server.xml'" );
-    ($TCDeployXML) = ( split( /\s+/, $TCDeployXML ) )[7];
-    $TCDeployXML =~ s/\"//g;
-    $TCDeployXML =~ s/>//g;
-    if ( $TCDeployXML =~ m/false/ ) {
-        print expand( CYAN "\t \\_ deployXML " . GREEN . $TCDeployXML . "\n" );
-    }
-    else {
-        print expand( CYAN "\t \\_ deployXML "
-              . RED
-              . $TCDeployXML
-              . " [ SHOULD BE FALSE ]\n" );
-    }
-    my $TCsecretRequired = timed_run( 2,
-        "grep 'secretRequired' '$RealHome/ea-tomcat85/conf/server.xml'" );
-    ($TCsecretRequired) = ( split( /\s+/, $TCsecretRequired ) )[5];
-    $TCsecretRequired =~ s/\"//g;
-    $TCsecretRequired =~ s/\/>//g;
-    if ( $TCsecretRequired =~ m/false/ ) {
-        print expand(
-            CYAN "\t \\_ secretRequired " . GREEN . $TCsecretRequired . "\n" );
-    }
-    else {
-        print expand( CYAN "\t \\_ secretRequired "
-              . RED
-              . $TCsecretRequired
-              . " [ SHOULD BE FALSE ]\n" );
-    }
-	opendir my $dh, "$RealHome/ea-tomcat85/webapps/ROOT";
-	my @webapp_data = readdir( $dh );
-	closedir( $dh );
-	my $showHeader=0;
-	foreach my $jspFile (@webapp_data) {
-		chomp($jspFile);
-		next unless( $jspFile =~ m{\.jsp} );
-		print expand( "jsp files found in $RealHome/ea-tomcat85/webapps/ROOT/\n" ) unless( $showHeader );
-		$showHeader=1;
-		print expand( YELLOW "\t \\_ $jspFile\n");	
-        if ( $jspFile eq "test.jsp" ) {
-            my $TJP = timed_run( 2,
-                "lynx --dump http://$MAINDOMAIN/test.jsp | head -1" );
-            if ( $TJP =~ m/Test JSP Page/ ) {
-                print GREEN "\t \\_ Success: "
-                  . WHITE "http://$MAINDOMAIN/test.jsp"
-                  . CYAN " Works!\n";
-            }
-            else {
-                print RED "\t \\_ Failed: "
-                  . WHITE "http://$MAINDOMAIN/test.jsp"
-                  . CYAN " Didn't work!\n";
-            }
-        }
-    }
-}
-
 sub get_json_href {
     my ( $raw, $fail_warning ) = @_;
     return unless defined $raw;
@@ -4809,11 +4448,30 @@ sub getProfileNode {
     }
 }
 
+sub check_for_user_cdn {
+	return if ( readlink '/usr/local/cpanel/server.type' ne 'wp2' );		## User CDN's are only available on wp2
+	my $wp2_cdn_db="$RealHome/.cpanel/wp_squared/cdns.sqlite";	
+	return unless ( -e $wp2_cdn_db );	## If the SQLite db doesn't exist, return.
+	my $hasCDN=Cpanel::SafeRun::Timed::timedsaferun( 2, 'sqlite3', $wp2_cdn_db, "SELECT * FROM zones;" );
+	# THIS NEXT SECTION IS STILL IN BETA! Unexpected results may occur.
+	if ( $hasCDN ) {
+		print "$username has a user CDN configured:\n";
+        my $CDNData=Cpanel::SafeRun::Timed::timedsaferun( 2, 'sqlite3', $wp2_cdn_db, "SELECT * FROM cdns;" );
+        my ( $CDN_id, $CDN_provider, $CDN_desc, $CDN_created, $CDN_expires, $CDN_checked ) = (split( /\|/, $CDNData ))[0,1,2,4,5,6];
+        print expand( CYAN "\t\\_ ID: " . YELLOW $CDN_id . CYAN " Provider: " . YELLOW ucfirst($CDN_provider) . CYAN " Description: " . YELLOW $CDN_desc ."\n");
+		$CDN_expires = ( $CDN_expires == 0 ) ? "N/A" : scalar(localtime($CDN_expires));
+		$CDN_checked = ( $CDN_checked == 0 ) ? "N/A" : scalar(localtime($CDN_checked));
+        print expand( CYAN "\t\\_ Created: " . YELLOW scalar(localtime($CDN_created)) . CYAN " / Expires: " . YELLOW $CDN_expires . CYAN " / Last Checked: " . YELLOW $CDN_checked . "\n");
+	}
+	return;
+}
+
 sub get_wp_info {
     my $pubhtml = shift;
     my $allwpconfs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-type', 'f', '-name', 'wp-config.php' );
     my @allwpconfs = split /\n/, $allwpconfs;
     my $dbfound=0;
+	check_for_user_cdn();
     foreach my $wpconf( @allwpconfs ) {
         print "Found wp-config.php file at: $wpconf\n";
         chomp($wpconf);
