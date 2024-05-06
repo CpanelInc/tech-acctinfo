@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.50";
+my $VERSION = "2.5.51";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -3311,6 +3311,28 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
     }
     print expand(
         WHITE "\t\\_ DEFAULT: " . YELLOW "*: $DefaultAddress $DAtext" );
+
+    smborder();
+    # List autoresponders
+    my $UserAutoRespJSON =
+      get_uapi( 'Email', 'list_auto_responders', "--user=$username",
+        "account=$DOMAIN" );
+        if ( @{ $UserAutoRespJSON->{result}->{data} } ) {
+            print expand( YELLOW "Auto Responders\n" );
+            for my $UserAutoResp ( @{ $UserAutoRespJSON->{result}->{data} } ) {
+                print GREEN "-=-" x 27;
+                print "\n";
+                print expand( WHITE
+                    "\t\\_ $UserAutoResp->{email}" . CYAN "  Subject: " . WHITE $UserAutoResp->{subject} . "\n" );
+                my $AutoRespDet = get_uapi( 'Email', 'get_auto_responder', "--user=$username", "email=$UserAutoResp->{email}" );
+                print expand( WHITE "\t\t\\_ Charset: $AutoRespDet->{result}->{data}->{charset} / Interval: $AutoRespDet->{result}->{data}->{interval} Hrs. / From: $AutoRespDet->{result}->{data}->{from}\n");
+                my $AutoRespStart = ( defined $AutoRespDet->{result}->{data}->{start} ) ? scalar localtime($AutoRespDet->{result}->{data}->{start}) : "Immediate";
+                my $AutoRespStop = ( defined $AutoRespDet->{result}->{data}->{stop} ) ? scalar localtime($AutoRespDet->{result}->{data}->{stop}) : "Never";
+                my $isHTML = ( defined $AutoRespDet->{result}->{data}->{is_html} ) ? "Yes" : "No";
+                print expand( WHITE "\t\t\\_ Start: $AutoRespStart / Stop: $AutoRespStop / HTML Body: $isHTML\n");
+                print expand( WHITE "\t\t\\_ Body:\n$AutoRespDet->{result}->{data}->{body}\n");
+            }
+    }
 
     smborder();
 
