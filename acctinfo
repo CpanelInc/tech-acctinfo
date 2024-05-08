@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.51";
+my $VERSION = "2.5.52";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -4454,7 +4454,6 @@ sub nginx_caching {
 }
 
 sub getProfileNode {
-
 # Note that if the license is invalid (activated too many times, expired, etc...) this will fail.
 # Note that if running older than 74 (when profiles were introduced) this should just return true.
     my $ProfileNodeJSON = get_whmapi1('get_current_profile');
@@ -4471,29 +4470,28 @@ sub getProfileNode {
 }
 
 sub check_for_user_cdn {
-	return if ( readlink '/usr/local/cpanel/server.type' ne 'wp2' );		## User CDN's are only available on wp2
-	my $wp2_cdn_db="$RealHome/.cpanel/wp_squared/cdns.sqlite";	
-	return unless ( -e $wp2_cdn_db );	## If the SQLite db doesn't exist, return.
-	my $hasCDN=Cpanel::SafeRun::Timed::timedsaferun( 2, 'sqlite3', $wp2_cdn_db, "SELECT * FROM zones;" );
-	# THIS NEXT SECTION IS STILL IN BETA! Unexpected results may occur.
-	if ( $hasCDN ) {
-		print "$username has a user CDN configured:\n";
+    return if ( readlink '/usr/local/cpanel/server.type' ne 'wp2' );		## User CDN's are only available on wp2
+    my $wp2_cdn_db="$RealHome/.cpanel/wp_squared/cdns.sqlite";	
+    return unless ( -e $wp2_cdn_db );	## If the SQLite db doesn't exist, return.
+    my $hasCDN=Cpanel::SafeRun::Timed::timedsaferun( 2, 'sqlite3', $wp2_cdn_db, "SELECT * FROM zones;" );
+    # THIS NEXT SECTION IS STILL IN BETA! Unexpected results may occur.
+    if ( $hasCDN ) {
+        print "$username has a user CDN configured:\n";
         my $CDNData=Cpanel::SafeRun::Timed::timedsaferun( 2, 'sqlite3', $wp2_cdn_db, "SELECT * FROM cdns;" );
         my ( $CDN_id, $CDN_provider, $CDN_desc, $CDN_created, $CDN_expires, $CDN_checked ) = (split( /\|/, $CDNData ))[0,1,2,4,5,6];
         print expand( CYAN "\t\\_ ID: " . YELLOW $CDN_id . CYAN " Provider: " . YELLOW ucfirst($CDN_provider) . CYAN " Description: " . YELLOW $CDN_desc ."\n");
-		$CDN_expires = ( $CDN_expires == 0 ) ? "N/A" : scalar(localtime($CDN_expires));
-		$CDN_checked = ( $CDN_checked == 0 ) ? "N/A" : scalar(localtime($CDN_checked));
+        $CDN_expires = ( $CDN_expires == 0 ) ? "N/A" : scalar(localtime($CDN_expires));
+        $CDN_checked = ( $CDN_checked == 0 ) ? "N/A" : scalar(localtime($CDN_checked));
         print expand( CYAN "\t\\_ Created: " . YELLOW scalar(localtime($CDN_created)) . CYAN " / Expires: " . YELLOW $CDN_expires . CYAN " / Last Checked: " . YELLOW $CDN_checked . "\n");
-	}
-	return;
+    }
+    return;
 }
 
 sub get_wp_info {
     my $pubhtml = shift;
-    my $allwpconfs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-type', 'f', '-name', 'wp-config.php' );
+    my $allwpconfs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '3', '-type', 'f', '-name', 'wp-config.php' );
     my @allwpconfs = split /\n/, $allwpconfs;
-    my $dbfound=0;
-	check_for_user_cdn();
+    check_for_user_cdn();
     foreach my $wpconf( @allwpconfs ) {
         print "Found wp-config.php file at: $wpconf\n";
         chomp($wpconf);
@@ -4505,6 +4503,7 @@ sub get_wp_info {
         my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
         my @wpconfdata=<$fh>;
         close( $fh );
+        my $dbfound=0;
         foreach my $line( @wpconfdata ) {
             chomp($line);
             next unless( $line =~ m{DB_NAME|DB_HOST|DB_USER|DB_PASSWORD|table_prefix} );
@@ -4533,11 +4532,7 @@ sub get_wp_info {
                 ($tblprefix) = ( split( /'/, $line ) )[1];
                 print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
             }
-            my %attr = ( PrintError=>0, RaiseError=>0 );
-            my $dbconnect = DBI->connect("dbi:mysql:$dbname",$dbuser,$dbpass, \%attr);
-            print MAGENTA "Connection check using above credentials: ";
-            print GREEN "Success\n" if( defined( $dbconnect ));
-            print RED "Failed\n" unless( defined( $dbconnect ));
+            # Check for database to make sure it exists.
             my $DB_Exists = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', '-BNe', "SHOW DATABASES" );
             my @DB_Exists = split /\n/, $DB_Exists;
             foreach my $line(@DB_Exists) {
@@ -4547,29 +4542,40 @@ sub get_wp_info {
                     last;
                 }
             }
-            next;
         }
-        print RED "[WARN] - Database " . YELLOW $dbname . RED " seems to be missing!\n" unless ( $dbfound );
-        smborder();
-        close $fh;
-        my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
-        my @wp_settings = split /\n/, $wp_settings;
-        if (@wp_settings) {
-            print CYAN "WP Settings for home, siteurl, stylesheet, template  and permalinks:\n";
-            foreach my $wp_setting (@wp_settings) {
-                chomp($wp_setting);
-                $wp_setting =~ s/\s+/: /g;
-                print YELLOW "\t\\_ $wp_setting\n";
+        if ( $dbfound ) {
+            my %attr = ( PrintError=>0, RaiseError=>0 );
+            my $dbconnect = DBI->connect("dbi:mysql:$dbname",$dbuser,$dbpass, \%attr);
+            print MAGENTA "Connection check using above credentials: ";
+            print GREEN "Success\n" if( defined( $dbconnect ));
+            print RED "Failed\n" unless( defined( $dbconnect ));
+            my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" .    $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
+            chomp($AdminCnt);
+            print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
+            smborder();
+            close $fh;
+            my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
+            my @wp_settings = split /\n/, $wp_settings;
+            if (@wp_settings) {
+                print CYAN "WP Settings for home, siteurl, stylesheet, template  and permalinks:\n";
+                foreach my $wp_setting (@wp_settings) {
+                    chomp($wp_setting);
+                    $wp_setting =~ s/\s+/: /g;
+                    print YELLOW "\t\\_ $wp_setting\n";
+                }
+            }
+            my $wp_activeplugins = qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
+            my @wp_activeplugins = split /\n/, $wp_activeplugins;
+            if (@wp_activeplugins) {
+                print CYAN "WP Active Plugins:\n";
+                foreach my $wp_activeplugin (@wp_activeplugins) {
+                    chomp($wp_activeplugin);
+                    print YELLOW "\t\\_ $wp_activeplugin\n";
+                }
             }
         }
-        my $wp_activeplugins = qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
-        my @wp_activeplugins = split /\n/, $wp_activeplugins;
-        if (@wp_activeplugins) {
-            print CYAN "WP Active Plugins:\n";
-            foreach my $wp_activeplugin (@wp_activeplugins) {
-                chomp($wp_activeplugin);
-                print YELLOW "\t\\_ $wp_activeplugin\n";
-            }
+        else {
+            print RED "[WARN] - Database " . YELLOW $dbname . RED " seems to be missing!\n" unless ( $dbfound );
         }
         my $current_version;
         if ( -e "$wppath/wp-includes/version.php" ) {
