@@ -735,12 +735,18 @@ print WHITE "UID/GID: " . CYAN $UID . "/" . $GID . "\n";
 my $quotaJSON = get_whmapi1( 'accountsummary', "user=$username" );
 my $quotaused = $quotaJSON->{data}->{acct}->[0]->{diskused};
 my $maxquota  = $quotaJSON->{data}->{acct}->[0]->{disklimit};
-print "Disk Quota: $quotaused used of $maxquota allowed ";
+my $inodeslimit = $quotaJSON->{data}->{acct}->[0]->{inodeslimit};
+my $inodesused = $quotaJSON->{data}->{acct}->[0]->{inodesused};
+print "Disk Quota: $quotaused used of $maxquota allowed / Inodes Used: $inodesused used of $inodeslimit allowed";
 
 if ( $quotaused > $maxquota ) {
     $acct_over_quota = 1 unless ( $maxquota eq "unlimited" );
     print RED "[WARN] - $username appears to be over quota!"
       unless ( $maxquota eq "unlimited" );
+}
+if ( $inodesused > $inodeslimit ) {
+    $acct_over_quota = 1 unless ( $inodeslimit eq "unlimited" );
+    print RED "[WARN] - $username appears to have maxed out inodes!" unless ( $inodeslimit eq "unlimited" );
 }
 print "\n";
 
@@ -804,10 +810,15 @@ if ( $sitejetinfo ) {
         print WHITE "Sitejet Builder Data [ " . GREEN "API Token: " . YELLOW "REDACTED --showtoken to reveal" . WHITE " ]\n" unless( $insecure );
         my $SjJSON = get_uapi( 'Sitejet', 'get_all_user_sitejet_info', "--user=$username", "domain=$sitejet_domain" );
         print expand( YELLOW "\t\\_ Website ID: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{websiteId} . "\n" );
-        print expand( YELLOW "\t\\_ Template Name: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateName} . YELLOW "[ Template ID: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateId} . YELLOW "]\n" );
+        print expand( YELLOW "\t\\_ Template Name: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateName} . YELLOW " [ Template ID: " . CYAN $SjJSON->{result}->{data}->[0]->{metadata}->{templateId} . YELLOW " ]\n" );
         my $isPublished = ( $SjJSON->{result}->{data}->[0]->{metadata}->{publish_status} ) ? "Yes" : "No";
-        print expand( YELLOW "\t\\_ Published: " . CYAN $isPublished . YELLOW " Latest Published Date: " . CYAN scalar(localtime($SjJSON->{result}->{data}->[0]->{metadata}->{latest_publish_date})));
-        print "\n";
+        if ( $isPublished eq "Yes" ) {
+            print expand( YELLOW "\t\\_ Published: " . CYAN $isPublished . YELLOW " Latest Published Date: " . CYAN scalar(localtime($SjJSON->{result}->{data}->[0]->{metadata}->{latest_publish_date})));
+        }
+        else {
+            print expand( YELLOW "\t\\_ Published: " . CYAN "No" );
+        }
+        print "\n\n";
     }
 }
 
@@ -1593,21 +1604,6 @@ if ( $listssls or $all ) {
             }
             print expand(
                 YELLOW "\t \\_ " . BRIGHT_CYAN $ExcludedDomain . "\n" );
-        }
-    }
-
-    # Check for purchased SSL's
-    if ( -e ("$RealHome/.cpanel/ssl/pending_queue.json") ) {
-        print "Checking for pending SSL Orders (purchased): \n";
-        my ($PendingSSLOrder) = ( split( /\s+/, qx[ python -mjson.tool $RealHome/.cpanel/ssl/pending_queue.json|grep -A1 cPStore ]))[3];
-        $PendingSSLOrder =~ s/\"//g;
-        $PendingSSLOrder =~ s/,//g;
-        $PendingSSLOrder =~ s/://g;
-        if ($PendingSSLOrder) {
-            print expand( CYAN "\t \\_ Pending order number: "
-                  . GREEN
-                  . "https://manage2.cpanel.net/certificate.cgi?oii=$PendingSSLOrder\n"
-            );
         }
     }
 
@@ -2927,6 +2923,24 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
         }
     }
 
+    # check mail and etc directories for PHP files (there should never be any php files in these directories) - CX-1103
+    my @dirs=qw( etc mail );
+    foreach my $dir(@dirs) {
+        if ( -d "$RealHome/$dir") {
+            opendir my $dh, "$RealHome/$dir"; 
+            my @files = readdir( $dh );
+            closedir( $dh );
+            my $showHead=0;
+            foreach my $file(@files) {
+                next if ( $file eq "." or $file eq ".." );
+                next unless( $file =~ m{.php} );
+                print RED "[WARNING] - Suspicious PHP file found within the " . WHITE "$RealHome/$dir" . RED " directory!\n" unless( $showHead );
+                $showHead=1;
+                print expand( YELLOW "\t\\_ $file\n" );
+            }
+        }
+    }
+
     # Check for /etc/manualmx file
     if ( -s '/etc/manualmx' ) {
         my $manual_mx_entry =
@@ -3859,29 +3873,19 @@ sub dispSSLdata {
             my ($SSLIssuer2) = ( split( /O=|O = /, $SSLIssuer1 ))[1];
             my ($SSLIssuer) = ( split( /\//, $SSLIssuer2 ))[0];
             $SSLIssuer =~ s/\"//g;
-            print expand( GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer" );
+            print expand( GREEN "\t \\_ [CA SIGNED] " . WHITE "Issued by: $SSLIssuer\n" );
 
-            # Get OCSP and Certificate status
-            my $OCSPstatus = qx[ openssl s_client -connect $tcDomain:443 -servername $tcDomain -status <<<quit 2>&1 | grep 'Cert Status:' ];
-
-            # It looks like if OCSPstatus is empty, the SSL may be revoked!
-            if ( $OCSPstatus and $isExpired ne "[EXPIRED]" ) {
-                print expand( BOLD CYAN "\t \\_ OCSP: "
-                      . BOLD MAGENTA substr( $OCSPstatus, 17 )
-                      . "\n" );
-            }
         }
         print WHITE "Protecting the following Subject Alternative Names:\n";
         my $SAN;
         my $getSANS = timed_run( 3, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-noout', '-text' );
         my @getSANS = split "\n", $getSANS;
         push @getSANS, "DNS: $tcDomain";
-        my $SSLHostMismatch = 0;
         foreach $SAN (@getSANS) {
             chomp($SAN);
             next unless( $SAN =~ m/DNS:/ );
-            $SAN =~ s/DNS://g;
             $SAN =~ s/\s+//;
+            $SAN =~ s/DNS://g;
             $SAN =~ s/, /\n/g;
             my @SANS = split( /\s+/, $SAN );
             foreach $SAN (@SANS) {
@@ -4557,7 +4561,7 @@ sub get_wp_info {
             my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
             if (@wp_settings) {
-                print CYAN "WP Settings for home, siteurl, stylesheet, template  and permalinks:\n";
+                print CYAN "WP Settings for home, siteurl, stylesheet, template and permalinks:\n";
                 foreach my $wp_setting (@wp_settings) {
                     chomp($wp_setting);
                     $wp_setting =~ s/\s+/: /g;
@@ -4568,9 +4572,18 @@ sub get_wp_info {
             my @wp_activeplugins = split /\n/, $wp_activeplugins;
             if (@wp_activeplugins) {
                 print CYAN "WP Active Plugins:\n";
+                my $dirname = dirname( $wpconf );
                 foreach my $wp_activeplugin (@wp_activeplugins) {
                     chomp($wp_activeplugin);
-                    print YELLOW "\t\\_ $wp_activeplugin\n";
+                    next if ( $wp_activeplugin eq 'wp_squared.php' );
+                    my $plugin_version = Cpanel::SafeRun::Timed::timedsaferun( 5, 'grep', 'Version: ', "$dirname/wp-content/plugins/$wp_activeplugin" );
+                    chomp($plugin_version);
+                    $plugin_version =~ s/\s+\*\s+//g;
+                    $plugin_version =~ s/Version:\s+//g;
+                    $plugin_version =~ s/^\s*(.*?)\s*$/$1/;
+                    print YELLOW "\t\\_ $wp_activeplugin " . CYAN "[ Version: " . WHITE $plugin_version . CYAN "]\n";
+                    my $plugin_name=basename("$dirname/wp-content/plugins/$wp_activeplugin");   ## Just the plugin name
+                    # RIGHT HERE - We'll add the wpvuln plugin checks.
                 }
             }
         }
