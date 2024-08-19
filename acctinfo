@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.52";
+my $VERSION = "2.5.53";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -30,6 +30,7 @@ use Cpanel::Sys::Hostname           ();
 use Cpanel::Config::LoadCpUserFile  ();
 use Cpanel::Config::LoadUserOwners  ();
 use Cpanel::Config::LoadUserDomains ();
+use Cpanel::Version::Compare        ();
 use Cpanel::Config::Users           ();
 use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
@@ -107,6 +108,10 @@ my $showpass        = undef;
 my $showtoken       = undef;
 my $showteaminfo    = undef;
 my $acct_over_quota = 0;
+my $coreEP="https://www.wpvulnerability.net/core";
+my $pluginEP="https://www.wpvulnerability.net/plugin";
+my $themeEP="https://www.wpvulnerability.net/theme";
+
 our $isInNamedConf = 0;
 our $spincounter;
 our @HasCAA;
@@ -2972,7 +2977,7 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
         print expand( CYAN $emailacctline . "\n" );
         print expand( "\t\\_ [Quota Used "
               . $qused
-              . " MB of "
+              . " of "
               . $qlimit . " ("
               . $qpercent
               . "%)] $over_quota_warn\n" );
@@ -4565,7 +4570,15 @@ sub get_wp_info {
                 foreach my $wp_setting (@wp_settings) {
                     chomp($wp_setting);
                     $wp_setting =~ s/\s+/: /g;
-                    print YELLOW "\t\\_ $wp_setting\n";
+                    my $theme_name = (split( /\s+/, $wp_setting))[1] if ( $wp_setting =~ m/template:/ );
+                    print YELLOW "\t\\_ $wp_setting";
+                    # RIGHT HERE we we'll add wpvuln theme check only if $wp_setting is template)
+                    if ( $wp_setting =~ m/template:/ ) {
+                        my ($num_unpatched,$numtotal)=get_theme_vuln( $theme_name );
+                        print WHITE " ( $num_unpatched " . MAGENTA "of" . WHITE $numtotal . MAGENTA "vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
+                        print MAGENTA " ( no open vulnerabilities )" unless (defined $num_unpatched && defined $num_unpatched);
+                    }
+                    print "\n";
                 }
             }
             my $wp_activeplugins = qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
@@ -4575,15 +4588,21 @@ sub get_wp_info {
                 my $dirname = dirname( $wpconf );
                 foreach my $wp_activeplugin (@wp_activeplugins) {
                     chomp($wp_activeplugin);
+                    my $plugin_name=dirname($wp_activeplugin);
                     next if ( $wp_activeplugin eq 'wp_squared.php' );
+                    next if ( $wp_activeplugin eq 'hello.php' );
                     my $plugin_version = Cpanel::SafeRun::Timed::timedsaferun( 5, 'grep', 'Version: ', "$dirname/wp-content/plugins/$wp_activeplugin" );
                     chomp($plugin_version);
                     $plugin_version =~ s/\s+\*\s+//g;
                     $plugin_version =~ s/Version:\s+//g;
+                    $plugin_version =~ s/\*//;
                     $plugin_version =~ s/^\s*(.*?)\s*$/$1/;
-                    print YELLOW "\t\\_ $wp_activeplugin " . CYAN "[ Version: " . WHITE $plugin_version . CYAN "]\n";
-                    my $plugin_name=basename("$dirname/wp-content/plugins/$wp_activeplugin");   ## Just the plugin name
-                    # RIGHT HERE - We'll add the wpvuln plugin checks.
+                    print YELLOW "\t\\_ $plugin_name " . CYAN "[ Version: " . WHITE $plugin_version . CYAN "] ";
+                    my ($num_unpatched,$numtotal)=get_plugin_vuln( $plugin_name, $plugin_version );
+                    my $goodbad=($num_unpatched == 0) ? GREEN " [GOOD]" : RED " [BAD] ";
+                    print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " ) $goodbad" if (defined $num_unpatched && defined $num_unpatched);
+                    print MAGENTA "( no open vulnerabilities ) $goodbad" unless (defined $num_unpatched && defined $num_unpatched);
+                    print "\n";
                 }
             }
         }
@@ -4600,9 +4619,14 @@ sub get_wp_info {
                     $current_version =~ s/\;//g;
                     chomp($current_version);
                     print CYAN "Current WordPress Version: "
-                    . YELLOW $current_version . "\n";
+                    . YELLOW $current_version;
+                    my ($num_unpatched,$numtotal)=get_wpcore_vuln( $current_version );
+                    print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
+                    print MAGENTA " ( no open vulnerabilities )" unless (defined $num_unpatched && defined $num_unpatched);
+                    print "\n";
                 }
             }
+
             my $latest_version = Cpanel::SafeRun::Timed::timedsaferun( 4, 'curl', '-s', 'https://wordpress.org/download/' );
             my @latest_version = split /\n/, $latest_version;
             my $release_version;
@@ -4628,4 +4652,81 @@ sub get_wp_info {
     smborder();
     }
 }
+
+sub get_wpcore_vuln {
+    my $tcCoreVer=shift;
+    my $coreJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$coreEP/$tcCoreVer" );
+    my $json_output = get_json_href($coreJSON);
+    return if ($json_output->{error} );
+    return unless( $json_output->{data}->{vulnerability} );
+    my $core_version=$json_output->{data}->{core};
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcCoreVer);
+    $cnt="no" unless( defined $cnt );
+    $cnt_patched="0" unless( defined $cnt_patched );
+    $cnt_unpatched="0" unless( defined $cnt_unpatched );
+    return $cnt_unpatched, $cnt;
+}
+
+sub get_plugin_vuln {
+    my $tcPlugin_Slug=shift;
+    my $tcVer=shift;
+    my $pluginJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$pluginEP/$tcPlugin_Slug" );
+    my $json_output = get_json_href($pluginJSON);
+    return if ($json_output->{error} );
+    return unless( $json_output->{data}->{plugin} );
+    return unless( $json_output->{data}->{vulnerability} );
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
+    $cnt="no" unless( defined $cnt );
+    $cnt_patched="0" unless( defined $cnt_patched );
+    $cnt_unpatched="0" unless( defined $cnt_unpatched );
+    return $cnt_unpatched, $cnt;
+}
+
+sub get_theme_vuln {
+    my $tcTheme_Slug=shift;
+    my $tcVer=shift;
+    my $themeJSON = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', "$themeEP/$tcTheme_Slug" );
+    my $json_output = get_json_href($themeJSON);
+    return if ($json_output->{error} );
+    return unless( $json_output->{data}->{theme} );
+    return unless( $json_output->{data}->{vulnerability} );
+    my ( $cnt, $cnt_patched, $cnt_unpatched ) = get_data($json_output->{data}->{vulnerability}, $tcVer);
+    $cnt="no" unless( defined $cnt );
+    $cnt_patched="0" unless( defined $cnt_patched );
+    $cnt_unpatched="0" unless( defined $cnt_unpatched );
+    return $cnt_unpatched, $cnt;
+}
+
+sub get_data {
+    my $yy=shift;
+    my $tcVer2=shift;
+    my $cnt;
+    my $cnt_patched;
+    my $cnt_unpatched;
+    for my $vuln ( @{ $yy // q{} } ) {
+        my $cveid=$vuln->{source}->[0]->{name};
+        my $maxver=$vuln->{operator}->{max_version};
+        my $maxoperator=$vuln->{operator}->{max_operator};
+        my $op;
+        $op="<" if ( $maxoperator eq "lt" );
+        $op="<=" if ( $maxoperator eq "le" );
+        $op=">" if ( $maxoperator eq "gt" );
+        $op=">=" if ( $maxoperator eq "ge" );
+        $op="=" if ( $maxoperator eq "eq" );
+        $op="!=" if ( $maxoperator eq "ne" );
+        if ( substr( $cveid, 0,3 ) eq 'CVE' ) {
+            if ( $tcVer2 ) {
+                if ( Cpanel::Version::Compare::compare( $maxver, $op, $tcVer2 ) ) {
+                    $cnt_patched++;
+                }
+                else {
+                    $cnt_unpatched++;
+                }
+            }
+            $cnt++;
+        }
+    }
+    return $cnt, $cnt_patched, $cnt_unpatched;
+}
+
 
