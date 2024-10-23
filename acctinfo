@@ -1939,6 +1939,7 @@ sub cruft_check {
         next unless( $cmd =~ m{CREATE$|REMOVE$|CREATERESELLERWITHOUTDOMAIN$} );
         if ( $line =~ m/$QUERY/ ) {
             $is_acct = 1;       ## Main domain (sub/addon/parked don't get added to accounting.log file)
+			$MAINDOMAIN=$other1;
             if ( $cmd eq 'CREATE' ) {
                 print GREEN "Domain: $other1 with username $other3 was created on $fulldate.\n";
                 $isActive     = 1;
@@ -2513,7 +2514,8 @@ qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v
                 or $dnscluster =~ m/dnsrole/
                 or $dnscluster =~ m/json/
                 or $dnscluster =~ m/error_log/
-                or $dnscluster =~ m/.cache/ )
+                or $dnscluster =~ m/.cache/
+                or $dnscluster =~ m/CDN/ )
             {
                 next;
             }
@@ -2553,24 +2555,24 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
                           . "\n" );
                 }
             }
-            else {
-                $QueryCluster =
-                  qx[ dig +tries=2 +time=5 \@$dnscluster $QUERY +short ];
-                if ($QueryCluster) {
-                    print expand( YELLOW "\t \\_ $QUERY "
-                          . GREEN ON_BLACK
-                          . "was found in "
-                          . $dnscluster
-                          . "\n" );
-                }
-                else {
-                    print expand( YELLOW "\t \\_ $QUERY "
-                          . RED
-                          . "NOT found in "
-                          . YELLOW $dnscluster
-                          . "\n" );
-                }
-            }
+#            else {
+#                $QueryCluster =
+#                  qx[ dig +tries=2 +time=5 \@$dnscluster $QUERY +short ];
+#                if ($QueryCluster) {
+#                    print expand( YELLOW "\t \\_ $QUERY "
+#                          . GREEN ON_BLACK
+#                          . "was found in "
+#                          . $dnscluster
+#                          . "\n" );
+#                }
+#                else {
+#                    print expand( YELLOW "\t \\_ $QUERY "
+#                          . RED
+#                          . "NOT found in "
+#                          . YELLOW $dnscluster
+#                          . "\n" );
+#                }
+#            }
         }
     }
 
