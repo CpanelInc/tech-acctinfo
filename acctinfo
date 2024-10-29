@@ -4371,12 +4371,12 @@ sub display_header {
     my $httpval = 0;
     $httpval = get_http_loc($tcDomain);
     return unless($httpval == 0);
-    get_data( $tcDomain, 'Server',       4 );
-    get_data( $tcDomain, 'Powered-By:',  4 );
-    get_data( $tcDomain, 'Redirect-By:', 4 );
+    get_head_data( $tcDomain, 'Server',       4 );
+    get_head_data( $tcDomain, 'Powered-By:',  4 );
+    get_head_data( $tcDomain, 'Redirect-By:', 4 );
 }
 
-sub get_data {
+sub get_head_data {
     my $tcDomain  = shift;
     my $tcValue   = shift;
     my $tnTimeout = shift;
@@ -4577,7 +4577,7 @@ sub get_wp_info {
                     # RIGHT HERE we we'll add wpvuln theme check only if $wp_setting is template)
                     if ( $wp_setting =~ m/template:/ ) {
                         my ($num_unpatched,$numtotal)=get_theme_vuln( $theme_name );
-                        print WHITE " ( $num_unpatched " . MAGENTA "of" . WHITE $numtotal . MAGENTA "vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
+                        print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
                         print MAGENTA " ( no open vulnerabilities )" unless (defined $num_unpatched && defined $num_unpatched);
                     }
                     print "\n";
