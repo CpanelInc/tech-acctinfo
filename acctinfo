@@ -1,5 +1,5 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2006 - 2024, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
+# Copyright 2006 - 2025, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.53";
+my $VERSION = "2.5.54";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -4564,6 +4564,10 @@ sub get_wp_info {
             chomp($AdminCnt);
             print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
             smborder();
+            print "Checking for suspicious script within widget block...\n";
+            my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
+            print RED "\t\\_ [WARN] * Suspicious entry in " . $tblprefix . "options widget_block. [Contains <script> tags]\n\t\\_ Go to wp-admin > Appearance > Widgets to examine.\n" if ( $widget_chk );
+            print GREEN "\t\\_ Nothing suspicious found within widget_block\n" unless( $widget_chk );
             close $fh;
             my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
