@@ -1264,8 +1264,8 @@ print WHITE "Count of other domains: ["
   . GREEN $addoncnt
   . WHITE "]\n";
 
-#my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
-my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt;
+my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
+#my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt;
 open( USERS, "/var/cpanel/users/$username" );
 my @USERFILE = <USERS>;
 close(USERS);
