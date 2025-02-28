@@ -1994,7 +1994,8 @@ sub cruft_check {
 
     # END OF ACCOUNTING LOG CHECK
 
-    $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt + 1;
+    #$TotalDomainCnt = $addoncnt + $subcnt + $parkcnt + 1;
+    $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
     open( USERS, "/var/cpanel/users/$username" );
     my @USERFILE = <USERS>;
     close(USERS);
