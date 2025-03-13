@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.55";
+my $VERSION = "2.5.56";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2052,7 +2052,8 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
               unless ($isAddon);
         }
         $isParked =
-          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' ];
+          #qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' ];
+          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' | grep -v 'cprapid.com' ];
         if ($isParked) {
             ($username) = ( split( /\s+/, $isParked ) )[1];
             ($username) = ( split( /==/,  $username ) );
@@ -3482,16 +3483,22 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
     print expand( YELLOW "\t\t \\_ IP Address: " . CYAN $ptripAddr . "\n" );
     print "\n";
 
-    # Check for DMARC record.
-    my $dmarc =
-      qx[ dig +tries=2 +time=5 \@208.67.222.222 _dmarc.$DOMAIN TXT +short ];
-    print "Checking DMARC Record For _dmarc.$DOMAIN\n";
-    if ($dmarc) {
-        print expand( YELLOW "\t \\_ " . $dmarc . "\n" );
+    print "Verifying DMARC Record For $DOMAIN\n";
+    my $valDMARCJSON = get_whmapi1( 'validate_current_dmarcs', "domain=$DOMAIN" );
+    my $DmarcState = $valDMARCJSON->{data}->{payload}->[0]->{state};
+    my $DmarcRecord = $valDMARCJSON->{data}->{payload}->[0]->{record};
+    my $DmarcDomain = $valDMARCJSON->{data}->{payload}->[0]->{domain};
+    my $DmarcSubDomain = $valDMARCJSON->{data}->{payload}->[0]->{subdomain};
+    my $DmarcSuggestion = $valDMARCJSON->{data}->{payload}->[0]->{suggested};
+    if ( $DmarcState eq "VALID" ) {
+        print expand( GREEN "\t \\_ [ " . $DmarcState . " ]\n" );
     }
     else {
-        print expand( YELLOW "\t \\_ None\n" );
+        print expand( RED "\t \\_ [ " . $DmarcState . " ]\n" );
     }
+    print expand( YELLOW "\t\t \\_ Domain " . CYAN $DmarcDomain . WHITE " [ " . $DmarcSubDomain . " ]\n" );
+    print expand( YELLOW "\t\t \\_ Record: " . CYAN $DmarcRecord . "\n" ) if ( $DmarcRecord );
+    print expand( YELLOW "\t\t \\_ Suggested " . WHITE $DmarcSuggestion . "\n" ) if ( $DmarcSuggestion );
     print "\n";
 
     # Add MAX_EMAIL_PER_HOUR, MAX_DEFER_FAIL_PERCENTAGE, MAILBOX_FORMAT
@@ -4562,8 +4569,10 @@ sub get_wp_info {
             print "Checking for suspicious script within widget block...\n";
             my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
             print RED "\t\\_ [WARN] * Suspicious entry in " . $tblprefix . "options widget_block. [Contains <script> tags]\n\t\\_ Go to wp-admin > Appearance > Widgets to examine.\n" if ( $widget_chk );
-            print GREEN "\t\\_ Nothing suspicious found within widget_block\n" unless( $widget_chk );
             close $fh;
+            print "Checking for massearchtraffic.top URL within functions.php file...\n";
+            my $massearchtraffic_malware = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$RealHome", '-name', 'functions.php', '-not', '-path', "/home/virtfs/*", '-a', '-not', '-path', '*/[@.]*', '-exec', 'grep', 'massearchtraffic.top', '{}', '+' );
+            print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
             my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
             if (@wp_settings) {
