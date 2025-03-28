@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.56";
+my $VERSION = "2.5.57";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -277,23 +277,16 @@ my $IS_ADDON    = "";
 my $IS_SUB      = "";
 my $maindocroot = "";
 my ( $subdocroot, $addondocroot, $parkeddocroot );
-my @OtherDomains  = "";
-my @SUBDOMAINS    = "";
-my @ADDONDOMAINS  = "";
-my @PARKEDDOMAINS = "";
-my @users_domains = (
-    $user_conf->{'DOMAIN'},
-    $user_conf->{'DOMAINS'} ? @{ $user_conf->{'DOMAINS'} } : ()
-);
-
-push @OtherDomains, $MAINDOMAIN;
+my @OtherDomains  = undef;
+my @SUBDOMAINS    = undef;
+my @ADDONDOMAINS  = undef;
+my @PARKEDDOMAINS = undef;
 
 my $DomainInfoJSON = get_whmapi1('get_domain_info');
 my $DomainInfoLines;
 for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
     if ( $DomainInfoLines->{user} eq $username ) {
         if ( $DomainInfoLines->{domain_type} eq "sub" ) {
-            push( @OtherDomains, $DomainInfoLines->{domain} );
             push( @SUBDOMAINS,   $DomainInfoLines->{domain} );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
@@ -309,7 +302,6 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
         }
         if ( $DomainInfoLines->{domain_type} eq "addon" ) {
 
-            push( @OtherDomains, $DomainInfoLines->{domain} );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             my $sitejet_status = ( -e "$HOMEDIR/$username/.cpanel/sitejet/$DomainInfoLines->{domain}" ) ? MAGENTA "[Sitejet Enabled]" : "";
@@ -331,9 +323,8 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
             $addondocroot = $DomainInfoLines->{docroot}
               unless ( $DomainInfoLines->{domain} ne $QUERY );
         }
-        if ( $DomainInfoLines->{domain_type} eq "parked" ) {
-
-            push( @OtherDomains,  $DomainInfoLines->{domain} );
+		if ( $DomainInfoLines->{domain_type} eq "parked" ) {
+			next if ( $DomainInfoLines->{domain} =~ m/cprapid\.com/ );
             push( @PARKEDDOMAINS, $DomainInfoLines->{domain} );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
@@ -348,6 +339,7 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
               unless ( $DomainInfoLines->{domain} ne $QUERY );
         }
         if ( $DomainInfoLines->{domain_type} eq "main" ) {
+            push( @OtherDomains, $DomainInfoLines->{domain} );
             $maindocroot = $DomainInfoLines->{docroot};
         }
     }
@@ -360,7 +352,7 @@ shift @OtherDomains;
 my $subcnt   = @SUBDOMAINS;
 my $addoncnt = @ADDONDOMAINS;
 my $parkcnt  = @PARKEDDOMAINS;
-my $othercnt = @OtherDomains;
+my $MainDomainCnt = @OtherDomains;
 
 if ($cruft) {
     cruft_check();
@@ -539,7 +531,6 @@ for my $child_nodes ( @{ $user_child_nodesJSON->{data}->{payload} } ) {
 # Get home directory from /etc/passwd
 our $SSLProvider = getSSLProvider();
 my $RealHome    = Cpanel::PwCache::gethomedir($username);
-my $OnCloud=($RealHome =~ m{remote-storage}) ? 1 : 0;
 my $RealShell = Cpanel::PwCache::Get::getshell($username);
 my $UID       = Cpanel::PwCache::Get::getuid($username);
 my $GID       = Cpanel::Config::CpUser::get_cpgid($username);
@@ -579,25 +570,6 @@ print expand(
 
 if ( $maindocroot eq "" ) {
     print expand( RED "\t \\_ [WARN] - DocumentRoot is blank!\n" );
-}
-
-if ( $OnCloud ) {
-    print GREEN expand( "\tcPCloud Instance Detected...\n");
-    my $namespaces=timed_run( 3, 'kubectl', 'get', 'namespaces' );
-    my @namespaces=split /\n/, $namespaces;
-    foreach my $namespace(@namespaces) {
-        chomp($namespace);
-        next unless( $namespace =~ m/$username/ );
-        print expand( YELLOW "\t " . $namespace . "\n");
-        last;
-    }
-    my $serviceweb=timed_run( 3, 'kubectl', '-n', "cpsc-service-web-$username", 'get', 'all' );
-    my @servicewebs=split /\n/, $serviceweb;
-    foreach my $line(@servicewebs) {
-        chomp($line);
-        print expand( CYAN "\t\t\\_ $line\n" ) if ( $line =~ m{pod/cpsc-service-web} );
-    }
-    print "\n";
 }
 
 print WHITE "Real Home Directory (/etc/passwd): "
@@ -1129,19 +1101,10 @@ my @multipleIPs      = undef;
 foreach $ResolvedIP (@ResolvedIP) {
     chomp($ResolvedIP);
     next if !Cpanel::Validate::IP::is_valid_ip($ResolvedIP);
-    my $hasCloud = hasCloud($ResolvedIP) if($OnCloud);
-    if ( $hasCloud ) {
-        my $ResolvedHost = Cpanel::SafeRun::Timed::timedsaferun( 4, 'dig', '-x', $ResolvedIP, '+short' );
-        chomp($ResolvedHost);
-        $ResolvesToDetail = "A node on the cpCloud Server [ $ResolvedHost ]";
-        push @multipleIPs, CYAN "\t \\_ " . $ResolvedIP . " " . YELLOW $ResolvesToDetail . "\n";
-    }
-    else {
-        #$ResolvesToDetail = check_resolved_ip($ResolvedIP);
-        $ResolvesToDetail = check_resolved_ip($ResolvedIP, $IPADDR);
-        push @multipleIPs, CYAN "\t\\_ " . $ResolvedIP . " " . YELLOW $ResolvesToDetail . "\n";
-    }
+    $ResolvesToDetail = check_resolved_ip($ResolvedIP, $IPADDR);
+    push @multipleIPs, CYAN "\t\\_ " . $ResolvedIP . " " . YELLOW $ResolvesToDetail . "\n";
 }
+
 print WHITE "Resolves to the following IPs:\n";
 if ( $TotalARecords == 0 ) {
     print CYAN "\t \\_ DOES NOT RESOLVE " . RED "[NXDOMAIN]\n";
@@ -1264,12 +1227,15 @@ print WHITE "Count of other domains: ["
   . GREEN $addoncnt
   . WHITE "]\n";
 
-my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt + 1;
-#my $TotalDomainCnt = $subcnt + $parkcnt + $addoncnt;
-open( USERS, "/var/cpanel/users/$username" );
-my @USERFILE = <USERS>;
-close(USERS);
-my $DNSLinesCnt = @users_domains;
+my $TotalDomainCnt = $MainDomainCnt + $subcnt + $parkcnt + $addoncnt;
+my $DNSLinesCnt=0;
+open( my $fh, '<', "/var/cpanel/users/$username" );
+while ( <$fh> ) {
+	chomp;
+	next unless( $_ =~ m/^DNS/ );
+	$DNSLinesCnt++ unless( $_ =~ m/cprapid.com/ );
+}
+close( $fh );
 
 if ($IS_USERNAME) {
     $isInNamedConf = 1;
@@ -1841,55 +1807,6 @@ sub check_resolved_ip {
     return $RetVal;
 }
 
-# OLD ROUTINE
-#sub check_resolved_ip {
-    my $IP2CHK        = shift;
-    my $RetVal        = "";
-    my $IS_CLOUDFLARE = check_cloudflare_ips($IP2CHK);
-    if ($IS_CLOUDFLARE) {
-        $RetVal = $RetVal .= " <<--- CloudFlare IP Address";
-        $defaultsite = 1;
-        return $RetVal;
-    }
-    my $ListIPsJSON     = get_whmapi1('listips');
-    my $IS_IP_ON_SERVER = 0;
-    for my $ListOfIPs ( @{ $ListIPsJSON->{data}->{ip} } ) {
-        if ( $ListOfIPs->{public_ip} eq $IP2CHK ) {
-            $IS_IP_ON_SERVER = 1;
-        }
-    }
-    if ( !$IS_IP_ON_SERVER ) {
-        $RetVal = $RetVal .= "[Not on this server]";
-        $defaultsite = 1;
-        return $RetVal;
-    }
-
-    if ( -e ("/var/cpanel/cpnat") ) {
-        open( CPNAT, "/var/cpanel/cpnat" );
-        my @CPNAT = <CPNAT>;
-        close(CPNAT);
-        my $cpnatline;
-        my $RetVal;
-        foreach $cpnatline (@CPNAT) {
-            chomp($cpnatline);
-            my ( $private_ip, $public_ip ) = ( split( /\s+/, $cpnatline ) );
-            chomp($public_ip);
-            chomp($private_ip);
-            if ( $IP2CHK eq $public_ip ) {
-                $RetVal = " Routed via 1:1 NAT ($public_ip => $private_ip)"
-                  . GREEN " [SAME]";
-                $defaultsite = 0;
-                return $RetVal;
-            }
-        }
-    }
-    else {
-        $RetVal      = " Direct Route ($IP2CHK => $IP2CHK)" . GREEN " [SAME]";
-        $defaultsite = 0;
-        return $RetVal;
-    }
-#}
-
 sub cruft_check {
     border();
     print CYAN "CRUFT CHECK\n";
@@ -1900,6 +1817,8 @@ sub cruft_check {
     my $spacer         = 0;
     my $len            = 0;
     my $filestatus     = "";
+    my $isActive       = 0;
+    my $is_acct        = 0;
     my $isTerminated   = 0;
     my $termdate       = "";
     my $createdate     = "";
@@ -1911,91 +1830,89 @@ sub cruft_check {
     if ( $systemUser == 0 ) {
         $skipMySQLCruft = 1;
     }
-    my $isActive;
-    my $is_acct;
     my $check_for;
-
-    if ( substr( $QUERY, 0, 5 ) eq "cptkt" ) {
-        print BOLD RED
-"[WARN] - cruft check for cPanel Support temporary reseller accounts are unpredictable!\n";
-        if ($debugHookChanged) {
-            get_whmapi1( 'set_tweaksetting', 'key=debughooks', 'value=logall' );
-        }
-    }
 
    # Check /var/cpanel/accounting.log file here (for CREATE and/or REMOVE lines)
    # ONLY MAIN ACCT / DOMAIN is checked
-    print BRIGHT_BLUE "From your query of "
-      . GREEN $QUERY
-      . BRIGHT_BLUE " I have determined:\n";
+    print BRIGHT_BLUE "From your query of " . GREEN $QUERY . BRIGHT_BLUE " I have determined:\n";
     open( my $fh, '<', '/var/cpanel/accounting.log' );
-    my @data=<$fh>;
-    close( $fh);
-    foreach my $line( @data ) {
-        chomp($line);
-        my ( $day, $mon, $date, $time, $year ) = ( split( /\s+/, $line ))[0,1,2,3,4];
-        my ( $onlyyear ) = ( split( /:/, $year ) )[0];
-        my $fulldate = $day . " " . $mon . " " . $date . " " . $time . " " . $onlyyear;
-        my ( $cmd, $owner1, $owner2, $other1, $other2, $other3 ) = ( split( /\:/, $line ))[3,4,5,6,7,8];
-        next unless( $cmd =~ m{CREATE$|REMOVE$|CREATERESELLERWITHOUTDOMAIN$} );
-        if ( $line =~ m/$QUERY/ ) {
+    while( <$fh> ) {
+        chomp;
+        if ( $_ =~ m{$QUERY} ) {
             $is_acct = 1;       ## Main domain (sub/addon/parked don't get added to accounting.log file)
-			$MAINDOMAIN=$other1;
+            my ( $day, $mon, $date, $time, $year ) = ( split( /\s+/, $_ ))[0,1,2,3,4];
+            my ( $onlyyear ) = ( split( /:/, $year ) )[0];
+            my $fulldate = $day . " " . $mon . " " . $date . " " . $time . " " . $onlyyear;
+            my ( $cmd, $owner1, $owner2, $other1, $other2, $other3 ) = ( split( /\:/, $_ ))[3,4,5,6,7,8];
+            next unless( $cmd =~ m{CREATE|REMOVE|CREATERESELLERWITHOUTDOMAIN} );
             if ( $cmd eq 'CREATE' ) {
                 print GREEN "Domain: $other1 with username $other3 was created on $fulldate.\n";
                 $isActive     = 1;
                 $isTerminated = 0;
+                $username=$other3;
+                $MAINDOMAIN=$other1;
             }
             if ( $cmd eq 'REMOVE' ) {
                 print RED "Domain: $other1 with username $other2 was terminated on $fulldate.\n";
                 $isActive     = 0;
                 $isTerminated = 1;
+                $username=$other2;
+                $MAINDOMAIN=$other1;
             }
             if ( $cmd eq 'CREATERESELLERWITHOUTDOMAIN' ) {
                 print MAGENTA "A domainless reseller account ( $other1 ) was created on $fulldate.\n";
+                $isActive=1;
+                $isTerminated=0;
+                $username=$other3;
+                $MAINDOMAIN=$other1;
             }
         }
     }
+    close( $fh );
+
+    if ( ! $IS_USERNAME ) {
+        my $DataJSON = get_whmapi1( 'getdomainowner', "domain=$QUERY" );
+        if ( $DataJSON->{data}->{user} ) {
+            $username = $DataJSON->{data}->{user};
+        }
+    }
+    else {
+        $username=$QUERY;
+    }
+
     my $NOGrep = 0;
     if ($isTerminated) {  ## $is_acct is true if this is the main account/domain
         $NOGrep         = 1;
         $skipMySQLCruft = 1;
     }
-    if ($isActive) {
-        if ( $MAINDOMAIN eq $HOSTNAME or $MAINDOMAIN eq "root" ) {
-            print RED
-"[WARN] - $MAINDOMAIN is either root or is the same as hostname $HOSTNAME!\n";
-        }
-        if ( $addoncnt > 0 ) {
 
-            print "It has $addoncnt Addon domains ";
-        }
-        if ( $subcnt > 0 ) {
-
-            print "It has $subcnt Sub domains ";
-        }
-        if ( $parkcnt > 0 ) {
-            print "It has $parkcnt Aliased domains";
-        }
-        print "\n";
+    if ( $isActive ) {
+       if ( $addoncnt > 0 ) {
+           print "It has $addoncnt Addon domains ";
+       }
+       if ( $subcnt > 0 ) {
+           print "It has $subcnt Sub domains ";
+       }
+       if ( $parkcnt > 0 ) {
+           print "It has $parkcnt Aliased domains";
+       }
+       print "\n";
     }
-
     if ( $username and -e "/etc/passwd" ) {
         my $UID     = Cpanel::PwCache::Get::getuid($username);
         my $GID     = Cpanel::Config::CpUser::get_cpgid($username);
         my $UID_MIN = Cpanel::LoginDefs::get_uid_min();
         my $GID_MIN = Cpanel::LoginDefs::get_gid_min();
         if ( $UID < $UID_MIN or $GID < $GID_MIN ) {
-            print RED
-"[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n"
-              unless ( $UID == 0 or $GID == 0 );
+            print RED "[WARN] - UID/GID for $username is less than $UID_MIN/$GID_MIN as set in /etc/login.defs\n" unless ( $UID == 0 or $GID == 0 );
         }
     }
 
     # END OF ACCOUNTING LOG CHECK
 
-    #$TotalDomainCnt = $addoncnt + $subcnt + $parkcnt + 1;
-    $TotalDomainCnt = $addoncnt + $subcnt + $parkcnt;
+    $TotalDomainCnt=0;
+    $TotalDomainCnt = $MainDomainCnt + $addoncnt + $subcnt + $parkcnt;
+
     open( USERS, "/var/cpanel/users/$username" );
     my @USERFILE = <USERS>;
     close(USERS);
@@ -2006,66 +1923,47 @@ sub cruft_check {
     foreach $userline (@USERFILE) {
         chomp($userline);
         next unless ( $userline =~ m/^DNS/ );
+		next if ( $userline =~ m/cprapid.com/ );
         my ($dnsdomain) = ( split( /=/, $userline ) )[1];
         push @DNSLinesOnly, $dnsdomain;
         $DNSLinesCnt++;
     }
-    if (    !$isActive
-        and !$is_acct
-        and !$isTerminated
-        and !$MAINDOMAIN
-        and !$username )
-    {
-        print 
-"No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
-        print "Continuing search for $QUERY...\n";
-    }
+#    if ( !$isActive and !$is_acct and !$isTerminated ) {
+#        print "No data found for your query of: $QUERY in /var/cpanel/accounting.log\n";
+#        print "Continuing search for $QUERY...\n";
+#        $skipMySQLCruft=1;
+#    }
     my $isAddon;
     my $isSub;
     my $isParked;
     my $SubDomain;
     my $TheAddonDomain;
     if ( !$isActive ) {
-        $isAddon =
-          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
+        $isAddon = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' ];
         if ($isAddon) {
-            $TheAddonDomain =
-qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
+            $TheAddonDomain = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
             chomp($TheAddonDomain);
             ($username) = ( split( /\s+/, $isAddon ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isAddon)  = ( split( /:/,   $isAddon ) );
-            print YELLOW 
-"$QUERY has an entry in /etc/userdatadomains as an Addon Domain under the "
-              . CYAN $username
-              . WHITE " user\n";
+            print YELLOW "$QUERY has an entry in /etc/userdatadomains as an Addon Domain under the " . CYAN $username . WHITE " user\n";
         }
         $isSub = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==sub==' ];
         if ($isSub) {
             ($username) = ( split( /\s+/, $isSub ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isSub)    = ( split( /:/,   $isSub ) );
-            print YELLOW 
-"$QUERY has an entry in /etc/userdatadomains as a Sub Domain under the "
-              . CYAN $username
-              . WHITE " user\n"
-              unless ($isAddon);
+            print YELLOW "$QUERY has an entry in /etc/userdatadomains as a Sub Domain under the " . CYAN $username . WHITE " user\n" unless ($isAddon);
         }
-        $isParked =
-          #qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' ];
-          qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' | grep -v 'cprapid.com' ];
+        $isParked = qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==parked==' | grep -v 'cprapid.com' ];
         if ($isParked) {
             ($username) = ( split( /\s+/, $isParked ) )[1];
             ($username) = ( split( /==/,  $username ) );
             ($isParked) = ( split( /:/,   $isParked ) );
-            print YELLOW 
-"$QUERY has an entry in /etc/userdatadomains as a Aliased Domain under the "
-              . CYAN $username
-              . WHITE " user\n";
+            print YELLOW "$QUERY has an entry in /etc/userdatadomains as a Aliased Domain under the " . CYAN $username . WHITE " user\n";
         }
         if ( !$MAINDOMAIN and $username ) {
-            ($MAINDOMAIN) =
-              ( split( /:/, qx[ grep '$username' /etc/trueuserdomains ] ) )[0];
+            ($MAINDOMAIN) = ( split( /:/, qx[ grep '$username' /etc/trueuserdomains ] ) )[0];
             chomp($MAINDOMAIN);
         }
     }
@@ -2115,17 +2013,9 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
     }
     if ($username) {
         if ( $username ne "nobody" ) {
-            print "Searching the following files for user: "
-              . BOLD MAGENTA $username . "\n";
+            print "Searching the following files for user: " . BOLD MAGENTA $username . "\n\n";
             foreach $file2searchu (@FILES2SEARCHUSER) {
                 chomp($file2searchu);
-                if ( !( -s ($file2searchu) ) ) {
-                    my $filestat =
-                      $file2searchu . " is either empty or missing";
-                    my $fileskip = CYAN "[SKIPPING]";
-                    print_output( $filestat, $fileskip );
-                    next;
-                }
                 $filestatus = check_file_existance( $file2searchu, $username );
                 if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
                 else               { $filestatus = RED "[MISSING]"; }
@@ -2135,31 +2025,32 @@ qx[ grep '^$QUERY:' /etc/userdatadomains | grep '==addon==' | cut -d = -f7 ];
     }
     else {
         print "No Username detected for $QUERY - skipping some checks!\n\n";
-        $skipMySQLCruft = 1;
     }
-    if ($IS_USERNAME) {
-        $username = $QUERY;
-    }
-    else {
-        $MAINDOMAIN = $QUERY;
-    }
-    if ($MAINDOMAIN) {
-        print "Searching the following files for domain: "
-          . BOLD MAGENTA $MAINDOMAIN . "\n";
-        foreach $file2search (@FILES2SEARCH) {
-            chomp($file2search);
-            if ( !( -s ($file2search) ) ) {
-                my $filestat = $file2search . " is either empty or missing";
-                my $fileskip = CYAN "[SKIPPING]";
-                print_output( $filestat, $fileskip );
-                next;
+    if ( $QUERY ne "" ) {
+        if ( $MAINDOMAIN eq "" ) {
+            $MAINDOMAIN=$QUERY;
+            $username=$QUERY;
+        }
+        if ($IS_USERNAME) {
+            $QUERY=$MAINDOMAIN;
+        }
+        if ($MAINDOMAIN) {
+            print "\nSearching the following files for domain: " . BOLD MAGENTA $MAINDOMAIN . "\n\n";
+            foreach $file2search (@FILES2SEARCH) {
+                chomp($file2search);
+                if ( !( -s ($file2search) ) ) {
+                    my $filestat = $file2search . " is either empty or missing";
+                    my $fileskip = CYAN "[SKIPPING]";
+                    print_output( $filestat, $fileskip );
+                    next;
+                }
+
+                $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
+
+                if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
+                else               { $filestatus = RED "[MISSING]"; }
+                print_output( $file2search, $filestatus );
             }
-
-            $filestatus = check_file_existance( $file2search, $MAINDOMAIN );
-
-            if   ($filestatus) { $filestatus = GREEN "[EXISTS]"; }
-            else               { $filestatus = RED "[MISSING]"; }
-            print_output( $file2search, $filestatus );
         }
     }
     if ($username) {
