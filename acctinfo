@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.57";
+my $VERSION = "2.5.58";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -114,7 +114,6 @@ my $themeEP="https://www.wpvulnerability.net/theme";
 
 our $isInNamedConf = 0;
 our $spincounter;
-our @HasCAA;
 
 GetOptions(
     'listdbs'       => \$listdbs,
@@ -1581,6 +1580,7 @@ if ( $listssls or $all ) {
 
     # Check for CAA records
     print "Checking for CAA records: \n";
+    my @HasCAA=checkCAA();
     my $CAARecord;
     my $CAAFound = @HasCAA;
     if ( $CAAFound == 0 ) {
@@ -1827,7 +1827,7 @@ sub cruft_check {
     my $TotalDomainCnt = 0;
     my $skipMySQLCruft = 0;
 
-    if ( $systemUser == 0 ) {
+    if ( $systemUser == 0 or $UserSuspended ) {
         $skipMySQLCruft = 1;
     }
     my $check_for;
@@ -2488,6 +2488,7 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
         }
     }
     print YELLOW "Checking for any MySQL users in mysql.user table\n";
+    print RED "[NOTE: Database Prefix is DISABLED - Results may be inconclusive]\n" unless( $DBPrefix );
     my $DBusername = timed_run( 3, 'mysql', '-BNe',
         "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'"
     );
@@ -2519,7 +2520,9 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
         my $NewDBUser;
         foreach $NewDBUser (@DBusernames) {
             chomp($NewDBUser);
-            print expand( WHITE "\t \\_ " . $NewDBUser . "\n" );
+	    my ( $dbuser, $dbname ) = (split ( /\s+/, $NewDBUser ));
+	    $dbname =~ s/\\\\//g;
+            print expand( CYAN "\t \\_ DBUser: " . WHITE $dbuser . CYAN " DBName: " . WHITE $dbname . "\n" );
         }
     }
     else {
@@ -4232,6 +4235,7 @@ sub chk_for_blocked_country_codes {
 
 sub checkCAA {
     my $tcDomain = $_[0];
+    my @AddCAA;
     my $CAAResult;
     my $CAAResults =
       timed_run( 10, 'dig', '+noall', '+answer', "$tcDomain", 'CAA' );
@@ -4250,13 +4254,13 @@ sub checkCAA {
         my ( $CAAFlag, $CAATag, $CAAValue ) =
           ( split( /\s+/, $CAAResult ) )[ 4, 5, 6 ];
         push(
-            @HasCAA,
+            @AddCAA,
             expand(
                 YELLOW "\t\\_ " . $CAAFlag . " " . $CAATag . " " . $CAAValue
             )
         );
     }
-    return;
+    return @AddCAA;
 }
 
 sub display_header {
@@ -4456,6 +4460,13 @@ sub get_wp_info {
             my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" .    $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
             chomp($AdminCnt);
             print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
+            my $listAdmins = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', ${dbname}, '-BNe', "SELECT ${tblprefix}users.user_login, ${tblprefix}users.user_registered FROM ${tblprefix}users INNER JOIN ${tblprefix}usermeta ON ${tblprefix}users.ID=${tblprefix}usermeta.user_id WHERE ${tblprefix}usermeta.meta_key='${tblprefix}capabilities' AND ${tblprefix}usermeta.meta_value LIKE '%administrator%';" );
+            my @listAdmins = split /\n/, $listAdmins;
+	    print expand( "\t\tUser") . expand( "\t\t\tRegistered On\n" );
+            foreach my $Admin(@listAdmins) {
+                chomp($Admin);
+                print expand( GREEN "\t\\_ $Admin\n" );
+            }
             smborder();
             print "Checking for suspicious script within widget block...\n";
             my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
@@ -4464,6 +4475,19 @@ sub get_wp_info {
             print "Checking for massearchtraffic.top URL within functions.php file...\n";
             my $massearchtraffic_malware = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$RealHome", '-name', 'functions.php', '-not', '-path', "/home/virtfs/*", '-a', '-not', '-path', '*/[@.]*', '-exec', 'grep', 'massearchtraffic.top', '{}', '+' );
             print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
+            # Check for malware in MU-Plugins
+            my @files=qw( redirect.php index.php custom-js-loader.php );
+            my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
+            my @allmuplugs = split /\n/, $allmuplugs;
+            foreach my $muplugins_path(@allmuplugs) {
+                print "Checking for suspicious malware related files under mu-plugins folder...\n";
+                foreach my $file( @files ) {
+                    chomp( $file );
+                    if ( -e "$muplugins_path/$file" ) {
+                        print RED "\t\\_ [WARN] * Suspicious file found in " . WHITE $muplugins_path . RED " folder (" . CYAN $file . RED ")\n";
+                    }
+                }
+            }
             my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
             if (@wp_settings) {
