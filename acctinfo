@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.58";
+my $VERSION = "2.5.59";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -1923,7 +1923,7 @@ sub cruft_check {
     foreach $userline (@USERFILE) {
         chomp($userline);
         next unless ( $userline =~ m/^DNS/ );
-		next if ( $userline =~ m/cprapid.com/ );
+        next if ( $userline =~ m/cprapid.com/ );
         my ($dnsdomain) = ( split( /=/, $userline ) )[1];
         push @DNSLinesOnly, $dnsdomain;
         $DNSLinesCnt++;
@@ -2071,6 +2071,20 @@ sub cruft_check {
                 else              { $dirstatus = RED "MISSING"; }
                 print expand(
                     "\t \\_ " . $FoundHere . " - " . $dirstatus . "\n" );
+            }
+        }
+
+        # Check /etc/imunify360/user_config/$username
+        my $dirstatus = check_dir("/etc/imunify360/user_config/$username");
+        if   ($dirstatus) { $dirstatus = GREEN "[EXISTS]"; }
+        else              { $dirstatus = RED "[MISSING]"; }
+        print_output( "/etc/imunify360/user_config/$username", $dirstatus );
+        if ( $dirstatus =~ m/EXISTS/ ) {
+            my @FoundHere = qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /etc/imunify360/user_config/$username/* | grep -v 'cache' ];
+            my $FoundHere;
+            foreach $FoundHere (@FoundHere) {
+                chomp($FoundHere);
+                print expand( "\t \\_ " . $FoundHere . "\n" );
             }
         }
 
@@ -4462,19 +4476,25 @@ sub get_wp_info {
             print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
             my $listAdmins = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', ${dbname}, '-BNe', "SELECT ${tblprefix}users.user_login, ${tblprefix}users.user_registered FROM ${tblprefix}users INNER JOIN ${tblprefix}usermeta ON ${tblprefix}users.ID=${tblprefix}usermeta.user_id WHERE ${tblprefix}usermeta.meta_key='${tblprefix}capabilities' AND ${tblprefix}usermeta.meta_value LIKE '%administrator%';" );
             my @listAdmins = split /\n/, $listAdmins;
-	    print expand( "\t\tUser") . expand( "\t\t\tRegistered On\n" );
+            print expand( "\t\tUser") . expand( "\t\t\tRegistered On\n" );
             foreach my $Admin(@listAdmins) {
                 chomp($Admin);
                 print expand( GREEN "\t\\_ $Admin\n" );
             }
             smborder();
+
+            print "Checking for suspicious WP Malware...\n";
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/WP-antymalwary-bot.php]\n" if ( -e "$wppath/wp-content/plugins/WP-antymalwary-bot.php" );
+
             print "Checking for suspicious script within widget block...\n";
             my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
             print RED "\t\\_ [WARN] * Suspicious entry in " . $tblprefix . "options widget_block. [Contains <script> tags]\n\t\\_ Go to wp-admin > Appearance > Widgets to examine.\n" if ( $widget_chk );
             close $fh;
+
             print "Checking for massearchtraffic.top URL within functions.php file...\n";
             my $massearchtraffic_malware = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$RealHome", '-name', 'functions.php', '-not', '-path', "/home/virtfs/*", '-a', '-not', '-path', '*/[@.]*', '-exec', 'grep', 'massearchtraffic.top', '{}', '+' );
             print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
+
             # Check for malware in MU-Plugins
             my @files=qw( redirect.php index.php custom-js-loader.php );
             my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
