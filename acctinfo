@@ -4057,7 +4057,7 @@ sub chk_login_disabled {
     if ( -s "$shadow_file/shadow" ) {
         open( my $fh, '<', "$shadow_file/shadow" ) or die( $! );
         while( <$fh> ) {
-            if ( $_ =~ m/$localpart/ ) {
+            if ( $_ =~ m/^$localpart$/ ) {
                 print expand( RED "\t \\_ Login for this account has been disabled/suspended\n" );
             }
         }
