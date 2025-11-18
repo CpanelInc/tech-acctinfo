@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.59";
+my $VERSION = "2.5.60";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -161,7 +161,6 @@ if ($helpME) {
 getProfileNode();
 
 my $conf        = Cpanel::Config::LoadWwwAcctConf::loadwwwacctconf();
-#my $HOMEDIR     = $conf->{'HOMEDIR'};
 my $HOMEDIR;
 my $HOMEMATCH   = $conf->{'HOMEMATCH'};
 my $SERVER_IP   = $conf->{'ADDR'};
@@ -1706,6 +1705,22 @@ sub check_cloudflare_ips {
     }
 }
 
+sub getAWS_IPs {
+    my $chkIP = shift;
+    chomp($chkIP);
+    my $AWSsubnets = Cpanel::SafeRun::Timed::timedsaferun( 0, 'curl', '-s', 'https://ip-ranges.amazonaws.com/ip-ranges.json' );
+    my $output = decode_json( $AWSsubnets );
+    for my $prefix ( @{ $output->{prefixes} // q{} } ) {
+        my $ip_prefix=$prefix->{ip_prefix};
+        chomp($ip_prefix);
+        my $network = NetAddr::IP->new($ip_prefix);
+        my $ip      = NetAddr::IP->new($chkIP);
+        if ( $ip->within($network) ) {
+            return 1;
+        }
+    }
+}
+
 sub check_for_rfc1918 {
     my $tcRFC1918chk = shift;
     my @rfc1918=qw( 10/8 172.16/12 192.168/16 );
@@ -1763,6 +1778,14 @@ sub check_resolved_ip {
     my $is_cloudflare_ip = check_cloudflare_ips($tcResolvedIP);
     if ($is_cloudflare_ip) {
         $RetVal .= " <<--- CloudFlare IP Address";
+        $defaultsite = 1;
+        return $RetVal;
+    }
+
+    # Is Amazon CloudFront IP?
+    my $is_Amazon_CF=getAWS_IPs($tcResolvedIP);
+    if ( $is_Amazon_CF ) {
+        $RetVal .= " <<--- Amazon CloudFront IP Address";
         $defaultsite = 1;
         return $RetVal;
     }
@@ -4420,7 +4443,9 @@ sub get_wp_info {
         my $wppath = dirname( $wpconf );
         my $insecure    = ($showpass)                   ? 1 : 0;
         my $inmaintmode = ( -e "$wppath/.maintenance" ) ? 1 : 0;
+        my $wp_toolkit_ignore = ( -e "$wppath/.wp-toolkit-ignore" ) ? 1 : 0;
         print RED "[WARN] - WordPress is in maintenance mode!\n" unless ( !$inmaintmode );
+        print YELLOW "[INFO] - Ignored from WP-Toolkit Scanning.\n" . CYAN "\t[ .wp-toolkit-ignore file exists in $wppath ]\n" if ( $wp_toolkit_ignore );
         open my $fh, '<:encoding(UTF-8)', $wpconf;
         my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
         my @wpconfdata=<$fh>;
@@ -4485,6 +4510,7 @@ sub get_wp_info {
 
             print "Checking for suspicious WP Malware...\n";
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/WP-antymalwary-bot.php]\n" if ( -e "$wppath/wp-content/plugins/WP-antymalwary-bot.php" );
+            print RED "[WARN] - Suspicious WP backdoor found!\n" . CYAN "\t\\_ [$wppath/wp-content/mu-plugins/wp-index.php]\n" if ( -e "$wppath/wp-content/mu-plugins/wp-index.php" );
 
             print "Checking for suspicious script within widget block...\n";
             my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
