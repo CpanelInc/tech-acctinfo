@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.60";
+my $VERSION = "2.5.61";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2908,8 +2908,8 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
         chomp($EmailPop);
         ( $emailacctline, $qused, $qlimit, $qpercent, $localpart ) =
           ( split( /\|\|/, $EmailPop ) );
-	my $over_quota_warn = "";
-	$over_quota_warn = RED "[ OVER QUOTA ]" unless( $qpercent < 100 );
+    my $over_quota_warn = "";
+    $over_quota_warn = RED "[ OVER QUOTA ]" unless( $qpercent < 100 );
         print expand( CYAN $emailacctline . "\n" );
         print expand( "\t\\_ [Quota Used "
               . $qused
@@ -3060,6 +3060,10 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
 "\t\\_ passwd: $passwdCnt / shadow: $shadowCnt / Email: $emailPopCnt\n"
             );
         }
+        # Check for weak MD5 hash in shadow files
+        my $md5cnt = timed_run( 0, 'grep', '-c', '\$1\$', "$RealHome/etc/$DOMAIN/shadow" );
+        chomp($md5cnt);
+        print RED "\n[WARN] * " . WHITE "There is/are " . YELLOW $md5cnt . WHITE " accounts in the " . MAGENTA "$RealHome/etc/$DOMAIN/shadow" . WHITE " file that are using a weak (MD5) hash.\n\t\\_ Use " . CYAN "grep '\\\$1\\\$' $RealHome/etc/$DOMAIN/shadow" . WHITE " to list them.\n" if ( $md5cnt > 0 );
         smborder();
     }
 
@@ -3786,26 +3790,8 @@ sub dispSSLdata {
               . $expiredate . " "
               . $isExpired
               . "\n" );
-        my ($SSLSubject) = (
-            split(
-                /\= /,
-                timed_run(
-                    4, 'openssl', 'x509', '-in',
-                    "$sslsyscertdir/$tcDomain/certificates",
-                    '-subject', '-noout'
-                )
-            )
-        )[1];
-        my ($SSLIssuer) = (
-            split(
-                /\= /,
-                timed_run(
-                    4, 'openssl', 'x509', '-in',
-                    "$sslsyscertdir/$tcDomain/certificates",
-                    '-issuer', '-noout'
-                )
-            )
-        )[1];
+        my ($SSLSubject) = ( split( /\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-subject', '-noout')))[2];
+        my ($SSLIssuer) = ( split( /\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[2];
         chomp($SSLSubject);
         chomp($SSLIssuer);
         my $isSelfSigned = ( $SSLSubject eq $SSLIssuer ) ? 1 : 0;
@@ -4525,8 +4511,8 @@ sub get_wp_info {
             my @files=qw( redirect.php index.php custom-js-loader.php );
             my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
             my @allmuplugs = split /\n/, $allmuplugs;
+            print "Checking for suspicious malware related files under mu-plugins folder...\n";
             foreach my $muplugins_path(@allmuplugs) {
-                print "Checking for suspicious malware related files under mu-plugins folder...\n";
                 foreach my $file( @files ) {
                     chomp( $file );
                     if ( -e "$muplugins_path/$file" ) {
