@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.61";
+my $VERSION = "2.5.62";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -321,8 +321,8 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
             $addondocroot = $DomainInfoLines->{docroot}
               unless ( $DomainInfoLines->{domain} ne $QUERY );
         }
-		if ( $DomainInfoLines->{domain_type} eq "parked" ) {
-			next if ( $DomainInfoLines->{domain} =~ m/cprapid\.com/ );
+        if ( $DomainInfoLines->{domain_type} eq "parked" ) {
+            next if ( $DomainInfoLines->{domain} =~ m/cprapid\.com/ );
             push( @PARKEDDOMAINS, $DomainInfoLines->{domain} );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
@@ -547,7 +547,8 @@ if ( $PWHash eq "" ) {
     print RED "[WARN] * $username is missing password hash in /etc/shadow\n";
 }
 
-print GREEN ON_BLACK "The main domain is " . YELLOW $MAINDOMAIN . $sitejet_status . GREEN ON_BLACK $RO_TEXT . "\n";
+my $has_nova = chk_for_nova($username);
+print GREEN ON_BLACK "The main domain is " . YELLOW $MAINDOMAIN . $sitejet_status . MAGENTA $has_nova . GREEN ON_BLACK $RO_TEXT . "\n";
 
 if ( $QUERY eq $HOSTNAME ) {
     print RED
@@ -4683,6 +4684,13 @@ sub get_data {
         }
     }
     return $cnt, $cnt_patched, $cnt_unpatched;
+}
+
+sub chk_for_nova {
+	my $nova_user=shift;
+	my $nova_data = get_uapi( 'Pal', 'get_all_user_pal_info', "--user=$nova_user" );
+	return "" unless( $nova_data->{result}->{data}->[0]->{status});
+	return " [ Nova by WebPros ]";
 }
 
 
