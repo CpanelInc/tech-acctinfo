@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.62";
+my $VERSION = "2.5.63";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -3793,8 +3793,8 @@ sub dispSSLdata {
               . $expiredate . " "
               . $isExpired
               . "\n" );
-        my ($SSLSubject) = ( split( /\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-subject', '-noout')))[2];
-        my ($SSLIssuer) = ( split( /\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[2];
+        my ($SSLSubject) = ( split( /\=|\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-subject', '-noout')))[2];
+        my ($SSLIssuer) = ( split( /\=|\= /, timed_run( 4, 'openssl', 'x509', '-in', "$sslsyscertdir/$tcDomain/certificates", '-issuer', '-noout')))[2];
         chomp($SSLSubject);
         chomp($SSLIssuer);
         my $isSelfSigned = ( $SSLSubject eq $SSLIssuer ) ? 1 : 0;
