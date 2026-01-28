@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.61";
+my $VERSION = "2.5.62";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -1271,7 +1271,7 @@ if ( $all or $domains or $listsubs ) {
         print "\n";
         foreach $SUB (@SUBDOMAINS) {
             chomp($SUB);
-			my $has_nova = chk_for_nova($username, $ADDON);
+            my $has_nova = chk_for_nova($username, $ADDON);
             print expand( YELLOW "\t \\_ $SUB " . MAGENTA $has_nova . "\n" );
         }
     }
@@ -1291,8 +1291,7 @@ if ( $all or $domains or $listaddons ) {
         print "\n";
         foreach $ADDON (@ADDONDOMAINS) {
             chomp($ADDON);
-			# RIGHT HERE add nova check
-			my $has_nova = chk_for_nova($username, $ADDON);
+            my $has_nova = chk_for_nova($username, $ADDON);
             print expand( YELLOW "\t \\_ $ADDON " . MAGENTA $has_nova . "\n" );
         }
     }
@@ -4690,11 +4689,12 @@ sub get_data {
 }
 
 sub chk_for_nova {
-	my $nova_user=shift;
-	my $nova_domain=shift;
-	my $nova_data = get_uapi( 'Pal', 'get_all_user_pal_info', "--user=$nova_user" );
-	return "" unless( $nova_data->{result}->{data}->[0]->{status});
-	return " [ Nova by WebPros ]";
+    my $nova_user=shift;
+    my $nova_domain=shift;
+    return unless( -e '/usr/local/cpanel/Cpanel/API/Pal.pm' );
+    my $nova_data = get_uapi( 'Pal', 'get_all_user_pal_info', "--user=$nova_user" );
+    return "" unless( $nova_data->{result}->{data}->[0]->{status});
+    return " [ Nova by WebPros ]";
 }
 
 
