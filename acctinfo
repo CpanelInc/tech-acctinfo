@@ -4691,8 +4691,8 @@ sub get_data {
 sub chk_for_nova {
     my $nova_user=shift;
     my $nova_domain=shift;
-    return unless( -e '/usr/local/cpanel/Cpanel/API/Pal.pm' );
-    my $nova_data = get_uapi( 'Pal', 'get_all_user_pal_info', "--user=$nova_user" );
+    return unless( -e '/usr/local/cpanel/Cpanel/API/Nova.pm' );
+    my $nova_data = get_uapi( 'Nova', 'get_all_user_nova_info', "--user=$nova_user" );
     return "" unless( $nova_data->{result}->{data}->[0]->{status});
     return " [ Nova by WebPros ]";
 }
