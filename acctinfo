@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.63";
+my $VERSION = "2.5.64";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -285,7 +285,8 @@ my $DomainInfoLines;
 for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
     if ( $DomainInfoLines->{user} eq $username ) {
         if ( $DomainInfoLines->{domain_type} eq "sub" ) {
-            push( @SUBDOMAINS,   $DomainInfoLines->{domain} );
+            my $http_status_code = get_http_status( $DomainInfoLines->{domain} );
+            push( @SUBDOMAINS, "$DomainInfoLines->{domain}" . CYAN " [ HTTP Status Code: " . WHITE $http_status_code . CYAN " ]" );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             $IS_SUB = expand(
@@ -303,8 +304,9 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             my $sitejet_status = ( -e "$HOMEDIR/$username/.cpanel/sitejet/$DomainInfoLines->{domain}" ) ? MAGENTA "[Sitejet Enabled]" : "";
+            my $http_status_code = get_http_status( $DomainInfoLines->{domain} );
             push( @ADDONDOMAINS,
-                    $DomainInfoLines->{domain} . " "
+                    $DomainInfoLines->{domain} . CYAN " [ HTTP Status Code: " . WHITE $http_status_code . CYAN " ] "
                   . $sitejet_status 
                   . YELLOW "\n\t\t \\_ [ Sub: "
                   . $DomainInfoLines->{parent_domain} . " ]"
@@ -323,7 +325,8 @@ for $DomainInfoLines ( @{ $DomainInfoJSON->{data}->{domains} } ) {
         }
         if ( $DomainInfoLines->{domain_type} eq "parked" ) {
             next if ( $DomainInfoLines->{domain} =~ m/cprapid\.com/ );
-            push( @PARKEDDOMAINS, $DomainInfoLines->{domain} );
+            my $http_status_code = get_http_status( $DomainInfoLines->{domain} );
+            push( @PARKEDDOMAINS, "$DomainInfoLines->{domain}" . CYAN " [ HTTP Status Code: " . WHITE $http_status_code . CYAN " ]" );
             my $docroot_status = "";
             $docroot_status = RED " [MISSING]" unless ( -d $DomainInfoLines->{docroot} );
             $IS_PARKED = expand(
@@ -969,7 +972,7 @@ if ( ! $UserSuspended ) {
 my $suPHPConfPathFound;
 if ( -e ("$docroot/.htaccess") ) {
     $suPHPConfPathFound =
-      timed_run( 2, "egrep -i ^suPHP_ConfigPath $docroot/.htaccess" );
+      timed_run( 2, "grep -Ei ^suPHP_ConfigPath $docroot/.htaccess" );
 }
 if ($suPHPConfPathFound) {
     chomp($suPHPConfPathFound);
@@ -2106,7 +2109,7 @@ sub cruft_check {
         else              { $dirstatus = RED "[MISSING]"; }
         print_output( "/etc/imunify360/user_config/$username", $dirstatus );
         if ( $dirstatus =~ m/EXISTS/ ) {
-            my @FoundHere = qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /etc/imunify360/user_config/$username/* | grep -v 'cache' ];
+            my @FoundHere = qx[ grep -srliwE '$QUERY|$MAINDOMAIN' /etc/imunify360/user_config/$username/* | grep -v 'cache' ];
             my $FoundHere;
             foreach $FoundHere (@FoundHere) {
                 chomp($FoundHere);
@@ -2121,7 +2124,7 @@ sub cruft_check {
         print_output( "/var/cpanel/userdata/$username", $dirstatus );
         if ( $dirstatus =~ m/EXISTS/ ) {
             my @FoundHere =
-qx[ egrep -srliw '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
+qx[ grep -srliwE '$QUERY|$MAINDOMAIN' /var/cpanel/userdata/$username/* | grep -v 'cache' ];
             my $FoundHere;
             foreach $FoundHere (@FoundHere) {
                 chomp($FoundHere);
@@ -2853,7 +2856,7 @@ sub display_mail_info {
 
         # Check for AnonymousF0x/smtpF0x hacks
         my $hassmtpF0x =
-qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|smtpf0x-|anonymousfox|smtpf' ];
+qx[ find $RealHome/etc/* -name 'shadow' -print | xargs grep -liE 'anonymousfox-|smtpf0x-|anonymousfox|smtpf' ];
         chomp($hassmtpF0x);
         my @hassmtpF0x = split "\n", $hassmtpF0x;
         if (@hassmtpF0x) {
@@ -2888,8 +2891,7 @@ qx[ find $RealHome/etc/* -name 'shadow' -print | xargs egrep -li 'anonymousfox-|
     # Check for /etc/manualmx file
     if ( -s '/etc/manualmx' ) {
         my $manual_mx_entry =
-          Cpanel::SafeRun::Timed::timedsaferun( 5, 'egrep', "^$DOMAIN",
-            '/etc/manualmx' );
+          Cpanel::SafeRun::Timed::timedsaferun( 5, 'grep', '-E', "^$DOMAIN", '/etc/manualmx' );
         print expand( YELLOW "[INFO] - "
               . $DOMAIN
               . BOLD CYAN " has an entry in /etc/manualmx."
@@ -3189,8 +3191,8 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
 # Depending on whether $IsRemote is true or false, we check if the domain is listed in
 # /etc/localdomains or /etc/remotedomains
     smborder();
-    my $IsInRemoteDomains = qx[ egrep '^$DOMAIN' /etc/remotedomains ];
-    my $IsInLocalDomains  = qx[ egrep '^$DOMAIN' /etc/localdomains ];
+    my $IsInRemoteDomains = qx[ grep -E '^$DOMAIN' /etc/remotedomains ];
+    my $IsInLocalDomains  = qx[ grep -E'^$DOMAIN' /etc/localdomains ];
     chomp($IsInRemoteDomains);
     chomp($IsInLocalDomains);
     print "Checking email routing (based on MX check above)...\n";
@@ -3199,7 +3201,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
         if ($IsInRemoteDomains) {
             print expand( GREEN
                   "\t \\_ [OK] - $DOMAIN is listed in /etc/remotedomains\n" );
-            $IsInLocalDomains = qx[ egrep '^$DOMAIN' /etc/localdomains ];
+            $IsInLocalDomains = qx[ grep -E '^$DOMAIN' /etc/localdomains ];
             if ($IsInLocalDomains) {
                 print expand( RED
                       "\t \\_ [WARN] - $DOMAIN was found in /etc/localdomains\n"
@@ -3224,7 +3226,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
         if ($IsInLocalDomains) {
             print expand( GREEN
                   "\t \\_ [OK] - $DOMAIN is listed in /etc/localdomains\n" );
-            $IsInRemoteDomains = qx[ egrep '^$DOMAIN' /etc/remotedomains ];
+            $IsInRemoteDomains = qx[ grep -E '^$DOMAIN' /etc/remotedomains ];
             if ($IsInRemoteDomains) {
                 print expand( RED
 "\t \\_ [WARN] - $DOMAIN was found in /etc/remotedomains\n"
@@ -3475,12 +3477,12 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
     my $CustomMailIPText = "";
 
     if ( $CustomMailIP eq "Yes" ) {
-        $CustomMailIPText = qx[ egrep '^$MAINDOMAIN' /etc/mailips ];
+        $CustomMailIPText = qx[ grep -E '^$MAINDOMAIN' /etc/mailips ];
         chomp($CustomMailIPText);
     }
     my $CustomHeloText = "";
     if ( $CustomHelo eq "Yes" ) {
-        $CustomHeloText = qx[ egrep '^$MAINDOMAIN' /etc/mailhelo ];
+        $CustomHeloText = qx[ grep -E '^$MAINDOMAIN' /etc/mailhelo ];
         chomp($CustomHeloText);
     }
     print WHITE "Send from dedicated IP: " . CYAN $SendFromDedicated . "\n";
@@ -4686,6 +4688,13 @@ sub get_data {
         }
     }
     return $cnt, $cnt_patched, $cnt_unpatched;
+}
+
+sub get_http_status {
+    my $tcDomain=shift;
+    my $code=Cpanel::SafeRun::Timed::timedsaferun( 4, 'curl', '--connect-timeout', '4', '-w', '%{http_code}', '-o', '/dev/null/', '-s', "https://$tcDomain" );
+    return $code if ( $code =~ m/[0-0]/ );
+    return "N/A";
 }
 
 sub chk_for_nova {
