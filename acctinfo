@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.64";
+my $VERSION = "2.5.65";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -2532,10 +2532,10 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
     }
     print YELLOW "Checking for any MySQL users in mysql.user table\n";
     print RED "[NOTE: Database Prefix is DISABLED - Results may be inconclusive]\n" unless( $DBPrefix );
-    my $DBusername = timed_run( 3, 'mysql', '-BNe',
-        "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'"
+    my $MYSQL_BIN=find_mysql_bin();
+    my $DBusername = timed_run( 3, $MYSQL_BIN, '-BNe', "SELECT DISTINCT User FROM mysql.user WHERE User LIKE '$username\\_%'"
     );
-    $DBusername .= timed_run( 3, 'mysql', '-BNe',
+    $DBusername .= timed_run( 3, $MYSQL_BIN, '-BNe',
         "SELECT DISTINCT User FROM mysql.user WHERE User = '$username'" );
     my @DBusernames = split( '\n', $DBusername );
     my $DBUserCnt   = @DBusernames;
@@ -2552,10 +2552,9 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
 
     print YELLOW
       "Checking for any MySQL users and databases in mysql.db table\n";
-    my $DBusername = timed_run( 3, 'mysql', '-BNe',
-        "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'"
+    my $DBusername = timed_run( 3, $MYSQL_BIN, '-BNe', "SELECT DISTINCT User,Db FROM mysql.db WHERE User LIKE '$username\\_%'"
     );
-    $DBusername .= timed_run( 3, 'mysql', '-BNe',
+    $DBusername .= timed_run( 3, $MYSQL_BIN, '-BNe',
         "SELECT DISTINCT User,Db FROM mysql.db WHERE User = '$username'" );
     my @DBusernames = split( '\n', $DBusername );
     my $DBUserCnt   = @DBusernames;
@@ -3902,6 +3901,9 @@ sub securitychk {
     if ( $susp_filter2 ) {
         print RED "[SECURITY WARNING] - Suspicious Mail Filter [ " . YELLOW "containing only 'mailer-daemon'" . RED " ] Found in " . CYAN $susp_filter2;
     }
+    if ( -e ( "$RealHome/public_html/seabot.php" ) {
+        print RED "[SECURITY WARNING] - $RealHome/public_html/seabot.php file found - Possibly tied to the nuclear.x86 bot!\n";
+    }
 }
 
 sub checkperms2 {
@@ -4471,7 +4473,8 @@ sub get_wp_info {
                 print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
             }
             # Check for database to make sure it exists.
-            my $DB_Exists = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', '-BNe', "SHOW DATABASES" );
+            my $MYSQL_BIN=find_mysql_bin();
+            my $DB_Exists = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, '-BNe', "SHOW DATABASES" );
             my @DB_Exists = split /\n/, $DB_Exists;
             foreach my $line(@DB_Exists) {
                 chomp($line);
@@ -4487,10 +4490,11 @@ sub get_wp_info {
             print MAGENTA "Connection check using above credentials: ";
             print GREEN "Success\n" if( defined( $dbconnect ));
             print RED "Failed\n" unless( defined( $dbconnect ));
-            my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" .    $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
+            my $MYSQL_BIN=find_mysql_bin();
+            my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" .    $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
             chomp($AdminCnt);
             print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
-            my $listAdmins = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', ${dbname}, '-BNe', "SELECT ${tblprefix}users.user_login, ${tblprefix}users.user_registered FROM ${tblprefix}users INNER JOIN ${tblprefix}usermeta ON ${tblprefix}users.ID=${tblprefix}usermeta.user_id WHERE ${tblprefix}usermeta.meta_key='${tblprefix}capabilities' AND ${tblprefix}usermeta.meta_value LIKE '%administrator%';" );
+            my $listAdmins = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, ${dbname}, '-BNe', "SELECT ${tblprefix}users.user_login, ${tblprefix}users.user_registered FROM ${tblprefix}users INNER JOIN ${tblprefix}usermeta ON ${tblprefix}users.ID=${tblprefix}usermeta.user_id WHERE ${tblprefix}usermeta.meta_key='${tblprefix}capabilities' AND ${tblprefix}usermeta.meta_value LIKE '%administrator%';" );
             my @listAdmins = split /\n/, $listAdmins;
             print expand( "\t\tUser") . expand( "\t\t\tRegistered On\n" );
             foreach my $Admin(@listAdmins) {
@@ -4502,9 +4506,11 @@ sub get_wp_info {
             print "Checking for suspicious WP Malware...\n";
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/WP-antymalwary-bot.php]\n" if ( -e "$wppath/wp-content/plugins/WP-antymalwary-bot.php" );
             print RED "[WARN] - Suspicious WP backdoor found!\n" . CYAN "\t\\_ [$wppath/wp-content/mu-plugins/wp-index.php]\n" if ( -e "$wppath/wp-content/mu-plugins/wp-index.php" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/akismet/_inc/]\n" if ( -d "$wppath/wp-content/plugins/aksmet/_inc" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/block-bindings/]\n" if ( -d "$wppath/wp-content/plugins/block-bindings" );
 
             print "Checking for suspicious script within widget block...\n";
-            my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, 'mysql', $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
+            my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
             print RED "\t\\_ [WARN] * Suspicious entry in " . $tblprefix . "options widget_block. [Contains <script> tags]\n\t\\_ Go to wp-admin > Appearance > Widgets to examine.\n" if ( $widget_chk );
             close $fh;
 
@@ -4525,7 +4531,8 @@ sub get_wp_info {
                     }
                 }
             }
-            my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, 'mysql', $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
+            my $MYSQL_BIN=find_mysql_bin();
+            my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
             if (@wp_settings) {
                 print CYAN "WP Settings for home, siteurl, stylesheet, template and permalinks:\n";
@@ -4542,7 +4549,7 @@ sub get_wp_info {
                     print "\n";
                 }
             }
-            my $wp_activeplugins = qx[ mysql $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
+            my $wp_activeplugins = qx[ $MYSQL_BIN $dbname -BNe "SELECT option_value FROM ${tblprefix}options WHERE option_name='active_plugins';" | grep -oP '(?<=")[^"]+php' ];
             my @wp_activeplugins = split /\n/, $wp_activeplugins;
             if (@wp_activeplugins) {
                 print CYAN "WP Active Plugins:\n";
@@ -4704,6 +4711,12 @@ sub chk_for_nova {
     my $nova_data = get_uapi( 'Nova', 'get_all_user_nova_info', "--user=$nova_user" );
     return "" unless( $nova_data->{result}->{data}->[0]->{status});
     return " [ Nova by WebPros ]";
+}
+
+sub find_mysql_bin {
+    my $mysql_bin = '/usr/bin/mysql';
+    $mysql_bin = '/usr/bin/mariadb' if ( -l $mysql_bin );
+    return $mysql_bin;
 }
 
 

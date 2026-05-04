@@ -1,0 +1,48 @@
+[% USE Whostmgr;
+USE JSON;
+WRAPPER 'master_templates/master.tmpl'
+        header = 'Account Information'
+        skipsupport = 1
+        skipheader = 1
+        hide_license_warnings = 1
+        theme='bootstrap'
+        breadcrumbdata = {
+                previous = [
+                {
+                        name = "Home",
+                        url  = "/scripts/command?PFILE=main",
+                },
+                {
+                        name = "Plugins",
+                        url  = "/scripts/command?PFILE=Plugins",
+                }
+                ],
+                name = 'Account Information',
+                url = '/cgi/acctinfo/acctinfo.cgi',
+        };
+%]
+<!DOCTYPE html>
+<html>
+<head><title>Account Information</title>
+<link rel="stylesheet" type="text/css" href="acctinfo.css">
+</head>
+<body>
+<p>
+<h2><b>Account Information Plugin - Version: 2.1</b></h2>
+<p>
+<form name="form1" id="form1" action="acctinfo.cgi">
+<input class="form-control" type="text" placeholder="Enter domain name or cPanel account name" name="query" size="65" autocomplete="off" autocorrect="off" autocapitalize="off">
+<br>
+Advanced options:
+
+<input type="radio" name="optname" value="cruft"> Cruft Check
+
+<input type="radio" name="optname" value="mail"> Mail Check
+
+<input type="radio" name="optname" value="ssl"> SSL Check
+<p>
+<input type="submit" value="GO!" />
+</form>
+<p>
+[% acctinfo_output %]
+[% END %]

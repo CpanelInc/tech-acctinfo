@@ -1,0 +1,174 @@
+/* acctinfo.css - Account Information Plugin Styles */
+
+:root {
+    --text-black: #000000;
+    --text-darkblue: darkblue;
+    --text-darkgreen: darkgreen;
+    --text-darkred: darkred;
+    --text-darkmagenta: darkmagenta;
+    --text-green: green;
+    --text-red: red;
+    --text-blue: blue;
+    --text-purple: #800080;
+    --text-magenta: magenta;
+    --text-darkcyan: darkcyan;
+    --text-darkorange: #FF8C00;
+    --text-brown: #A52A2A;
+    --text-teal: #008080;
+    --font-small: 12px;
+    --font-normal: 14px;
+    --font-large: 16px;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: var(--font-normal);
+    line-height: 1.2;
+    color: var(--text-black);
+}
+
+p {
+    margin: 0;
+    padding: 0;
+}
+
+br {
+    line-height: 1.2;
+    margin: 0;
+    padding: 0;
+}
+
+tr {
+    margin: 0;
+    padding: 0;
+}
+
+span {
+    margin: 0;
+    padding: 0;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0;
+}
+
+td {
+    padding: 2px 8px;
+    vertical-align: top;
+}
+
+h1 {
+    font-size: 24px;
+    color: var(--text-darkblue);
+    margin: 5px 0 5px 0;
+}
+
+.font-small { font-size: var(--font-small); }
+.font-normal { font-size: var(--font-normal); }
+.font-large { font-size: var(--font-large); }
+
+.text-black { color: var(--text-black); }
+.text-darkblue { color: var(--text-darkblue); }
+.text-darkgreen { color: var(--text-darkgreen); }
+.text-darkred { color: var(--text-darkred); }
+.text-darkmagenta { color: var(--text-darkmagenta); }
+.text-green { color: var(--text-green); }
+.text-red { color: var(--text-red); }
+.text-blue { color: var(--text-blue); }
+.text-purple { color: var(--text-purple); }
+.text-magenta { color: var(--text-magenta); }
+.text-darkcyan { color: var(--text-darkcyan); }
+.text-darkorange { color: var(--text-darkorange); }
+.text-brown { color: var(--text-brown); }
+.text-teal { color: var(--text-teal); }
+
+.status-exists { color: var(--text-darkgreen); }
+.status-missing { color: var(--text-darkred); }
+.status-skipping { color: var(--text-darkblue); }
+.status-valid { color: var(--text-darkgreen); }
+.status-expired { color: var(--text-darkred); }
+.status-warn { color: var(--text-darkred); }
+.status-ca-signed { color: var(--text-darkgreen); }
+.status-self-signed { color: var(--text-darkred); }
+
+.domain-info { color: var(--text-darkblue); font-weight: bold; }
+.username { color: var(--text-darkblue); font-weight: bold; }
+.query-info { color: var(--text-magenta); }
+.border-line { color: var(--text-blue); }
+
+.form-button {
+    padding: 8px 16px;
+    background-color: var(--text-darkblue);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-normal);
+    border-radius: 4px;
+}
+
+.form-button:hover {
+    background-color: #00008B;
+}
+
+.directory-tree {
+    margin-left: 20px;
+}
+
+.section-header {
+    color: var(--text-darkblue);
+    font-size: var(--font-large);
+    font-weight: bold;
+    margin: 10px 0 5px 0;
+}
+
+.warning {
+    color: var(--text-darkred);
+    font-weight: bold;
+}
+
+.sans-indent {
+    padding-left: 20px;
+}
+
+.form-control {
+    display: block;
+    width: 50%;
+    height: 40px;
+    padding: 6px 12px;
+    font-size: 18px;
+    line-height: 1.42857143;
+    color: #555555;
+    background-color: #ffffff;
+    background-image: none;
+    border: 1px solid #cccccc;
+    border-radius: 4px;
+    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.075);
+    transition: border-color ease-in-out .15s, box-shadow ease-in-out .15s;
+}
+
+.form-control:focus {
+    border-color: #66afe9;
+    outline: 0;
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.075), 0 0 8px rgba(102, 175, 233, 0.6);
+}
+
+.form-control::-moz-placeholder {
+    color: #999999;
+    opacity: 1;
+}
+
+.form-control:-ms-input-placeholder {
+    color: #999999;
+}
+
+.form-control::-webkit-input-placeholder {
+    color: #999999;
+}
+
+.form-control-static {
+    padding-top: 7px;
+    padding-bottom: 7px;
+    margin-bottom: 0;
+}
