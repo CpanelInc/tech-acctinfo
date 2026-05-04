@@ -3901,7 +3901,7 @@ sub securitychk {
     if ( $susp_filter2 ) {
         print RED "[SECURITY WARNING] - Suspicious Mail Filter [ " . YELLOW "containing only 'mailer-daemon'" . RED " ] Found in " . CYAN $susp_filter2;
     }
-    if ( -e ( "$RealHome/public_html/seabot.php" ) {
+    if ( -e ( "$RealHome/public_html/seabot.php" ) ) {
         print RED "[SECURITY WARNING] - $RealHome/public_html/seabot.php file found - Possibly tied to the nuclear.x86 bot!\n";
     }
 }
