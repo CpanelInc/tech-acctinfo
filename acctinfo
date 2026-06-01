@@ -942,21 +942,11 @@ print "EA4 PHP Version [ $result ]: " . CYAN $PHPversion;
 print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless ( !$clPHPVer );
 print MAGENTA $HasPrecedence . "\n";
 if ( !$skipEA4 ) {
-    if ( $PHPversion eq "inherit" ) {
-        $PHPiniFile =
-          timed_run( 5, "$PHPDefaultVersion -i|grep '^Configuration File'" );
-        $PHPiniLoad = timed_run( 5,
-            "$PHPDefaultVersion -i|grep '^Loaded Configuration File'" );
-        $PHPiniScan =
-          timed_run( 5, "$PHPDefaultVersion -i|grep '^Scan this dir'" );
-    }
-    else {
-        $PHPiniFile =
-          timed_run( 5, "$PHPversion -i|grep '^Configuration File'" );
-        $PHPiniLoad =
-          timed_run( 5, "$PHPversion -i|grep '^Loaded Configuration File'" );
-        $PHPiniScan = timed_run( 5, "$PHPversion -i|grep '^Scan this dir'" );
-    }
+    my $phpBin = $PHPversion eq "inherit" ? $PHPDefaultVersion : $PHPversion;
+    my @phpinfo = split( /\n/, timed_run( 5, $phpBin, '-i' ) );
+    $PHPiniFile = ( grep { /^Configuration File/ } @phpinfo )[0];
+    $PHPiniLoad = ( grep { /^Loaded Configuration File/ } @phpinfo )[0];
+    $PHPiniScan = ( grep { /^Scan this dir/ } @phpinfo )[0];
 }
 chomp($PHPiniFile);
 chomp($PHPiniLoad);
@@ -972,7 +962,7 @@ if ( ! $UserSuspended ) {
 my $suPHPConfPathFound;
 if ( -e ("$docroot/.htaccess") ) {
     $suPHPConfPathFound =
-      timed_run( 2, "grep -Ei ^suPHP_ConfigPath $docroot/.htaccess" );
+      timed_run( 2, 'grep', '-Ei', '^suPHP_ConfigPath', "$docroot/.htaccess" );
 }
 if ($suPHPConfPathFound) {
     chomp($suPHPConfPathFound);
@@ -1124,10 +1114,10 @@ my $FoundInHTTPDconf;
 
 # NEED TO REVIEW THIS.  SHOULD I JUST CHECK FOR $QUERY (regardless if it's a username or not?)
 if ($IS_USERNAME) {
-    $FoundInHTTPDconf = timed_run( 3, "grep -w '$MAINDOMAIN' /etc/apache2/conf/httpd.conf" );
+    $FoundInHTTPDconf = timed_run( 3, 'grep', '-w', $MAINDOMAIN, '/etc/apache2/conf/httpd.conf' );
 }
 else {
-    $FoundInHTTPDconf = timed_run( 3, "grep -w '$QUERY' /etc/apache2/conf/httpd.conf" );
+    $FoundInHTTPDconf = timed_run( 3, 'grep', '-w', $QUERY, '/etc/apache2/conf/httpd.conf' );
 }
 
 if ( !($FoundInHTTPDconf) ) {
@@ -3622,10 +3612,8 @@ qx[ /usr/local/cpanel/3rdparty/bin/clamscan --no-summary --infected --suppress-o
                 if ( $ruleData eq "rule $foundRule {" ) {
                     $ruleData = $RULEDATA[$resultCnt];
                     my ($string) = ( split( /\"/, $ruleData ) )[1];
-                    my $ChangeDate =
-                      timed_run( 3, "stat $scannedFile | grep -i change" );
-                    ($ChangeDate) = ( split( /\./, $ChangeDate ) );
-                    $ChangeDate =~ s/Change: //;
+                    my $ctime       = ( stat($scannedFile) )[10];
+                    my $ChangeDate = Time::Piece->new($ctime)->strftime("%Y-%m-%d %H:%M:%S");
                     push(
                         @FOUND,
                         expand(
@@ -3685,9 +3673,8 @@ qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
         my @newRetVal       = uniq(@FileNamesOnly);
         my $TotalFilesFound = @newRetVal;
         foreach $FileOnly (@newRetVal) {
-            my $ChangeDate = timed_run( 3, "stat $FileOnly | grep -i change" );
-            ($ChangeDate) = ( split( /\./, $ChangeDate ) );
-            $ChangeDate =~ s/Change: //;
+            my $ctime       = ( stat($FileOnly) )[10];
+            my $ChangeDate  = Time::Piece->new($ctime)->strftime("%Y-%m-%d %H:%M:%S");
             print expand( CYAN "\t \\_ File: "
                   . WHITE "$FileOnly "
                   . BOLD RED
@@ -3903,6 +3890,19 @@ sub securitychk {
     }
     if ( -e ( "$RealHome/public_html/seabot.php" ) ) {
         print RED "[SECURITY WARNING] - $RealHome/public_html/seabot.php file found - Possibly tied to the nuclear.x86 bot!\n";
+    }
+
+    my $sorryfound = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-xdev', '-maxdepth', '3', '-name', "*.sorry", '-print' );
+    my @sorryfound = split /\n/, $sorryfound;
+    my $max_detected=5;
+    my $cnt=0;
+    if ( $sorryfound ) {
+        print RED "$RealHome has evidence of the .sorry ransomware. Listing up to the first $max_detected\n";
+        foreach $sorryfound (@sorryfound) {
+            chomp($sorryfound);
+            print expand( CYAN "\t\\_ $sorryfound\n" ) unless( $cnt >= $max_detected );
+            $cnt++;
+        }
     }
 }
 
@@ -4449,16 +4449,31 @@ sub get_wp_info {
             next unless( $line =~ m{DB_NAME|DB_HOST|DB_USER|DB_PASSWORD|table_prefix} );
             if ( $line =~ m/DB_NAME/ ) {
                 ($dbname) = ( split( /'/, $line ) )[3];
+                $dbname =~ s/[^a-zA-Z0-9_]//g;
+                if ( $dbname eq "" ) {
+                    print RED "Invalid or empty database name in $wpconf. Skipping...\n";
+                    next;
+                }
                 print CYAN "WordPress Database Name: " . YELLOW $dbname . "\n";
                 next;
             }
             if ( $line =~ m/DB_HOST/ ) {
                 ($dbhost) = ( split( /'/, $line ) )[3];
+                $dbhost =~ s/[^a-zA-Z0-9_.:\/\-]//g;
+                if ( $dbhost eq "" ) {
+                    print RED "Invalid or empty database host in $wpconf. Skipping...\n";
+                    next;
+                }
                 print CYAN "Host: " . YELLOW $dbhost . "\n";
                 next;
             }
             if ( $line =~ m/DB_USER/ ) {
                 ($dbuser) = ( split( /'/, $line ) )[3];
+                $dbuser =~ s/[^a-zA-Z0-9_]//g;
+                if ( $dbuser eq "" ) {
+                    print RED "Invalid or empty database user in $wpconf. Skipping...\n";
+                    next;
+                }
                 print CYAN "WordPress Database User: " . YELLOW $dbuser . "\n";
                 next;
             }
@@ -4470,6 +4485,11 @@ sub get_wp_info {
             }
             if ( $line =~ m/table_prefix/ ) {
                 ($tblprefix) = ( split( /'/, $line ) )[1];
+                $tblprefix =~ s/[^a-zA-Z0-9_]//g;
+                if ( $tblprefix eq "" ) {
+                    print RED "Invalid or empty table prefix in $wpconf. Skipping...\n";
+                    next;
+                }
                 print CYAN "Table Prefix: " . YELLOW $tblprefix . "\n";
             }
             # Check for database to make sure it exists.
