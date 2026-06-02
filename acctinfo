@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.65";
+my $VERSION = "2.5.66";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -1672,13 +1672,13 @@ sub Usage {
 
 sub border {
     print MAGENTA ON_BLACK
-"===================================================================================\n";
+"============================================================================================================\n";
     return;
 }
 
 sub smborder {
     print MAGENTA
-"-----------------------------------------------------------------------------------\n";
+"------------------------------------------------------------------------------------------------------------\n";
     return;
 }
 
@@ -2003,6 +2003,7 @@ sub cruft_check {
       /etc/userips
       /etc/userbwlimits
       /var/cpanel/resellers
+      /var/cpanel/temporary-domains.yaml
     );
 
     my @FILES2SEARCH = qw(
@@ -2608,7 +2609,7 @@ sub check_file_existance {
 sub print_output {
     my $DisplayName = $_[0];
     my $TheStatus   = $_[1];
-    my $maxwidth    = 30;
+    my $maxwidth    = 60;
     my $spacer      = 0;
     my $len         = length($DisplayName);
     $spacer = ( $maxwidth - $len ) + 50;
