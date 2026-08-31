@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.66";
+my $VERSION = "2.5.67";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -427,22 +427,9 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 
-$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
-#if ($IS_USERNAME) {
-#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A' );
-#}
-#else {
-#    $ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun( 8, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A' );
-#}
+$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Timed::timedsaferun( 0, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Timed::timedsaferun( 0, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
 @ResolvedIP=split /\n/, $ResolvedIP;
 my $IPTYPE = ( $IPADDR eq $SERVER_IP ) ? "shared" : "dedicated";
-#my $IPTYPE = "";
-#if ( $IPADDR eq $SERVER_IP ) {
-#    $IPTYPE = "shared";
-#}
-#else {
-#    $IPTYPE = "dedicated";
-#}
 my $ip_on_localhost=0;
 if ( $IPADDR eq '127.0.0.1' ) {
     $IPTYPE = RED "[WARN] - $username\'s IP address is configured to localhost!";
@@ -3702,6 +3689,36 @@ qx[ LC_ALL=C grep -srIwf /root/ai_detections.txt $RealHome/public_html/* ];
     unlink("/root/ai_detections.txt") unless ( !-e "/root/ai_detections.txt" );
     unlink("/root/suspicious_strings.yara")
       unless ( !-e "/root/suspicious_strings.yara" );
+
+    print "Scanning for suspicious PHP files in $RealHome\n";
+    my $files = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-type', 'f', '-name', '*.php', '-newer', '/etc/passwd', '-size', '-500k' );
+    my @files = split /\n/, $files;
+    my %bad_php_patterns = (
+            eval_encoded => qr/eval\s*\(\s*base64_decode/i,
+            system_cmd   => qr/system\s*\(\s*\$_|shell_exec\s*\(\s*\$_|passthru\s*\(\s*\$_|exec\s*\(\s*\$_/i,
+            file_manip   => qr/file_put_contents\s*\(\s*\$_|fwrite\s*\(\s*\$_|move_uploaded_file/i,
+            obfuscated   => qr/gzinflate|str_rot13|preg_replace.*\/e|create_function.*\$/i,
+            backconnect  => qr/fsockopen|pfsockopen|stream_socket_client.*tcp/i,
+            r57_shell    => qr/c99|c100|r57|shell\.php|cmd\.php|wso|webshell/i,
+    );
+    my $showHeader=0;
+    for my $f (@files) {
+        chomp $f;
+        next unless $f;
+        next unless -f $f && -r _;
+        if (open my $fh, '<', $f) {
+            my $content = do { local $/; <$fh> };
+            close $fh;
+            for my $type (keys %bad_php_patterns) {
+                if ($content =~ $bad_php_patterns{$type}) {
+                    print RED "Found possible suspicious PHP file " . CYAN "Could be false-positive [Please check]\n" unless( $showHeader );
+                    $showHeader=1;
+                    print expand( WHITE "\t\\_ $f [ " . YELLOW $type . WHITE " ]\n");
+                    last;
+                }
+            }
+        }
+    }
 }
 
 sub spin {
@@ -3892,6 +3909,13 @@ sub securitychk {
     if ( -e ( "$RealHome/public_html/seabot.php" ) ) {
         print RED "[SECURITY WARNING] - $RealHome/public_html/seabot.php file found - Possibly tied to the nuclear.x86 bot!\n";
     }
+    my $susp_user_ini = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-name', '.user.ini' );
+    my @susp_user_ini = split /\n/, $susp_user_ini;
+    foreach my $file(@susp_user_ini) {
+        chomp($file);
+        my $found = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', '-E', "auto_prepend|auto_append", $file );
+        print RED "[SECURITY ISSUE] " . WHITE "- auto_prepend or auto_append found within $file\n" if $found;
+    }
 
     my $sorryfound = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-xdev', '-maxdepth', '3', '-name', "*.sorry", '-print' );
     my @sorryfound = split /\n/, $sorryfound;
@@ -3905,6 +3929,45 @@ sub securitychk {
             $cnt++;
         }
     }
+    # Search $RealHome/access-logs/* for wp2shell hits
+    if ( -l "$RealHome/access-logs") {
+        opendir my $dh, "$RealHome/access-logs";
+        my @files = readdir( $dh );
+        closedir( $dh );
+        my $showHead=0;
+        foreach my $file(@files) {
+            next if ( $file eq "." or $file eq ".." );
+            open( my $fh, '<', "$RealHome/access-logs/$file" );
+            while( <$fh> ) {
+                chomp;
+                if ( $_ =~ m/wp-json\/batch\/v1|rest_route=\/batch\/v1/ && $_ =~ m/wp2shell/ && $_ =~m/ 200 / ) {
+                    print RED "[WARNING] - Possible wp2shell compromise found within " . WHITE "$RealHome/access-logs/$file\n" unless( $showHead );
+                    $showHead=1;
+                    print expand( YELLOW "\t\\_ $_\n" );
+                }
+            }
+        }
+    }
+    my $ACCESS_LOG    = "/usr/local/cpanel/logs/access_log";
+    open( my $fh, '<:raw', $ACCESS_LOG ) or die "Cannot open log file '$ACCESS_LOG': $!\n";
+    my $file_re = 'test123Cp.php';
+    my $user_re = $username;
+    my $showHeader = 0;
+    while (my $line = <$fh>) {
+        next unless $line =~ /\Q$file_re\E/;
+        my @fields = split ' ', $line;
+        my $f1  = defined $fields[0]  ? $fields[0]  : '';  # $1  - remote IP
+        my $f3  = defined $fields[2]  ? $fields[2]  : '';  # $3  - username
+        my $f4  = defined $fields[3]  ? $fields[3]  : '';  # $4  - timestamp "[dd/Mon...."
+        my $f24 = defined $fields[23] ? $fields[23] : '';  # $24 - auth type
+        my $f26 = defined $fields[25] ? $fields[25] : '';  # $26 - port
+        my $out_line = "$f1 $f3 $f4 $f24 $f26";
+        next unless $f3 =~ /$user_re/;
+        print "Found upload attempts of malware [ $file_re ] to $user_re account" unless( $showHeader );
+        $showHeader = 1;
+        print expand( WHITE "\t\\_ $out_line" );
+    }
+    close($fh);
 }
 
 sub checkperms2 {
@@ -4526,7 +4589,6 @@ sub get_wp_info {
 
             print "Checking for suspicious WP Malware...\n";
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/WP-antymalwary-bot.php]\n" if ( -e "$wppath/wp-content/plugins/WP-antymalwary-bot.php" );
-            print RED "[WARN] - Suspicious WP backdoor found!\n" . CYAN "\t\\_ [$wppath/wp-content/mu-plugins/wp-index.php]\n" if ( -e "$wppath/wp-content/mu-plugins/wp-index.php" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/akismet/_inc/]\n" if ( -d "$wppath/wp-content/plugins/aksmet/_inc" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/block-bindings/]\n" if ( -d "$wppath/wp-content/plugins/block-bindings" );
 
@@ -4539,8 +4601,20 @@ sub get_wp_info {
             my $massearchtraffic_malware = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$RealHome", '-name', 'functions.php', '-not', '-path', "/home/virtfs/*", '-a', '-not', '-path', '*/[@.]*', '-exec', 'grep', 'massearchtraffic.top', '{}', '+' );
             print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
 
+            print "Checking for evidence of wp2shell malware...\n";
+            my $wp2shellsearch = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name FROM ${tblprefix}options WHERE option_name IN ('_core_version_check_hash','_site_compatibility_data_wcfg','wp_0899e252b1_cfg', '_wp_theme_compat_718175affdbd', '_tds_stats', '_wp_site_activity', '_wp_session_tokens_data' );" );
+            my @wp2shellsearch = split /\n/, $wp2shellsearch;
+            my $showHeader=0;
+            if ( @wp2shellsearch ) {
+                print RED "[WARN] * Suspicious database entry [option_name] found within the ${tblprefix}options table in $dbname\n" unless( $showHeader );
+                $showHeader=1;
+                foreach my $suspoption (@wp2shellsearch) {
+                    print expand( "\t\\_ $suspoption\n") ;
+                }
+            }
+
             # Check for malware in MU-Plugins
-            my @files=qw( redirect.php index.php custom-js-loader.php );
+            my @files=qw( redirect.php index.php custom-js-loader.php hyper-publisher-tap.php flex-engine-dex.php media-component-ink.php prime-options-cue.php site-compat-layer.php 82048166.php widget-cache.php wp-sec.php wp-index.php quark-router-cue.php);
             my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
             my @allmuplugs = split /\n/, $allmuplugs;
             print "Checking for suspicious malware related files under mu-plugins folder...\n";
