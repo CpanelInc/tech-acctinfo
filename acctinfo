@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.67";
+my $VERSION = "2.5.68";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -1381,7 +1381,7 @@ if ( $resellerperms or $all ) {
                         print RED "[DANGER] - HAS ROOT PRIVILEGES!!!";
                     }
                     if ( $rperm =~ m/(edit-account|limit-bandwidth|quota|demo-setup|rearrange-accts|clustering|locale-edit)$/ ) {
-                        print MAGENTA "[WARNING] - SUPER PRIVILEGE! (can bypass certain limits)";
+                        print MAGENTA "[SECURITY WARNING] - SUPER PRIVILEGE! (can bypass certain limits)";
                     }
                     if ( $rperm =~ m/(list-accts|show-bandwidth|create-acct|kill-acct|suspend-acct|upgrade-account|ssl|ssl-buy|ssl-gencrt|edit-mx|passwd|file-restore|create-dns|kill-dns|park-dns|edit-dns|add-pkg|edit-pkg|thirdparty|mailcheck|news|assign-root-account-enhancements)$/ ) {
                         print GREEN " - Standard Privileges";
@@ -1399,7 +1399,7 @@ if ( $resellerperms or $all ) {
     }
 }
 
-if ($wpinfo) {
+if ( $wpinfo or $all ) {
     border();
     if ($subdocroot) {
         get_wp_info($subdocroot);
@@ -3941,7 +3941,7 @@ sub securitychk {
             while( <$fh> ) {
                 chomp;
                 if ( $_ =~ m/wp-json\/batch\/v1|rest_route=\/batch\/v1/ && $_ =~ m/wp2shell/ && $_ =~m/ 200 / ) {
-                    print RED "[WARNING] - Possible wp2shell compromise found within " . WHITE "$RealHome/access-logs/$file\n" unless( $showHead );
+                    print RED "[SECURITY WARNING] - Possible wp2shell compromise found within " . WHITE "$RealHome/access-logs/$file\n" unless( $showHead );
                     $showHead=1;
                     print expand( YELLOW "\t\\_ $_\n" );
                 }
@@ -3968,6 +3968,15 @@ sub securitychk {
         print expand( WHITE "\t\\_ $out_line" );
     }
     close($fh);
+    my $files_owned_by_another_user = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-not', '-user', $username );
+    my @files_owned_by_another_user = split /\n/, $files_owned_by_another_user;
+    print RED "[SECURITY WARNING] - Found files not owned by $username within $RealHome\n" if ( $files_owned_by_another_user );
+    foreach my $file ( @files_owned_by_another_user ) {
+        chomp( $file);
+        my $fileinfo = Cpanel::SafeRun::Timed::timedsaferun( 0, 'stat', '-c', "User-Group: %U-%G / Size: %s / Type: %F / Created: %w", $file );
+        print expand( CYAN "\t\\_ $file\n" );
+        print expand( YELLOW "\t\t\\_ $fileinfo");
+    }
 }
 
 sub checkperms2 {
@@ -4513,6 +4522,7 @@ sub get_wp_info {
             next unless( $line =~ m{DB_NAME|DB_HOST|DB_USER|DB_PASSWORD|table_prefix} );
             if ( $line =~ m/DB_NAME/ ) {
                 ($dbname) = ( split( /'/, $line ) )[3];
+                ($dbname) = ( split( /'/, $line ) )[2] unless( $dbname );
                 $dbname =~ s/[^a-zA-Z0-9_]//g;
                 if ( $dbname eq "" ) {
                     print RED "Invalid or empty database name in $wpconf. Skipping...\n";
@@ -4523,6 +4533,7 @@ sub get_wp_info {
             }
             if ( $line =~ m/DB_HOST/ ) {
                 ($dbhost) = ( split( /'/, $line ) )[3];
+                ($dbhost) = ( split( /'/, $line ) )[2] unless( $dbhost );
                 $dbhost =~ s/[^a-zA-Z0-9_.:\/\-]//g;
                 if ( $dbhost eq "" ) {
                     print RED "Invalid or empty database host in $wpconf. Skipping...\n";
@@ -4533,6 +4544,7 @@ sub get_wp_info {
             }
             if ( $line =~ m/DB_USER/ ) {
                 ($dbuser) = ( split( /'/, $line ) )[3];
+                ($dbuser) = ( split( /'/, $line ) )[2] unless( $dbuser );
                 $dbuser =~ s/[^a-zA-Z0-9_]//g;
                 if ( $dbuser eq "" ) {
                     print RED "Invalid or empty database user in $wpconf. Skipping...\n";
@@ -4543,6 +4555,9 @@ sub get_wp_info {
             }
             if ( $line =~ m/DB_PASSWORD/ ) {
                 ($dbpass) = ( split( /'/, $line ) )[3];
+                ($dbpass) = ( split( /'/, $line ) )[2] unless( $dbpass );
+                $dbpass = ( split( /"/, $dbpass ) )[1] if ( $dbpass =~ m/\"/ );
+                $dbpass = ( split( /'/, $dbpass ) )[3] if ( $dbpass =~ m/\'/ );
                 print CYAN "Database Password: " . YELLOW $dbpass . "\n" unless ( !$insecure );
                 print CYAN "Database Password: " . GREEN . "[REDACTED] " . MAGENTA "(use --showpass to reveal)\n" unless ($insecure);
                 next;
