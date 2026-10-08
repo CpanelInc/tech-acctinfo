@@ -3885,6 +3885,7 @@ sub securitychk {
         print RED
 "[SECURITY WARNING] - $RealHome/public_html/.env file found - Might store sensitive database information - Not recommended!\n";
     }
+
     my @dirs = qw( .well-known/pki-validation .well-known/acme-challenge );
     my @files =
       qw( error_log ins.htm msg.jpg msges.jpg reso.zip rolf.zip stroi-invest.zip thn.htm );
@@ -3909,14 +3910,6 @@ sub securitychk {
     if ( -e ( "$RealHome/public_html/seabot.php" ) ) {
         print RED "[SECURITY WARNING] - $RealHome/public_html/seabot.php file found - Possibly tied to the nuclear.x86 bot!\n";
     }
-    my $susp_user_ini = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-name', '.user.ini' );
-    my @susp_user_ini = split /\n/, $susp_user_ini;
-    foreach my $file(@susp_user_ini) {
-        chomp($file);
-        my $found = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', '-E', "auto_prepend|auto_append", $file );
-        print RED "[SECURITY ISSUE] " . WHITE "- auto_prepend or auto_append found within $file\n" if $found;
-    }
-
     my $sorryfound = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-xdev', '-maxdepth', '3', '-name', "*.sorry", '-print' );
     my @sorryfound = split /\n/, $sorryfound;
     my $max_detected=5;
@@ -3968,12 +3961,17 @@ sub securitychk {
         print expand( WHITE "\t\\_ $out_line" );
     }
     close($fh);
+
     my $files_owned_by_another_user = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-not', '-user', $username );
     my @files_owned_by_another_user = split /\n/, $files_owned_by_another_user;
-    print RED "[SECURITY WARNING] - Found files not owned by $username within $RealHome\n" if ( $files_owned_by_another_user );
+    my $showHeader = 0;
     foreach my $file ( @files_owned_by_another_user ) {
         chomp( $file);
-        my $fileinfo = Cpanel::SafeRun::Timed::timedsaferun( 0, 'stat', '-c', "User-Group: %U-%G / Size: %s / Type: %F / Created: %w", $file );
+        next if ( $file =~ m/\.cpanel|\.cagefs|\.ftpquota|lscache|ea-podman/ );
+        my $fileinfo = Cpanel::SafeRun::Timed::timedsaferun( 0, 'stat', '-c', "User:Group: %U:%G / Size: %s / Type: %F / Created: %w", $file );
+        next if ( $fileinfo =~ m/UNKNOWN/ );
+        print RED "[SECURITY WARNING] - Found files not owned by $username within $RealHome\n" unless ( $showHeader );
+        $showHeader = 1;
         print expand( CYAN "\t\\_ $file\n" );
         print expand( YELLOW "\t\t\\_ $fileinfo");
     }
@@ -4604,6 +4602,10 @@ sub get_wp_info {
 
             print "Checking for suspicious WP Malware...\n";
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/WP-antymalwary-bot.php]\n" if ( -e "$wppath/wp-content/plugins/WP-antymalwary-bot.php" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/hyper-engine-kit.php]\n" if ( -e "$wppath/wp-content/plugins/hyper-engine-kit.php" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/hyper-engine-kit/hyper-engine-kit.php]\n" if ( -e "$wppath/wp-content/plugins/hyper-engine-kit/hyper-engine-kit.php" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/c1b12371.php]\n" if ( -e "$wppath/wp-content/c1b12371.php" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/.c1b12371.php]\n" if ( -e "$wppath/wp-content/.c1b12371.php" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/akismet/_inc/]\n" if ( -d "$wppath/wp-content/plugins/aksmet/_inc" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/block-bindings/]\n" if ( -d "$wppath/wp-content/plugins/block-bindings" );
 
@@ -4617,7 +4619,7 @@ sub get_wp_info {
             print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
 
             print "Checking for evidence of wp2shell malware...\n";
-            my $wp2shellsearch = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name FROM ${tblprefix}options WHERE option_name IN ('_core_version_check_hash','_site_compatibility_data_wcfg','wp_0899e252b1_cfg', '_wp_theme_compat_718175affdbd', '_tds_stats', '_wp_site_activity', '_wp_session_tokens_data' );" );
+            my $wp2shellsearch = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,LENGTH(option_value) as size FROM ${tblprefix}options WHERE option_name IN ('_core_version_check_hash','_site_compatibility_data_wcfg','wp_0899e252b1_cfg', '_wp_theme_compat_718175affdbd', '_tds_stats', '_wp_site_activity', '_wp_session_tokens_data' );" );
             my @wp2shellsearch = split /\n/, $wp2shellsearch;
             my $showHeader=0;
             if ( @wp2shellsearch ) {
@@ -4628,8 +4630,50 @@ sub get_wp_info {
                 }
             }
 
+            print "Checking for suspicious .user.ini files containing auto_prepend_file or auto_append_file...\n";
+            # A WordPress site shouldn't use or need .user.ini files (especially if they contain auto_prepend...
+            my $susp_user_ini = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-name', '.user.ini' );
+            my @susp_user_ini = split /\n/, $susp_user_ini;
+            foreach my $file(@susp_user_ini) {
+                chomp($file);
+                my $found = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', '-E', "auto_prepend_file|auto_append_file", $file );
+                print RED "[SECURITY ISSUE] " . WHITE "- auto_prepend_file or auto_append_file found within $file\n" if $found;
+            }
+
+            print "Checking for suspicious PHP files...\n";
+            my $files = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-maxdepth', '5', '-type', 'f', '-name', '*.php', '-newer', '/etc/passwd', '-size', '-500k' );
+            my @files = split /\n/, $files;
+            my %bad_php_patterns = (
+                eval_encoded => qr/eval\s*\(\s*base64_decode/i,
+                system_cmd   => qr/system\s*\(\s*\$_|shell_exec\s*\(\s*\$_|passthru\s*\(\s*\$_|exec\s*\(\s*\$_/i,
+                file_manip   => qr/file_put_contents\s*\(\s*\$_|fwrite\s*\(\s*\$_/i,
+                obfuscated   => qr/gzinflate\s*\(\s*base64_decode|str_rot13\s*\(\s*base64_decode|preg_replace\s*\(\s*['"][^'"]*\/e['"]|create_function\s*\(\s*['"][^'"]*\$_/i,
+                backconnect  => qr/(?:fsockopen|pfsockopen|stream_socket_client)\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE)/i,
+                c99_shell    => qr/\bc99\b|\bc100\b|\br57\b|\bshell\.php\b|\bcmd\.php\b|\bwso\b|\bwebshell\b/i,
+                gluttonphp   => qr/l0ader_shell/,
+            );
+            my $showHeader=0;
+            for my $f (@files) {
+                chomp $f;
+                next unless $f;
+                next unless -f $f && -r _;
+                next if $f =~ m{/(wp-content/(?:plugins|themes)/|vendor/|vendor_prefixed/|jetpack_vendor/)};
+                if (open my $fh, '<', $f) {
+                    my $content = do { local $/; <$fh> };
+                    close $fh;
+                    for my $type (keys %bad_php_patterns) {
+                        if ($content =~ $bad_php_patterns{$type}) {
+                            print "Found possible suspicious PHP file " . CYAN "Could be false-positive [Please check]" unless( $showHeader );
+                            $showHeader=1;
+                            print expand( WHITE "\t\\_ $f [ " . YELLOW $type . " ]");
+                            last;
+                        }
+                    }
+                }
+            }
+
             # Check for malware in MU-Plugins
-            my @files=qw( redirect.php index.php custom-js-loader.php hyper-publisher-tap.php flex-engine-dex.php media-component-ink.php prime-options-cue.php site-compat-layer.php 82048166.php widget-cache.php wp-sec.php wp-index.php quark-router-cue.php);
+            my @files=qw( redirect.php index.php custom-js-loader.php hyper-publisher-tap.php flex-engine-dex.php media-component-ink.php prime-options-cue.php site-compat-layer.php 82048166.php widget-cache.php wp-sec.php wp-index.php quark-router-cue.php hyper-engine-kit.php );
             my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
             my @allmuplugs = split /\n/, $allmuplugs;
             print "Checking for suspicious malware related files under mu-plugins folder...\n";
