@@ -1,5 +1,5 @@
 #!/usr/local/cpanel/3rdparty/bin/perl
-# Copyright 2006 - 2025, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
+# Copyright 2006 - 2026, WebPros International, LLC. and Peter Elsner <cpanelpeter@gmail.com>
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.68";
+my $VERSION = "2.5.69";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -35,6 +35,7 @@ use Cpanel::Config::Users           ();
 use Cpanel::Config::LoadWwwAcctConf ();
 use Cpanel::Config::LoadCpConf      ();
 use Cpanel::SafeRun::Timed          ();
+use Cpanel::SafeRun::Errors         ();
 use Cpanel::JSON                    ();
 use JSON::PP;
 use Cpanel::ResellerFunctions ();
@@ -47,6 +48,7 @@ use Cpanel::Config::CpUser    ();
 use Cpanel::PwCache           ();
 use Cpanel::PwCache::Get      ();
 use LWP::UserAgent;
+use Digest::SHA qw(sha256_hex);
 use File::Basename;
 use Time::Piece;
 use Time::Seconds;
@@ -99,6 +101,7 @@ my $chk_cph_blocks  = undef;
 my $helpME          = undef;
 my $SearchFor       = undef;
 my $cruft           = undef;
+my $extra           = undef;
 my $mail            = undef;
 my $showHeader      = undef;
 my $scan            = undef;
@@ -111,6 +114,8 @@ my $acct_over_quota = 0;
 my $coreEP="https://www.wpvulnerability.net/core";
 my $pluginEP="https://www.wpvulnerability.net/plugin";
 my $themeEP="https://www.wpvulnerability.net/theme";
+my $content=get_hashes();
+my @knownhashes = split /\n/, $content;
 
 our $isInNamedConf = 0;
 our $spincounter;
@@ -130,6 +135,7 @@ GetOptions(
     'help'          => \$helpME,
     'cruft'         => \$cruft,
     'mail'          => \$mail,
+    'extra'         => \$extra,
     'header'        => \$showHeader,
     'cphulkblocks'  => \$chk_cph_blocks,
     'scan'          => \$scan,
@@ -427,7 +433,7 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 
-$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Timed::timedsaferun( 0, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Timed::timedsaferun( 0, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
+$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Errors::saferunnoerror( 0, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Errors::saferunnoerror( 0, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
 @ResolvedIP=split /\n/, $ResolvedIP;
 my $IPTYPE = ( $IPADDR eq $SERVER_IP ) ? "shared" : "dedicated";
 my $ip_on_localhost=0;
@@ -561,9 +567,9 @@ if ( $maindocroot eq "" ) {
     print expand( RED "\t \\_ [WARN] - DocumentRoot is blank!\n" );
 }
 
-print WHITE "Real Home Directory (/etc/passwd): "
-  . CYAN $RealHome
-  . YELLOW " - Checking permissions...";
+print WHITE "Real Home Directory (/etc/passwd): " . CYAN $RealHome . YELLOW " - Checking permissions...\n";
+print expand( MAGENTA "\t\\_ pass --extra for ownership/sha256 hash checks (time consuming)") unless( $extra );
+print expand( MAGENTA "\t\\_ --extra flag passed, checking for ownership/sha256 hash checks (patience please)") if( $extra );
 print "\n";
 
 checkperms2() unless( $UserSuspended );
@@ -1597,6 +1603,9 @@ sub Usage {
     print CYAN "acctinfo" . WHITE " --listsubs cptestdo\n";
     print expand(
         GREEN "\t Lists all sub domains under the cptestdo user name.\n" );
+    print CYAN "acctinfo" . WHITE " --extra cptest\n";
+    print expand(
+        GREEN "\t Run additional file ownership/sha256 Hash checks on user cptest (can be time consuming).\n" );
     print CYAN "acctinfo" . WHITE " --listaddons cptestdomain.net\n";
     print expand( GREEN
           "\t Lists all addon domains under the cptestdomain.net domain name.\n"
@@ -3941,6 +3950,8 @@ sub securitychk {
             }
         }
     }
+
+    # Check access_log for test123Cp.php file uploaded
     my $ACCESS_LOG    = "/usr/local/cpanel/logs/access_log";
     open( my $fh, '<:raw', $ACCESS_LOG ) or die "Cannot open log file '$ACCESS_LOG': $!\n";
     my $file_re = 'test123Cp.php';
@@ -3962,18 +3973,49 @@ sub securitychk {
     }
     close($fh);
 
-    my $files_owned_by_another_user = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-not', '-user', $username );
-    my @files_owned_by_another_user = split /\n/, $files_owned_by_another_user;
-    my $showHeader = 0;
-    foreach my $file ( @files_owned_by_another_user ) {
-        chomp( $file);
-        next if ( $file =~ m/\.cpanel|\.cagefs|\.ftpquota|lscache|ea-podman/ );
-        my $fileinfo = Cpanel::SafeRun::Timed::timedsaferun( 0, 'stat', '-c', "User:Group: %U:%G / Size: %s / Type: %F / Created: %w", $file );
-        next if ( $fileinfo =~ m/UNKNOWN/ );
-        print RED "[SECURITY WARNING] - Found files not owned by $username within $RealHome\n" unless ( $showHeader );
-        $showHeader = 1;
-        print expand( CYAN "\t\\_ $file\n" );
-        print expand( YELLOW "\t\t\\_ $fileinfo");
+    # SOP-1144 - Check for suspicious directory (php2shell?)
+    my $suspdir=Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-type', 'd', '-name', '.sysd-private-*' );
+    my @suspdir=split /\n/, $suspdir;
+    my @files=qw( .nm.conf .nm-dog.sh .nm-helper .nm-state );
+    my $showHeader=0;
+    foreach my $dir (@suspdir) {
+        print "Found suspicious directory (possibly php2shell infection)\n" unless( $showHeader );
+        $showHeader=1;
+        print RED "\t\\_ $dir\n";
+        foreach my $file(@files) {
+            if ( -f "$dir/$file" ) {
+                print CYAN "\t\t\\_ $dir/$file\n";
+            }
+        }
+    }
+
+    if ( $extra ) {
+        # check hash of $triggered_file against known256_hashes.txt
+        my $user_files = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-xdev', '-maxdepth', '5', '-type', 'f', '-not', '-path', '/home/virtfs/*', '-print' );
+        my @user_files = split( /\n/, $user_files );
+        foreach my $file(@user_files) {
+            my ($sha256only) = (split(/\s+/,Cpanel::SafeRun::Timed::timedsaferun( 0, 'sha256sum', $file )))[0];
+            my $knownHash  = known_sha256_hashes($sha256only);
+            my $susp_hash="";
+            if ($knownHash) {
+                print RED "[SECURITY WARNING] - $file has a hash\n\t\\_ " . GREEN . $sha256only . MAGENTA " known to be suspicious!\n" unless ( $showHeader );
+            }
+        }
+
+        # Check for files not owned by $username.
+        my $files_owned_by_another_user = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-not', '-user', $username );
+        my @files_owned_by_another_user = split /\n/, $files_owned_by_another_user;
+        my $showHeader = 0;
+        foreach my $file ( @files_owned_by_another_user ) {
+            chomp( $file);
+            next if ( $file =~ m/\.cpanel|\.cagefs|\.ftpquota|lscache|ea-podman/ );
+            my $fileinfo = Cpanel::SafeRun::Timed::timedsaferun( 0, 'stat', '-c', "User:Group: %U:%G / Size: %s / Type: %F [%N] / Created: %w", $file );
+            next if ( $fileinfo =~ m/UNKNOWN/ );
+            print RED "[SECURITY WARNING] - Found files not owned by $username within $RealHome\n" unless ( $showHeader );
+            $showHeader = 1;
+            print expand( CYAN "\t\\_ $file\n" );
+            print expand( YELLOW "\t\t\\_ $fileinfo");
+        }
     }
 }
 
@@ -4510,6 +4552,9 @@ sub get_wp_info {
         my $wp_toolkit_ignore = ( -e "$wppath/.wp-toolkit-ignore" ) ? 1 : 0;
         print RED "[WARN] - WordPress is in maintenance mode!\n" unless ( !$inmaintmode );
         print YELLOW "[INFO] - Ignored from WP-Toolkit Scanning.\n" . CYAN "\t[ .wp-toolkit-ignore file exists in $wppath ]\n" if ( $wp_toolkit_ignore );
+        my $verify_core = Cpanel::SafeRun::Timed::timedsaferun( 0, 'wp', 'core','verify-checksums', '--allow-root', "--path=$wppath" );
+        print GREEN "$verify_core" if ( $verify_core =~ m/Success:/ );
+        print RED "$verify_core" unless ( $verify_core =~ m/Success:/ );
         open my $fh, '<:encoding(UTF-8)', $wpconf;
         my ( $value, $dbhost, $dbname, $dbuser, $dbpass, $tblprefix );
         my @wpconfdata=<$fh>;
@@ -4588,7 +4633,7 @@ sub get_wp_info {
             print GREEN "Success\n" if( defined( $dbconnect ));
             print RED "Failed\n" unless( defined( $dbconnect ));
             my $MYSQL_BIN=find_mysql_bin();
-            my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" .    $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
+            my $AdminCnt = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, $dbname, '-BNe', "SELECT count(*) FROM " . $tblprefix . "users INNER JOIN " . $tblprefix . "usermeta ON " . $tblprefix . "users.ID=" . $tblprefix . "usermeta.user_id WHERE " . $tblprefix . "usermeta.meta_key='" . $tblprefix . "capabilities' AND " . $tblprefix . "usermeta.meta_value LIKE '%administrator%';");
             chomp($AdminCnt);
             print RED "[WARN] * There is more than 1 'administrator' account within the users table [$AdminCnt] - Very Suspicious!\n" if ( $AdminCnt > 1 );
             my $listAdmins = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, ${dbname}, '-BNe', "SELECT ${tblprefix}users.user_login, ${tblprefix}users.user_registered FROM ${tblprefix}users INNER JOIN ${tblprefix}usermeta ON ${tblprefix}users.ID=${tblprefix}usermeta.user_id WHERE ${tblprefix}usermeta.meta_key='${tblprefix}capabilities' AND ${tblprefix}usermeta.meta_value LIKE '%administrator%';" );
@@ -4597,6 +4642,12 @@ sub get_wp_info {
             foreach my $Admin(@listAdmins) {
                 chomp($Admin);
                 print expand( GREEN "\t\\_ $Admin\n" );
+                if ( $Admin =~ m/wp2_[0-9a-f]{8}/ ) {
+                    print expand( RED "\t\\_ WARN - Possible wp2shell Admin user found!\n" );
+                }
+                if ( $Admin =~ m/wpsupport_/ ) {
+                    print expand( RED "\t\\_ WARN - Possible RankMath malware Admin user found!\n" );
+                }
             }
             smborder();
 
@@ -4608,6 +4659,7 @@ sub get_wp_info {
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/.c1b12371.php]\n" if ( -e "$wppath/wp-content/.c1b12371.php" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/akismet/_inc/]\n" if ( -d "$wppath/wp-content/plugins/aksmet/_inc" );
             print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-content/plugins/block-bindings/]\n" if ( -d "$wppath/wp-content/plugins/block-bindings" );
+            print RED "[WARN] - Suspicious WP Malware found!\n" . CYAN "\t\\_ [$wppath/wp-includes/class-wp-cache-util.php]\n" if ( -d "$wppath/wp-includes/class-wp-cache-util.php" );
 
             print "Checking for suspicious script within widget block...\n";
             my $widget_chk = Cpanel::SafeRun::Timed::timedsaferun( 4, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_value FROM " . $tblprefix . "options WHERE option_name='widget_block' AND option_value like '%script%';");
@@ -4618,8 +4670,8 @@ sub get_wp_info {
             my $massearchtraffic_malware = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$RealHome", '-name', 'functions.php', '-not', '-path', "/home/virtfs/*", '-a', '-not', '-path', '*/[@.]*', '-exec', 'grep', 'massearchtraffic.top', '{}', '+' );
             print RED "\t\\_ [WARN] * Suspicious URL found in WordPress's function.php file. [massearchtraffic.top]\n" if ( $massearchtraffic_malware );
 
-            print "Checking for evidence of wp2shell malware...\n";
-            my $wp2shellsearch = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,LENGTH(option_value) as size FROM ${tblprefix}options WHERE option_name IN ('_core_version_check_hash','_site_compatibility_data_wcfg','wp_0899e252b1_cfg', '_wp_theme_compat_718175affdbd', '_tds_stats', '_wp_site_activity', '_wp_session_tokens_data' );" );
+            print "Checking for evidence of wp2shell and RankMath malware...\n";
+            my $wp2shellsearch = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,LENGTH(option_value) as size FROM ${tblprefix}options WHERE option_name IN ('_core_version_check_hash','_site_compatibility_data_wcfg','wp_0899e252b1_cfg', '_wp_theme_compat_718175affdbd', '_tds_stats', '_wp_site_activity', '_wp_session_tokens_data', '_uf6qdn2hmm', 't8krdk990phb', '_np5pvf754c' );" );
             my @wp2shellsearch = split /\n/, $wp2shellsearch;
             my $showHeader=0;
             if ( @wp2shellsearch ) {
@@ -4631,13 +4683,36 @@ sub get_wp_info {
             }
 
             print "Checking for suspicious .user.ini files containing auto_prepend_file or auto_append_file...\n";
-            # A WordPress site shouldn't use or need .user.ini files (especially if they contain auto_prepend...
-            my $susp_user_ini = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-name', '.user.ini' );
-            my @susp_user_ini = split /\n/, $susp_user_ini;
+            # A WordPress site shouldn't use or need .user.ini files (especially
+            # if they contain auto_prepend_file / auto_append_file). The SC
+            # family sets this via .user.ini, php.ini or .htaccess and points it
+            # at a hidden dot-prefixed PHP loader, so check all three.
+            my $susp_user_ini = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $RealHome, '-type', 'f', '(', '-name', '.user.ini', '-o', '-name', 'php.ini', '-o', '-name', '.htaccess', ')', '-not', '-path', '/home/virtfs/*' );
+            my @susp_user_ini = grep { length } split /\n/, $susp_user_ini;
             foreach my $file(@susp_user_ini) {
                 chomp($file);
                 my $found = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', '-E', "auto_prepend_file|auto_append_file", $file );
-                print RED "[SECURITY ISSUE] " . WHITE "- auto_prepend_file or auto_append_file found within $file\n" if $found;
+                next unless $found;
+                my $file_dir = dirname($file);
+                my @hits;
+                foreach my $line ( grep { length } split /\n/, $found ) {
+                    next if ( $line =~ m/^\s*[;#]/ );    # skip commented-out lines
+                    # Handles ".user.ini/php.ini" (key = value) and ".htaccess" (php_value key value)
+                    if ( $line =~ m{auto_(?:prepend|append)_file\s*(?:=\s*|\s+)["']?([^"'\s]+)}i ) {
+                        my $target = $1;
+                        # Skip the legitimate Wordfence WAF loader, but only if it sits in the
+                        # same directory as the config file (so a look-alike elsewhere is still flagged)
+                        next if ( basename($target) eq 'wordfence-waf.php' && dirname($target) eq $file_dir );
+                    }
+                    push @hits, $line;
+                }
+                next unless @hits;
+                print RED "[SECURITY ISSUE] " . WHITE "- auto_prepend_file or auto_append_file found within $file\n";
+                foreach my $hit (@hits) {
+                    if ( $hit =~ m{auto_(?:prepend|append)_file\s*(?:=\s*|\s+)["']?(?:[^\s"']*/)?\.([A-Za-z0-9_.-]+\.php)} ) {
+                        print RED "\t\\_ [SC Malware] prepend/append target is a hidden file: " . CYAN ".$1\n";
+                    }
+                }
             }
 
             print "Checking for suspicious PHP files...\n";
@@ -4672,19 +4747,192 @@ sub get_wp_info {
                 }
             }
 
-            # Check for malware in MU-Plugins
-            my @files=qw( redirect.php index.php custom-js-loader.php hyper-publisher-tap.php flex-engine-dex.php media-component-ink.php prime-options-cue.php site-compat-layer.php 82048166.php widget-cache.php wp-sec.php wp-index.php quark-router-cue.php hyper-engine-kit.php );
-            my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
-            my @allmuplugs = split /\n/, $allmuplugs;
-            print "Checking for suspicious malware related files under mu-plugins folder...\n";
-            foreach my $muplugins_path(@allmuplugs) {
-                foreach my $file( @files ) {
-                    chomp( $file );
-                    if ( -e "$muplugins_path/$file" ) {
-                        print RED "\t\\_ [WARN] * Suspicious file found in " . WHITE $muplugins_path . RED " folder (" . CYAN $file . RED ")\n";
-                    }
+            print "Checking for known malicious file/directory names...\n";
+            my $names = Cpanel::SafeRun::Timed::timedsaferun(
+                0, 'find', $RealHome,
+                '-maxdepth', '6',
+                '-regextype', 'posix-extended',
+                '-regex', '.*/wp2shell_[0-9a-f]{8}(/.*)?$',
+            );
+            my @bad_names = grep { length } split /\n/, $names;
+            my %bad_name_patterns = (
+                wp2shell => qr{/wp2shell_[0-9a-f]{8}(?:/|$)},
+            );
+            my $nameHeader = 0;
+            for my $p (@bad_names) {
+                for my $type (keys %bad_name_patterns) {
+                    next unless $p =~ $bad_name_patterns{$type};
+                    print "Found known malicious file/directory name\n" unless $nameHeader;
+                    $nameHeader = 1;
+                    my $kind = -d $p ? 'dir' : -f _ ? 'file' : 'other';
+                    print expand( WHITE "\t\\_ $p [ " . YELLOW "$type ($kind)" . " ]\n" );
+                    last;
                 }
             }
+
+            # Check for malware in MU-Plugins.
+            #
+            # The old approach matched a hardcoded list of known-bad file
+            # names that had to be edited by hand every time the malware
+            # rotated them. Instead inspect the names and contents of every
+            # PHP file under each mu-plugins directory for high-signal
+            # indicators, which needs no maintenance and also spots the SC
+            # "fake plugin" that is duplicated into wp-content/plugins.
+            my %mu_bad_patterns = (
+                'encoded eval'    => qr/eval\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|stripslashes)/i,
+                'base64+gzip'     => qr/(?:gzinflate|gzuncompress|gzdecode)\s*\(\s*base64_decode/i,
+                'preg_replace /e' => qr/preg_replace\s*\(\s*['"][^'"]*\/e['"]/i,
+                'create_function' => qr/create_function\s*\(\s*['"][^'"]*\$_(?:GET|POST|REQUEST|COOKIE|SERVER)/i,
+                'shell via input' => qr/(?:system|shell_exec|passthru|popen|proc_open|exec)\s*\(\s*\$_/i,
+                'write via input' => qr/file_put_contents\s*\(\s*\$_(?:GET|POST|REQUEST|COOKIE)|fwrite\s*\(\s*\$_/i,
+                'opcache refresh' => qr/opcache_invalidate\s*\(/i,
+                'shared memory'   => qr/\bshm_(?:attach|op_open)\b|shmop_open\s*\(/i,
+                'SC marker'       => qr/\bSC_[A-Za-z0-9_]+\b/,
+                'db trigger'      => qr/CREATE\s+TRIGGER\b.*?\bINSERT\b/is,
+                'prepend marker'  => qr/auto_(?:prepend|append)_file/i,
+            );
+
+            my $allmuplugs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $pubhtml, '-maxdepth', '5', '-type', 'd', '-name', 'mu-plugins' );
+            my @allmuplugs = grep { length } split /\n/, $allmuplugs;
+
+            my %plugin_hashes;
+            foreach my $muplugins_path (@allmuplugs) {
+                my $plugin_root = $muplugins_path;
+                $plugin_root =~ s{/mu-plugins/?$}{/plugins};
+                next unless -d $plugin_root;
+                my $allplugins = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $plugin_root, '-maxdepth', '5', '-type', 'f', '-name', '*.php' );
+                foreach my $pfile ( grep { length } split /\n/, $allplugins ) {
+                    next unless -f $pfile && -r _;
+                    open my $pfh, '<', $pfile or next;
+                    local $/;
+                    my $pdata = <$pfh>;
+                    close $pfh;
+                    $plugin_hashes{ sha256_hex($pdata) } = $pfile if defined $pdata;
+                }
+            }
+
+            # Legacy known-bad filename list, retained as a supplementary
+            # signal "just in case". Detection no longer depends on this
+            # list (the heuristics above are sufficient), so it does not
+            # need to be kept up to date - it is only an extra safety net
+            # for the names seen so far.
+            my %mu_known_names = map { $_ => 1 } qw(
+                redirect.php index.php custom-js-loader.php hyper-publisher-tap.php
+                flex-engine-dex.php media-component-ink.php prime-options-cue.php
+                site-compat-layer.php 82048166.php wp-index.php widget-cache.php
+                quark-router-cue.php wp-sec.php hyper-engine-kit.php
+            );
+
+            print "Checking for suspicious malware related files under mu-plugins folder...\n";
+            foreach my $muplugins_path (@allmuplugs) {
+                chomp( $muplugins_path );
+                my $mufiles = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', $muplugins_path, '-maxdepth', '4', '-type', 'f', '-name', '*.php' );
+                foreach my $file ( grep { length } split /\n/, $mufiles ) {
+                    chomp( $file );
+                    next unless -f $file && -r _;
+                    my $basefile = basename($file);
+                    my $reason;
+                    if ( $basefile =~ m/^\.[^\/]+\.php$/ ) {
+                        $reason = 'hidden (dot-prefixed) PHP loader';
+                    }
+                    elsif ( $basefile =~ m/^[0-9a-f]{8,}\.php$/i ) {
+                        $reason = 'randomised hex filename';
+                    }
+                    elsif ( $basefile =~ m/^[a-z]+-[a-z]+-[a-z]+-[0-9a-f]{4}\.php$/ ) {
+                        $reason = 'randomised slug filename';
+                    }
+                    elsif ( $mu_known_names{$basefile} ) {
+                        $reason = 'known malicious filename';
+                    }
+                    unless ( $reason ) {
+                        open my $mfh, '<', $file or next;
+                        local $/;
+                        my $mdata = <$mfh>;
+                        close $mfh;
+                        if ( defined $mdata ) {
+                            for my $type ( keys %mu_bad_patterns ) {
+                                if ( $mdata =~ $mu_bad_patterns{$type} ) {
+                                    $reason = $type;
+                                    last;
+                                }
+                            }
+                            if ( !$reason && $plugin_hashes{ sha256_hex($mdata) } ) {
+                                $reason = 'duplicate of plugin copy (fake-plugin redundancy)';
+                            }
+                        }
+                    }
+                    next unless $reason;
+                    print RED "\t\\_ [WARN] * Suspicious file found in " . WHITE $muplugins_path . RED " folder (" . CYAN $basefile . RED " - " . WHITE $reason . RED ")\n";
+                }
+            }
+
+            # SC WordPress malware family (Sucuri, September 2026) - a
+            # self-healing mesh of loaders, drop-ins, a fake plugin and
+            # off-disk persistence (database options, shared memory, cron).
+            # https://blog.sucuri.net/2026/09/sc-wordpress-malware-a-self-healing-mesh-of-loaders-drop-ins-and-a-blockchain-controlled-backdoor.html
+            print "Checking for SC WordPress malware indicators...\n";
+
+            # Database persistence: sc_-prefixed options/transients.
+            my $sc_opts = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,LENGTH(option_value) FROM ${tblprefix}options WHERE option_name LIKE 'sc\\_%' OR option_name LIKE '\\_transient\\_sc\\_%' OR option_name LIKE '\\_transient\\_timeout\\_sc\\_%';" );
+            foreach my $opt ( grep { length } split /\n/, $sc_opts ) {
+                chomp( $opt );
+                print RED "\t\\_ [WARN] * SC malware database option/transient found: " . CYAN $opt . "\n";
+            }
+
+            # Database triggers used by SC variants to recreate an admin on insert.
+            my $sc_triggers = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT TRIGGER_NAME,EVENT_OBJECT_TABLE FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='$dbname';" );
+            foreach my $trig ( grep { length } split /\n/, $sc_triggers ) {
+                chomp( $trig );
+                print RED "\t\\_ [WARN] * Database trigger found (SC uses triggers to recreate admins): " . CYAN $trig . "\n";
+            }
+
+            # Malicious cron hooks registered by the mesh. Underscores are
+            # escaped and matched case-sensitively for the same reason as above.
+            my $sc_cron = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_value FROM ${tblprefix}options WHERE option_name='cron' AND (BINARY option_value LIKE '%SC\\_%' OR BINARY option_value LIKE '%sc\\_%' OR BINARY option_value LIKE '%auto\\_prepend%');" );
+            print RED "\t\\_ [WARN] * SC malware cron hooks found in the WP cron option - review " . CYAN "${tblprefix}options" . RED " [ cron ].\n" if ( $sc_cron );
+
+            # Filesystem: malicious drop-ins and injected theme code.
+            my %sc_file_patterns = (
+                'SC marker'       => qr/\bSC_[A-Za-z0-9_]+\b/,
+                'base64+gzip'     => qr/(?:gzinflate|gzuncompress|gzdecode)\s*\(\s*base64_decode/i,
+                'shared memory'   => qr/\bshm_(?:attach|op_open)\b|shmop_open\s*\(/i,
+                'opcache refresh' => qr/opcache_invalidate\s*\(/i,
+                'auto prepend'    => qr/auto_(?:prepend|append)_file/i,
+                'drop-in rebuild' => qr/file_put_contents\s*\([^)]*(?:db\.php|advanced-cache\.php|mu-plugins)/is,
+            );
+            my @sc_targets = ( "$wppath/wp-content/db.php", "$wppath/wp-content/advanced-cache.php" );
+            my $sc_theme_funcs = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$wppath/wp-content/themes", '-maxdepth', '2', '-type', 'f', '-name', 'functions.php' );
+            push @sc_targets, grep { length } split /\n/, $sc_theme_funcs;
+            foreach my $file ( @sc_targets ) {
+                chomp( $file );
+                next unless -f $file && -r _;
+                open my $sfh, '<', $file or next;
+                local $/;
+                my $sdata = <$sfh>;
+                close $sfh;
+                next unless defined $sdata;
+                for my $type ( keys %sc_file_patterns ) {
+                    next unless $sdata =~ $sc_file_patterns{$type};
+                    print RED "\t\\_ [WARN] * SC malware indicator [ " . CYAN $type . RED " ] found in " . WHITE $file . "\n";
+                    last;
+                }
+            }
+
+            # Random-named ZIP restore bundle in wp-content / uploads / themes.
+            my $sc_zips = Cpanel::SafeRun::Timed::timedsaferun( 0, 'find', "$wppath/wp-content", '-maxdepth', '4', '-type', 'f', '-name', '*.zip' );
+            foreach my $zfile ( grep { length } split /\n/, $sc_zips ) {
+                chomp( $zfile );
+                next unless basename($zfile) =~ m/^[0-9a-f]{8,}\.zip$/i;
+                print RED "\t\\_ [WARN] * SC ZIP restore bundle with random hex name found: " . WHITE $zfile . "\n";
+            }
+
+            # Command & control via public Ethereum RPC gateways.
+            my $sc_eth = Cpanel::SafeRun::Timed::timedsaferun( 0, 'grep', '-rIlE', '--include=*.php', 'mainnet\.infura\.io|cloudflare-eth\.com|rpc\.ankr\.com|ethereum\.publicnode\.com|rpc\.flashbots\.net|eth\.drpc\.org|1rpc\.io|rpc\.blastapi\.io|eth\.llamarpc\.com', "$wppath/wp-content" );
+            foreach my $efile ( grep { length } split /\n/, $sc_eth ) {
+                chomp( $efile );
+                print RED "\t\\_ [WARN] * Possible Ethereum RPC command & control in: " . WHITE $efile . "\n";
+            }
+
             my $MYSQL_BIN=find_mysql_bin();
             my $wp_settings = Cpanel::SafeRun::Timed::timedsaferun( 5, $MYSQL_BIN, $dbname, '-BNe', "SELECT option_name,option_value FROM ${tblprefix}options WHERE option_name IN ('home','siteurl','permalink_structure', 'stylesheet', 'template' );" );
             my @wp_settings = split /\n/, $wp_settings;
@@ -4873,4 +5121,17 @@ sub find_mysql_bin {
     return $mysql_bin;
 }
 
+sub known_sha256_hashes {
+    my $checksum = shift;
+    return 0 unless defined $checksum && length $checksum;
+    return 1 if ( grep { /\Q$checksum\E/ } @knownhashes );
+    return 0;
+}
+
+sub get_hashes {
+    my $url      = URI->new( 'https://raw.githubusercontent.com/CpanelInc/tech-CSI/master/known_256hashes.txt');
+    my $ua      = LWP::UserAgent->new( ssl_opts => { verify_hostname => 1 } );
+    my $res     = $ua->get($url);
+    return $res->decoded_content;
+}
 
