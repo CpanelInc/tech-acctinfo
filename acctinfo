@@ -21,7 +21,7 @@
 
 use strict;
 
-my $VERSION = "2.5.69";
+my $VERSION = "2.5.70";
 use Getopt::Long;
 use Cpanel::MysqlUtils;
 use Term::ANSIColor qw(:constants);
@@ -433,8 +433,12 @@ if ( $HAS_AUTOSSL_TEXT eq "" ) {
 
 $BACKUPENABLED = ($BACKUPENABLED) ? "Yes" : "No";
 
-$ResolvedIP = ($IS_USERNAME) ? Cpanel::SafeRun::Errors::saferunnoerror( 0, '/usr/local/cpanel/scripts/cpdig', $MAINDOMAIN, 'A') : Cpanel::SafeRun::Errors::saferunnoerror( 0, '/usr/local/cpanel/scripts/cpdig', $QUERY, 'A');
-@ResolvedIP=split /\n/, $ResolvedIP;
+my $domain_to_resolve = $IS_USERNAME ? $MAINDOMAIN : $QUERY;
+$ResolvedIP = Cpanel::SafeRun::Timed::timedsaferun(
+    0, '/usr/local/cpanel/scripts/cpdig', $domain_to_resolve, 'A'
+);
+@ResolvedIP = grep { Cpanel::Validate::IP::is_valid_ip($_) } split /\n/, $ResolvedIP;
+@ResolvedIP = getArecords($domain_to_resolve) unless @ResolvedIP;
 my $IPTYPE = ( $IPADDR eq $SERVER_IP ) ? "shared" : "dedicated";
 my $ip_on_localhost=0;
 if ( $IPADDR eq '127.0.0.1' ) {
@@ -647,7 +651,6 @@ if ( -e '/var/cpanel/domainfwdip' ) {
         foreach my $line(@domainmaps) {
             chomp($line);
             my ($fwddom,$fwdurl) = ( split( /\=/, $line ));
-            #if ( $fwddom eq $MAINDOMAIN or $fwddom eq $QUERY ) {
             if ( $IS_USERNAME ) {
                 if ( $fwddom eq $MAINDOMAIN ) {
                     print RED "[WARN] - $fwddom is currently forwarding to $fwdurl\n";
@@ -933,7 +936,8 @@ if ( $PHPversion eq "inherit" ) {
 print "EA4 PHP Version [ $result ]: " . CYAN $PHPversion;
 
 print WHITE "\nCloudLinux PHP Version: " . CYAN $clPHPVer unless ( !$clPHPVer );
-print MAGENTA $HasPrecedence . "\n";
+print MAGENTA $HasPrecedence unless( $PHPversion =~ m/Unable/ );
+print "\n";
 if ( !$skipEA4 ) {
     my $phpBin = $PHPversion eq "inherit" ? $PHPDefaultVersion : $PHPversion;
     my @phpinfo = split( /\n/, timed_run( 5, $phpBin, '-i' ) );
@@ -1080,12 +1084,11 @@ print WHITE "Configured IP address: "
   . CYAN $IPTYPE
   . WHITE ") - $NOTONSERVER\n";
 my $defaultsite      = 0;
-my $TotalARecords    = @ResolvedIP;
+my $TotalARecords    = scalar @ResolvedIP;
 my $ResolvesToDetail = "";
 my @multipleIPs      = undef;
 foreach $ResolvedIP (@ResolvedIP) {
     chomp($ResolvedIP);
-    next if !Cpanel::Validate::IP::is_valid_ip($ResolvedIP);
     $ResolvesToDetail = check_resolved_ip($ResolvedIP, $IPADDR);
     push @multipleIPs, CYAN "\t\\_ " . $ResolvedIP . " " . YELLOW $ResolvesToDetail . "\n";
 }
@@ -1499,38 +1502,38 @@ if ( $listdbs or $all ) {
 }
 
 if ( $showteaminfo or $all ) {
-	my $teamdir = '/var/cpanel/team';
-	open( my $fh, '<', "$teamdir/$username" );
+    my $teamdir = '/var/cpanel/team';
+    open( my $fh, '<', "$teamdir/$username" );
     my $cnt=0;
     while ( <$fh> ) {
         $cnt++;
     }
     close( $fh );
-	$cnt--;
-	print "Getting team info...\n";
-	my $max_team_accts=7;
-	my $get_team_info = get_uapi( 'Team', 'list_team', "--user=$username" );
-	my $i=0;
+    $cnt--;
+    print "Getting team info...\n";
+    my $max_team_accts=7;
+    my $get_team_info = get_uapi( 'Team', 'list_team', "--user=$username" );
+    my $i=0;
     print expand( RED $get_team_info->{result}->{errors}->[0] . "\n" ) unless( $get_team_info->{result}->{errors}->[0] );
-	print "No team members configured.\n" unless( $get_team_info->{result}->{data}->[$i]->{created} );
-	while( $i < $cnt ) {
-		print CYAN "Username: $get_team_info->{result}->{data}->[$i]->{username}\@$MAINDOMAIN\n" if ( defined $get_team_info->{result}->{data}->[$i]->{username} );
-		print expand( CYAN "\t\\_Created: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{created} )) . "\n" if ( defined $get_team_info->{result}->{data}->[$i]->{created} );
-		print expand( CYAN "\t\\_Last Logged In: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{lastlogin} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{lastlogin} eq "" );
-		print expand( "\t\\_Expires: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{expire_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_date} eq "" );
-		print expand( CYAN "\t\t\\_Expire Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{expire_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_reason} eq "" );
-		print expand( CYAN "\t\\_Suspend Date: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{suspend_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_date} eq "" );
-		print expand( "\t\t\\_Suspend Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{suspend_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_reason} eq "" );
-		my $x=0;
-		print expand( CYAN "\t\\_Roles: " );
-		while( $x < 4 ) {
-			print GREEN $get_team_info->{result}->{data}->[$i]->{roles}->[$x] . " ";
-			$x++;
-		}
-		print "\n";
-		$i++;
-	}
-	print "\n";
+    print "No team members configured.\n" unless( $get_team_info->{result}->{data}->[$i]->{created} );
+    while( $i < $cnt ) {
+        print CYAN "Username: $get_team_info->{result}->{data}->[$i]->{username}\@$MAINDOMAIN\n" if ( defined $get_team_info->{result}->{data}->[$i]->{username} );
+        print expand( CYAN "\t\\_Created: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{created} )) . "\n" if ( defined $get_team_info->{result}->{data}->[$i]->{created} );
+        print expand( CYAN "\t\\_Last Logged In: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{lastlogin} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{lastlogin} eq "" );
+        print expand( "\t\\_Expires: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{expire_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_date} eq "" );
+        print expand( CYAN "\t\t\\_Expire Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{expire_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{expire_reason} eq "" );
+        print expand( CYAN "\t\\_Suspend Date: " . YELLOW scalar localtime( $get_team_info->{result}->{data}->[$i]->{suspend_date} )) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_date} eq "" );
+        print expand( "\t\t\\_Suspend Reason: " . MAGENTA $get_team_info->{result}->{data}->[$i]->{suspend_reason} ) . "\n" unless ( $get_team_info->{result}->{data}->[$i]->{suspend_reason} eq "" );
+        my $x=0;
+        print expand( CYAN "\t\\_Roles: " );
+        while( $x < 4 ) {
+            print GREEN $get_team_info->{result}->{data}->[$i]->{roles}->[$x] . " ";
+            $x++;
+        }
+        print "\n";
+        $i++;
+    }
+    print "\n";
 }
 
 if ( $listssls or $all ) {
@@ -2479,24 +2482,6 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
                           . "\n" );
                 }
             }
-#            else {
-#                $QueryCluster =
-#                  qx[ dig +tries=2 +time=5 \@$dnscluster $QUERY +short ];
-#                if ($QueryCluster) {
-#                    print expand( YELLOW "\t \\_ $QUERY "
-#                          . GREEN ON_BLACK
-#                          . "was found in "
-#                          . $dnscluster
-#                          . "\n" );
-#                }
-#                else {
-#                    print expand( YELLOW "\t \\_ $QUERY "
-#                          . RED
-#                          . "NOT found in "
-#                          . YELLOW $dnscluster
-#                          . "\n" );
-#                }
-#            }
         }
     }
 
@@ -2549,8 +2534,8 @@ qx[ dig +tries=2 +time=5 \@$dnscluster $TheAddonDomain +short ];
         my $NewDBUser;
         foreach $NewDBUser (@DBusernames) {
             chomp($NewDBUser);
-	    my ( $dbuser, $dbname ) = (split ( /\s+/, $NewDBUser ));
-	    $dbname =~ s/\\\\//g;
+        my ( $dbuser, $dbname ) = (split ( /\s+/, $NewDBUser ));
+        $dbname =~ s/\\\\//g;
             print expand( CYAN "\t \\_ DBUser: " . WHITE $dbuser . CYAN " DBName: " . WHITE $dbname . "\n" );
         }
     }
@@ -2707,45 +2692,36 @@ sub check_for_cagefs() {
 }
 
 sub get_php_version {
-    my $tcDomain         = shift;
-    my $searchFor        = ($IS_USERNAME) ? "account" : "vhost";
+    my $tcDomain  = shift;
+    my $searchFor = ($IS_USERNAME) ? "account" : "vhost";
     my $php_version_data = get_whmapi1('php_get_vhost_versions');
-    for my $phpVhosts ( @{ $php_version_data->{data}->{versions} } ) {
-        if ( $searchFor eq 'account' ) {    ## We only want the main domain
-            if ( $phpVhosts->{$searchFor} eq $tcDomain && $phpVhosts->{main_domain} ) {
-                if ( defined( $phpVhosts->{phpversion_source}->{system_default})) {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0, "", "", "", "inherit";
-                }
-                else {
-                    if ( $phpVhosts->{php_fpm} ) {
-                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 1, $phpVhosts->{php_fpm_pool_parms}->{pm_max_children}, $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests}, $phpVhosts->{php_fpm_pool_parms}->{pm_process_idle_timeout}, $phpVhosts->{version};
-                    }
-                    else {
-                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 0, "", "", "", $phpVhosts->{version};
-                    }
-                }
-            }
+
+    for my $phpVhosts ( @{ $php_version_data->{data}->{versions} || [] } ) {
+        next unless defined $phpVhosts->{$searchFor} && $phpVhosts->{$searchFor} eq $tcDomain;
+        next if $searchFor eq 'account' && !$phpVhosts->{main_domain};    ## We only want the main domain
+
+        my $docroot = $phpVhosts->{documentroot} // "";
+        my $source  = $phpVhosts->{phpversion_source} || {};
+
+        if ( defined $source->{system_default} ) {
+            return $docroot, ( $phpVhosts->{vhost} // "" ), 0, "", "", "", "inherit";
         }
-        else {    ## We are looking for specific vhost
-            if ( $phpVhosts->{$searchFor} eq $tcDomain ) {
-                if ( defined( $phpVhosts->{phpversion_source}->{system_default})) {
-                    return $phpVhosts->{documentroot}, $phpVhosts->{vhost}, 0, "", "", "", "inherit";
-                }
-                else {
-                    if ( $phpVhosts->{php_fpm} ) {
-                        return $phpVhosts->{documentroot},
-                          $phpVhosts->{phpversion_source}->{domain}, 1,
-                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_children},
-                          $phpVhosts->{php_fpm_pool_parms}->{pm_max_requests},
-                          $phpVhosts->{php_fpm_pool_parms}->{pm_process_idle_timeout}, $phpVhosts->{version};
-                    }
-                    else {
-                        return $phpVhosts->{documentroot}, $phpVhosts->{phpversion_source}->{domain}, 0, "", "", "", $phpVhosts->{version};
-                    }
-                }
-            }
+
+        my $domain  = $source->{domain} // "";
+        my $version = $phpVhosts->{version} // "";
+
+        if ( $phpVhosts->{php_fpm} ) {
+            my $pool = $phpVhosts->{php_fpm_pool_parms} || {};
+            return $docroot, $domain, 1,
+              $pool->{pm_max_children}         // "",
+              $pool->{pm_max_requests}         // "",
+              $pool->{pm_process_idle_timeout} // "",
+              $version;
         }
+        return $docroot, $domain, 0, "", "", "", $version;
     }
+
+    return ( "", "", 0, "", "", "", RED "Unable to determine PHP version!" );
 }
 
 sub get_system_php_version() {
@@ -3054,7 +3030,7 @@ qx [ cat "$RealHome/mail/$DOMAIN/$localpart/mailbox_format.cpanel" ];
         # Check for weak MD5 hash in shadow files
         my $md5cnt = timed_run( 0, 'grep', '-c', '\$1\$', "$RealHome/etc/$DOMAIN/shadow" );
         chomp($md5cnt);
-        print RED "\n[WARN] * " . WHITE "There is/are " . YELLOW $md5cnt . WHITE " accounts in the " . MAGENTA "$RealHome/etc/$DOMAIN/shadow" . WHITE " file that are using a weak (MD5) hash.\n\t\\_ Use " . CYAN "grep '\\\$1\\\$' $RealHome/etc/$DOMAIN/shadow" . WHITE " to list them.\n" if ( $md5cnt > 0 );
+        print RED "\n[WARN] * " . WHITE "There is/are " . YELLOW $md5cnt . WHITE " accounts in the " . MAGENTA "$RealHome/etc/$DOMAIN/shadow" . WHITE " file that are using a weak (MD5) hash.\n\t\\_ Use " . CYAN "grep '\\\$1\\\$' $RealHome/etc/$DOMAIN/shadow | cut -d : -f1" . WHITE " to list them.\n" if ( $md5cnt > 0 );
         smborder();
     }
 
@@ -3772,7 +3748,6 @@ sub ChkForIntegration {
 }
 
 sub dispSSLdata {
-    #my $tcDomain = $_[0];
     my $tcDomain = shift;
     chomp($tcDomain);
     print YELLOW $tcDomain . "\n";
@@ -4945,6 +4920,8 @@ sub get_wp_info {
                     print YELLOW "\t\\_ $wp_setting";
                     if ( $wp_setting =~ m/template:/ ) {
                         my ($num_unpatched,$numtotal)=get_theme_vuln( $theme_name );
+                        chomp( $num_unpatched );
+                        chomp( $numtotal );
                         print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
                         print MAGENTA " ( no open vulnerabilities )" unless (defined $num_unpatched && defined $num_unpatched);
                     }
@@ -4969,6 +4946,8 @@ sub get_wp_info {
                     $plugin_version =~ s/^\s*(.*?)\s*$/$1/;
                     print YELLOW "\t\\_ $plugin_name " . CYAN "[ Version: " . WHITE $plugin_version . CYAN "] ";
                     my ($num_unpatched,$numtotal)=get_plugin_vuln( $plugin_name, $plugin_version );
+                    chomp( $num_unpatched );
+                    chomp( $numtotal );
                     my $goodbad=($num_unpatched == 0) ? GREEN " [GOOD]" : RED " [BAD] ";
                     print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " ) $goodbad" if (defined $num_unpatched && defined $num_unpatched);
                     print MAGENTA "( no open vulnerabilities ) $goodbad" unless (defined $num_unpatched && defined $num_unpatched);
@@ -4991,6 +4970,8 @@ sub get_wp_info {
                     print CYAN "Current WordPress Version: "
                     . YELLOW $current_version;
                     my ($num_unpatched,$numtotal)=get_wpcore_vuln( $current_version );
+                    chomp( $num_unpatched );
+                    chomp( $numtotal );
                     print WHITE " ( $num_unpatched " . MAGENTA "of " . WHITE $numtotal . MAGENTA " vulnerabilities open" . WHITE " )" if (defined $num_unpatched && defined $num_unpatched);
                     print MAGENTA " ( no open vulnerabilities )" unless (defined $num_unpatched && defined $num_unpatched);
                     print "\n";
